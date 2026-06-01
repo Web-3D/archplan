@@ -790,7 +790,7 @@ export class ArchPlanLab extends BaseWorld {
     return null
   }
 
-  // Cao độ đáy tường của 1 floor = tổng chiều cao các tầng dưới (khớp _buildFloor: maxLift+maxFloorH).
+  // Cao độ đáy tường của 1 floor = tổng chiều cao các tầng dưới (khớp BuildingFromState.buildFloor: maxLift+maxFloorH).
   private _floorBaseY(targetFi: number): number {
     let yAcc = 0
     for (let fi = 0; fi < targetFi; fi++) {

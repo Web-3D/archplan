@@ -161,7 +161,7 @@ export class HighlightOverlay {
     return [this._oriented(wx, wy, wz, op.w / 1000, op.h / 1000, cfg.depth + 0.06, cfg.rotationY)]
   }
 
-  // 1 cột (col 1/2/3): box tại world pos cột (khớp _buildColumnsForInstance).
+  // 1 cột (col 1/2/3): box tại world pos cột (khớp BuildingFromState.buildColumns).
   private _wireCol(inst: ShapeInstance, base: number, colIdx: number): THREE.Object3D[] {
     const col = inst.structure.columns[colIdx]
     if (!col) return []
