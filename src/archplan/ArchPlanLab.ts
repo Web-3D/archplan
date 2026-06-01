@@ -52,6 +52,8 @@ import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
 import {
   computeLocalBbox,
   computeWallConfigs,
+  footprintXZ,
+  type FootXZ,
   stairFootprintWorld,
   type WorldRect,
   worldRectToSlabOpening,
@@ -63,14 +65,9 @@ import {
   wallColor,
   WallMaterialCache,
 } from './build/materials' // wall material cache + surface shader — tách monolith
-import {
-  type APGuiCtx,
-  type HighlightTarget,
-  setupGridPanel,
-  setupGroundPanel,
-  setupGUI,
-  setupSunPanel,
-} from './gui/gui'
+import { DevHud } from './gui/devhud' // perf HUD dev (fps/budget/leak) — tách monolith
+import { type APGuiCtx, setupGridPanel, setupGroundPanel, setupGUI, setupSunPanel } from './gui/gui'
+import { type HighlightHost, HighlightOverlay } from './interaction/highlight' // flash viền phần đang chỉnh — tách monolith
 import { type ManipulateHost, ManipulateTool } from './interaction/manipulate' // 🤚 Move + 🎯 Focus — tách monolith
 import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 khay swatch atelier — tách monolith
 import {
@@ -80,24 +77,19 @@ import {
   HumanFigure,
   type SunOpts,
 } from './scene/scene'
+import { DesignStore } from './state/persistence' // I/O save/load/autosave/export — tách monolith
 import {
   type BalconyState,
   type BuildingState,
-  buildingStateToJSON,
   defaultBuildingState,
   mkColumn,
   mkFloor,
   mkInstance,
-  parseDesign,
   type SegmentState,
-  serializeDesign,
   SHAPE_CONFIGS,
   type ShapeInstance,
   type WallConfig,
 } from './state/state'
-
-// localStorage slot cho autosave (full BuildingState versioned). 1 thiết kế / trình duyệt.
-const STORAGE_KEY = 'archplan:autosave'
 
 // File System Access API — TS 5.9 lib.dom đã có FileSystemFileHandle/WritableFileStream
 // nhưng THIẾU 2 hàm picker. Khai báo tối thiểu phần dùng (optional → feature-detect được).
@@ -120,10 +112,7 @@ declare global {
   }
 }
 
-type PickedDesign = { text: string; handle: FileSystemFileHandle | null }
-
 // Footprint XZ (world): tâm + kích thước AABB — dùng đặt pick box found/slab/roof.
-type FootXZ = { cx: number; cz: number; sx: number; sz: number }
 
 // ── ArchPlanLab ────────────────────────────────────────────────────────────────
 
@@ -209,31 +198,17 @@ export class ArchPlanLab extends BaseWorld {
 
   // Highlight 3D: viền wireframe vàng flash ~0.5s khi click tab GUI (biết đang chỉnh phần nào).
   // Group riêng (NGOÀI buildingGroup → _clearBuilding không xoá). Transient → tự dọn qua timer.
-  private _hiGroup: THREE.Group | null = null
-  private _hiMat: THREE.LineBasicMaterial | null = null
-  private _hiTimers: number[] = []
+  private highlight: HighlightOverlay | null = null
 
-  // File handle (File System Access API) — nhớ file đã Save/Load để Save sau đè thẳng.
-  // Reset xóa → Save kế tiếp hỏi nơi lưu mới. null khi chưa gắn / dùng fallback download.
-  private _fileHandle: FileSystemFileHandle | null = null
+  // I/O thiết kế: autosave localStorage + Save/Load file + export AP4. Giữ FileSystemFileHandle.
+  private store = new DesignStore()
 
-  // Dev HUD perf — LUÔN hiện ở dev (draw calls/triangles/geometries/textures từ renderer.info); phím `
-  // ẩn/hiện. Kiểm merge (1 mesh/key) & material leak. RuntimeGuard chỉ warn khi vượt budget; HUD hiện SỐ.
-  private _statsEl: HTMLElement | null = null
-  private _statsPerf: HTMLElement | null = null // dòng 1: fps · ms
-  private _statsBudget: HTMLElement | null = null // dòng 2: draw/100 · tri/500k · geo · tex
-  private _statsLeak: HTMLElement | null = null // dòng 3: leak watch
-  private _statsOn = true
-  private _fps = 0 // EMA fps — làm mượt jitter mỗi frame
-  // Leak watch: geo/tex tăng liên tục ≥10 frame = nghi leak (sweep hỏng). Cùng heuristic RuntimeGuard.
-  private _prevGeo = 0
-  private _prevTex = 0
-  private _riseGeo = 0
-  private _riseTex = 0
+  // Dev HUD perf — LUÔN hiện ở dev (fps/budget/leak từ renderer.info); phím ` ẩn/hiện. → gui/devhud.ts
+  private devHud: DevHud | null = null
   private _keysDown = new Set<string>()
   private readonly _onKeyDown = (e: KeyboardEvent): void => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-    if (e.code === 'Backquote' && !e.repeat) this._toggleStats() // ` → bật/tắt HUD perf
+    if (e.code === 'Backquote' && !e.repeat) this.devHud?.toggle() // ` → bật/tắt HUD perf
     this._keysDown.add(e.code)
   }
   private readonly _onKeyUp = (e: KeyboardEvent): void => {
@@ -381,7 +356,8 @@ export class ArchPlanLab extends BaseWorld {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   protected async onInit(): Promise<void> {
-    this._loadAutosave() // khôi phục thiết kế lần trước (nếu có) TRƯỚC khi dựng GUI/scene
+    const saved = this.store.loadAutosave() // khôi phục thiết kế lần trước TRƯỚC khi dựng GUI/scene
+    if (saved) this.state = saved
     this._setupScene()
     await this._setupEnvironment() // IBL → MeshStandardNodeMaterial phản chiếu specular (bớt nhựa)
     this._setupCamera()
@@ -396,6 +372,7 @@ export class ArchPlanLab extends BaseWorld {
     this.scene.add(this.buildingGroup)
     this.scene.add(this.pickGroup) // SPIKE: lớp pick vô hình cho brush paint
     this.manipulate = new ManipulateTool(this._manipulateHost()) // trước _setupGUI: nhận registerFocus
+    this.highlight = new HighlightOverlay(this._highlightHost())
     this._setupGUI()
     this._buildScene()
     window.addEventListener('keydown', this._onKeyDown)
@@ -406,7 +383,7 @@ export class ArchPlanLab extends BaseWorld {
     this.canvas.addEventListener('contextmenu', this._onContextMenu)
     if (import.meta.env.DEV) {
       this.guard = new RuntimeGuard(this.renderer)
-      this._syncStatsHud() // HUD perf luôn hiện ở dev — bấm ` để ẩn
+      this.devHud = new DevHud(this.canvas.parentElement ?? document.body) // perf HUD — bấm ` để ẩn
     }
   }
 
@@ -415,80 +392,7 @@ export class ArchPlanLab extends BaseWorld {
     this.controls?.update()
     this.css2dRenderer?.render(this.scene, this.camera)
     this.guard?.check()
-    if (deltaTime > 0) this._fps = this._fps > 0 ? this._fps * 0.9 + 0.1 / deltaTime : 1 / deltaTime
-    if (this._statsOn) this._updateStats()
-  }
-
-  // Toggle ẩn/hiện HUD bằng phím ` (Backquote). Mặc định hiện (bật trong onInit).
-  private _toggleStats(): void {
-    this._statsOn = !this._statsOn
-    this._syncStatsHud()
-  }
-
-  // Tạo (lazy) hoặc gỡ HUD theo _statsOn. 1 panel 3 dòng: fps/ms · budget(draw/tri/geo/tex) · leak.
-  private _syncStatsHud(): void {
-    if (!this._statsOn) {
-      this._statsEl?.remove()
-      this._statsEl = null
-      this._statsPerf = null
-      this._statsBudget = null
-      this._statsLeak = null
-      return
-    }
-    if (!this._statsEl) {
-      const el = document.createElement('div')
-      el.className = 'ap-perf-hud'
-      this._statsPerf = document.createElement('div')
-      this._statsBudget = document.createElement('div')
-      this._statsLeak = document.createElement('div')
-      this._statsLeak.className = 'ap-perf-leak'
-      el.append(this._statsPerf, this._statsBudget, this._statsLeak)
-      this.canvas.parentElement?.appendChild(el)
-      this._statsEl = el
-    }
-    this._updateStats()
-  }
-
-  // Phân hạng giá trị → state màu (ok ≥ hi · warn ≥ lo · else bad). Tránh nested ternary (eslint).
-  private _band(v: number, hi: number, lo: number): string {
-    if (v >= hi) return 'ok'
-    if (v >= lo) return 'warn'
-    return 'bad'
-  }
-
-  // Dòng 1 fps/ms (mượt = tín hiệu LAG). Dòng 2 budget (ĐỎ nếu draw>100 hoặc tri>500k). Dòng 3 leak.
-  private _updateStats(): void {
-    if (!this._statsPerf || !this._statsBudget) return
-    const { render, memory } = this.renderer.info
-    const fps = Math.round(this._fps)
-    const ms = this._fps > 0 ? (1000 / this._fps).toFixed(1) : '—'
-    this._statsPerf.textContent = `${fps} fps · ${ms} ms`
-    this._statsPerf.dataset.state = this._band(fps, 50, 30)
-    const tri = render.triangles
-    this._statsBudget.textContent = `draw ${render.drawCalls}/100 · tri ${Math.round(tri / 1000)}k/500k · geo ${memory.geometries} · tex ${memory.textures}`
-    this._statsBudget.dataset.state = render.drawCalls > 100 || tri > 500_000 ? 'bad' : 'ok'
-    this._updateLeakLine(memory.geometries, memory.textures)
-  }
-
-  // Bảng leak: geo/tex tăng liên tục ≥10 frame → đỏ "nghi leak"; đang tăng → vàng; đứng yên → xanh.
-  private _updateLeakLine(geo: number, tex: number): void {
-    if (!this._statsLeak) return
-    this._riseGeo = geo > this._prevGeo ? this._riseGeo + 1 : 0
-    this._riseTex = tex > this._prevTex ? this._riseTex + 1 : 0
-    this._prevGeo = geo
-    this._prevTex = tex
-    const rise = Math.max(this._riseGeo, this._riseTex)
-    let state = 'ok'
-    let msg = '✓ ổn định — không leak'
-    if (this._riseGeo >= 10 || this._riseTex >= 10) {
-      state = 'bad'
-      msg = `⚠ NGHI LEAK — geo/tex tăng ${rise} frame`
-    } else if (rise > 0) {
-      state = 'warn'
-      msg = `↑ tăng ${rise}f (rebuild)`
-    }
-    this._statsLeak.textContent = msg
-    this._statsLeak.dataset.state = state
+    this.devHud?.update(this.renderer.info, deltaTime)
   }
 
   private _applyHorizMove(move: THREE.Vector3, fwd: THREE.Vector3, speed: number): void {
@@ -530,9 +434,7 @@ export class ArchPlanLab extends BaseWorld {
       cancelAnimationFrame(this._rafBuild)
       this._rafBuild = 0
     }
-    this._clearHighlight()
-    this._hiMat?.dispose()
-    this._hiMat = null
+    this.highlight?.dispose()
     this._pickMat?.dispose() // SPIKE brush: material chung của pick layer
     this._pickMat = null
     this.controls?.dispose()
@@ -568,8 +470,8 @@ export class ArchPlanLab extends BaseWorld {
     this.sun = null
     this.guard?.dispose()
     this.guard = null
-    this._statsEl?.remove()
-    this._statsEl = null
+    this.devHud?.dispose()
+    this.devHud = null
   }
 
   // ── Scene setup ────────────────────────────────────────────────────────────
@@ -743,8 +645,8 @@ export class ArchPlanLab extends BaseWorld {
       removeFloor: (id) => this._removeFloor(id),
       addFloor: () => this._addFloor(),
       resetState: () => this._resetState(),
-      exportJSON: () => this._exportJSON(),
-      saveFile: () => void this._saveFile(),
+      exportJSON: () => this.store.exportJSON(this.state),
+      saveFile: () => void this.store.saveFile(this.state),
       loadFile: () => void this._loadFile(),
       addColumn: (inst) => this._addColumn(inst),
       removeColumn: (inst, idx) => this._removeColumn(inst, idx),
@@ -755,7 +657,7 @@ export class ArchPlanLab extends BaseWorld {
       updateMeasureLabels: () => this.heightGridSystem?.update(this.buildingGroup),
       undo: () => this._undo(),
       redo: () => this._redo(),
-      highlightPart: (t) => this._highlightPart(t),
+      highlightPart: (t) => this.highlight?.show(t),
       registerFocus: (k, f) => this.manipulate?.registerFocus(k, f),
     }
     this.gui = setupGUI(ctx)
@@ -796,7 +698,7 @@ export class ArchPlanLab extends BaseWorld {
     return {
       parent: () => this.leftTools,
       getState: () => this.state,
-      persist: () => this._persist(),
+      persist: () => this.store.autosave(this.state),
       getBrush: () => this._brushColor,
       setBrush: (c) => {
         this._brushColor = c
@@ -817,6 +719,15 @@ export class ArchPlanLab extends BaseWorld {
       buildScene: () => this._buildScene(),
       buildSceneLive: () => this._buildSceneLive(),
       refreshGuiNumbers: () => this.gui?.controllersRecursive().forEach((c) => c.updateDisplay()),
+    }
+  }
+
+  // Host cho HighlightOverlay: scene + 3 locator (dùng chung build/paint, nên ở lại Lab).
+  private _highlightHost(): HighlightHost {
+    return {
+      scene: this.scene,
+      locateInst: (id) => this._locateInst(id),
+      instWallBase: (inst, fi) => this._instWallBase(inst, fi),
     }
   }
 
@@ -905,232 +816,7 @@ export class ArchPlanLab extends BaseWorld {
     this._buildSceneLive()
   }
 
-  // ── Highlight phần đang chỉnh (click tab GUI) ────────────────────────────────
-  // Click tab Wall i / open / col / Struct / Roof / Foundation / Slab / Stairs / Balcony / Walls →
-  // flash viền wireframe vàng NHẠT quanh đúng phần đó ~0.6s. Box xoay đúng heading (computeWallConfigs);
-  // section dạng footprint band. Đọc state hiện tại → khớp geometry đang hiện (không đụng merge).
-  private _highlightPart(t: HighlightTarget): void {
-    const loc = this._locateInst(t.instId)
-    if (!loc) return
-    const lines = this._highlightWires(t, loc.inst, loc.fi)
-    this._clearHighlight()
-    if (lines.length === 0) return
-    const group = new THREE.Group()
-    for (const l of lines) group.add(l)
-    this.scene.add(group)
-    this._hiGroup = group
-    this._blinkHighlight()
-  }
-
-  private _highlightWires(t: HighlightTarget, inst: ShapeInstance, fi: number): THREE.Object3D[] {
-    const base = this._instWallBase(inst, fi)
-    const configs = computeWallConfigs(inst, base)
-    if (t.kind === 'wall') return this._wireBox(configs[t.segIdx])
-    if (t.kind === 'walls') return configs.flatMap((c) => this._wireBox(c))
-    if (t.kind === 'open') return this._wireOpen(configs[t.segIdx], inst, t.segIdx, t.opIdx)
-    if (t.kind === 'col') return this._wireCol(inst, base, t.colIdx)
-    if (t.kind === 'stairs') return this._wireStairs(inst, base)
-    if (t.kind === 'balcony') return this._wireBalcony(configs, inst, base, t.balconyIdx)
-    return this._wireFootprint(t.kind, configs, inst, base) // struct/roof/foundation/slab
-  }
-
-  // Nhấp nháy NHẠT ~0.6s: opacity 0.5↔0.16 mỗi 150ms (không tắt hẳn → dịu), rồi tự dọn.
-  private _blinkHighlight(): void {
-    const mat = this._hiMaterial()
-    mat.opacity = 0.5
-    this._hiTimers.push(
-      window.setInterval(() => {
-        mat.opacity = mat.opacity > 0.34 ? 0.16 : 0.5
-      }, 150)
-    )
-    this._hiTimers.push(window.setTimeout(() => this._clearHighlight(), 600))
-  }
-
-  private _clearHighlight(): void {
-    for (const id of this._hiTimers) {
-      window.clearTimeout(id)
-      window.clearInterval(id)
-    }
-    this._hiTimers = []
-    if (!this._hiGroup) return
-    this.scene.remove(this._hiGroup)
-    this._hiGroup.traverse((o) => {
-      if (o instanceof THREE.LineSegments) o.geometry.dispose()
-    })
-    this._hiGroup = null
-  }
-
-  private _hiMaterial(): THREE.LineBasicMaterial {
-    if (!this._hiMat) {
-      // Vàng, NHẠT (opacity thấp) + depthTest off → luôn thấy dù phần đó sau tường khác.
-      this._hiMat = new THREE.LineBasicMaterial({
-        color: 0xffd54a,
-        depthTest: false,
-        transparent: true,
-        opacity: 0.5,
-      })
-    }
-    return this._hiMat
-  }
-
-  // Viền box XOAY quanh tâm (cx,cy,cz) cỡ (sx,sy,sz), xoay rotDeg quanh Y. Helper chung mọi phần.
-  private _orientedWire(
-    cx: number,
-    cy: number,
-    cz: number,
-    sx: number,
-    sy: number,
-    sz: number,
-    rotDeg: number
-  ): THREE.LineSegments {
-    const box = new THREE.BoxGeometry(sx, sy, sz)
-    const edges = new THREE.EdgesGeometry(box)
-    box.dispose()
-    const line = new THREE.LineSegments(edges, this._hiMaterial())
-    line.position.set(cx, cy, cz)
-    line.rotation.y = (rotDeg * Math.PI) / 180
-    line.renderOrder = 999
-    return line
-  }
-
-  // 1 tường: box ôm sát đúng vị trí/heading từ WallConfig.
-  private _wireBox(cfg: WallConfig | undefined): THREE.Object3D[] {
-    if (!cfg) return []
-    return [
-      this._orientedWire(
-        cfg.xOffset,
-        cfg.yBase + cfg.h / 2,
-        cfg.zOffset,
-        cfg.w,
-        cfg.h,
-        cfg.depth,
-        cfg.rotationY
-      ),
-    ]
-  }
-
-  // 1 cửa/sổ: box tại đúng vị trí lỗ trên tường (local x dọc tường → world qua heading).
-  private _wireOpen(
-    cfg: WallConfig | undefined,
-    inst: ShapeInstance,
-    segIdx: number,
-    opIdx: number
-  ): THREE.Object3D[] {
-    const op = inst.segments[segIdx]?.openings[opIdx]
-    if (!cfg || !op) return []
-    const lx = (op.x + op.w / 2) / 1000 - cfg.w / 2
-    const th = (cfg.rotationY * Math.PI) / 180
-    const wx = cfg.xOffset + lx * Math.cos(th)
-    const wz = cfg.zOffset - lx * Math.sin(th)
-    const wy = cfg.yBase + (op.yOffset + op.h / 2) / 1000
-    return [
-      this._orientedWire(wx, wy, wz, op.w / 1000, op.h / 1000, cfg.depth + 0.06, cfg.rotationY),
-    ]
-  }
-
-  // 1 cột (col 1/2/3): box tại world pos cột (khớp _buildColumnsForInstance).
-  private _wireCol(inst: ShapeInstance, base: number, colIdx: number): THREE.Object3D[] {
-    const col = inst.structure.columns[colIdx]
-    if (!col) return []
-    const th = (inst.rotY * Math.PI) / 180
-    const cosR = Math.cos(th)
-    const sinR = Math.sin(th)
-    const cx = (col.x / 1000) * cosR - (col.z / 1000) * sinR + inst.posX / 1000
-    const cz = (col.x / 1000) * sinR + (col.z / 1000) * cosR + inst.posZ / 1000
-    const sz = (col.type === 'round' ? col.r * 2 : col.size) / 1000
-    return [this._orientedWire(cx, base + col.h / 2000, cz, sz, col.h / 1000, sz, 0)]
-  }
-
-  private _wireStairs(inst: ShapeInstance, base: number): THREE.Object3D[] {
-    const s = inst.structure.stairs
-    const th = (inst.rotY * Math.PI) / 180
-    const cx = (s.x / 1000) * Math.cos(th) - (s.z / 1000) * Math.sin(th) + inst.posX / 1000
-    const cz = (s.x / 1000) * Math.sin(th) + (s.z / 1000) * Math.cos(th) + inst.posZ / 1000
-    const hm = inst.segments.length ? Math.max(...inst.segments.map((g) => g.wallH)) / 1000 : 3
-    return [
-      this._orientedWire(
-        cx,
-        base + hm / 2,
-        cz,
-        s.runL / 1000,
-        hm,
-        s.width / 1000,
-        inst.rotY + s.rotDeg
-      ),
-    ]
-  }
-
-  // Ban công: box ôm sàn+lan can, đặt ngoài mặt tường (khớp makePositionedBalcony).
-  private _wireBalcony(
-    configs: WallConfig[],
-    inst: ShapeInstance,
-    base: number,
-    balconyIdx: number
-  ): THREE.Object3D[] {
-    const b = inst.structure.balconies[balconyIdx]
-    const cfg = configs[b?.wallIdx ?? 0]
-    if (!b || !cfg) return []
-    const lx = (b.x + b.width / 2) / 1000 - cfg.w / 2
-    const lz = cfg.depth / 2 + b.depth / 2000
-    const th = (cfg.rotationY * Math.PI) / 180
-    const wx = cfg.xOffset + lx * Math.cos(th) + lz * Math.sin(th)
-    const wz = cfg.zOffset - lx * Math.sin(th) + lz * Math.cos(th)
-    const wy = base + b.y / 1000 + (b.railH - b.slabT) / 2000
-    const sy = (b.railH + b.slabT) / 1000
-    return [this._orientedWire(wx, wy, wz, b.width / 1000, sy, b.depth / 1000, cfg.rotationY)]
-  }
-
-  // Section footprint band ở cao độ tương ứng: roof=đỉnh, foundation=dưới base, slab=tại base,
-  // struct=full chiều cao tường (toàn kết cấu).
-  private _wireFootprint(
-    kind: 'struct' | 'roof' | 'foundation' | 'slab',
-    configs: WallConfig[],
-    inst: ShapeInstance,
-    base: number
-  ): THREE.Object3D[] {
-    const fp = this._footprintXZ(configs)
-    const maxH = configs.length ? Math.max(...configs.map((c) => c.h)) : 3
-    if (kind === 'roof') {
-      const rh = inst.roof.show ? 1.5 : 0.4
-      return [this._orientedWire(fp.cx, base + maxH + rh / 2, fp.cz, fp.sx, rh, fp.sz, 0)]
-    }
-    if (kind === 'foundation') {
-      const fh = inst.structure.foundH / 1000
-      return [this._orientedWire(fp.cx, base - fh / 2, fp.cz, fp.sx, fh, fp.sz, 0)]
-    }
-    if (kind === 'slab') {
-      const st = inst.structure.slabThick / 1000
-      return [this._orientedWire(fp.cx, base + st / 2, fp.cz, fp.sx, st, fp.sz, 0)]
-    }
-    return [this._orientedWire(fp.cx, base + maxH / 2, fp.cz, fp.sx, maxH, fp.sz, 0)] // struct
-  }
-
-  // Footprint XZ (world) từ 2 đầu mỗi tường → tâm + kích thước AABB cho box section.
-  private _footprintXZ(configs: WallConfig[]): FootXZ {
-    let minX = Infinity
-    let maxX = -Infinity
-    let minZ = Infinity
-    let maxZ = -Infinity
-    for (const c of configs) {
-      const rad = (c.rotationY * Math.PI) / 180
-      const dx = (Math.cos(rad) * c.w) / 2
-      const dz = (-Math.sin(rad) * c.w) / 2
-      for (const s of [-1, 1]) {
-        minX = Math.min(minX, c.xOffset + s * dx)
-        maxX = Math.max(maxX, c.xOffset + s * dx)
-        minZ = Math.min(minZ, c.zOffset + s * dz)
-        maxZ = Math.max(maxZ, c.zOffset + s * dz)
-      }
-    }
-    if (!Number.isFinite(minX)) return { cx: 0, cz: 0, sx: 1, sz: 1 }
-    return {
-      cx: (minX + maxX) / 2,
-      cz: (minZ + maxZ) / 2,
-      sx: Math.max(0.3, maxX - minX),
-      sz: Math.max(0.3, maxZ - minZ),
-    }
-  }
-
+  // ── Locator helpers (dùng chung build + paint + highlight overlay) ───────────
   private _locateInst(instId: string): { inst: ShapeInstance; fi: number } | null {
     for (let fi = 0; fi < this.state.floors.length; fi++) {
       const inst = this.state.floors[fi].instances.find((i) => i.id === instId)
@@ -1207,7 +893,7 @@ export class ArchPlanLab extends BaseWorld {
     }
     this._recordHistory()
     this._prevState = JSON.stringify(this.state)
-    this._persist() // autosave mỗi build → reload/mở lại là ra nguyên thiết kế
+    this.store.autosave(this.state) // autosave mỗi build → reload/mở lại là ra nguyên thiết kế
     this._renderScene()
   }
 
@@ -1571,7 +1257,7 @@ export class ArchPlanLab extends BaseWorld {
     const wx = inst.posX / 1000
     const wz = inst.posZ / 1000
     const ry = inst.rotY
-    const fp = this._footprintXZ(computeWallConfigs(inst, wallBase)) // world footprint cho pick box
+    const fp = footprintXZ(computeWallConfigs(inst, wallBase)) // world footprint cho pick box
     this._buildBaseForInstance(inst, wallBase, isGround, holesHere, fp)
     this._buildColumnsForInstance(inst, wallBase)
     this._buildStairsForInstance(inst, wallBase, instHm)
@@ -1816,135 +1502,27 @@ export class ArchPlanLab extends BaseWorld {
     )
   }
 
-  // ── Reset / Export ─────────────────────────────────────────────────────────
+  // ── Reset / Load file (I/O qua DesignStore — state/persistence.ts) ───────────
 
   private _resetState(): void {
     this._undoStack = []
     this._redoStack = []
     this._prevState = ''
     this.state = defaultBuildingState()
-    this._fileHandle = null // dự án mới → quên file đang gắn, Save kế tiếp hỏi nơi lưu
+    this.store.forgetHandle() // dự án mới → quên file đang gắn, Save kế tiếp hỏi nơi lưu
     this._rebuildGUI()
     this._buildScene()
   }
 
-  // ── Persistence — autosave localStorage + Save/Load file ─────────────────────
-
-  private _persist(): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, serializeDesign(this.state))
-    } catch {
-      // localStorage đầy / bị chặn (private mode) → bỏ qua, không làm hỏng build
-    }
-  }
-
-  private _loadAutosave(): void {
-    try {
-      const text = localStorage.getItem(STORAGE_KEY)
-      if (!text) return
-      const st = parseDesign(text)
-      if (st) this.state = st // hỏng / khác version → parseDesign trả null → giữ default
-    } catch {
-      // localStorage bị chặn → giữ default
-    }
-  }
-
-  // Save: ghi file snapshot ĐẦY ĐỦ (nạp lại được). Khác nút JSON (AP4 render, 1 chiều).
-  // FSA picker → chọn thư mục + nhớ handle (Save sau đè thẳng, không hỏi lại). Không hỗ
-  // trợ → fallback download vào Downloads.
-  private async _saveFile(): Promise<void> {
-    const text = serializeDesign(this.state)
-    const picker = window.showSaveFilePicker
-    if (!picker) {
-      this._downloadFallback(text)
-      return
-    }
-    try {
-      if (!this._fileHandle) {
-        this._fileHandle = await picker({
-          suggestedName: 'archplan-design.json',
-          types: [{ description: 'ArchPlan design', accept: { 'application/json': ['.json'] } }],
-        })
-      }
-      const w = await this._fileHandle.createWritable()
-      await w.write(text)
-      await w.close()
-    } catch (e) {
-      if (!(e instanceof DOMException) || e.name !== 'AbortError') window.alert('Lưu file lỗi.')
-    }
-  }
-
-  // Load: chọn file → nhớ handle (Save sau đè đúng file đó) → nạp vào editor.
+  // Load file → reset undo + rebuild scene. Toàn bộ I/O + alert nằm trong DesignStore.
   private async _loadFile(): Promise<void> {
-    const picked = await this._pickDesignFile()
-    if (!picked) return
-    const st = parseDesign(picked.text)
-    if (!st) {
-      window.alert('File không hợp lệ hoặc khác version — không nạp được.')
-      return
-    }
-    this._fileHandle = picked.handle // null nếu fallback → Save sẽ hỏi nơi lưu
+    const st = await this.store.loadFile()
+    if (!st) return
     this._undoStack = []
     this._redoStack = []
     this._prevState = ''
     this.state = st
     this._rebuildGUI()
     this._buildScene()
-  }
-
-  // { text, handle } hoặc null (cancel/lỗi). FSA → có handle; fallback input → handle null.
-  private async _pickDesignFile(): Promise<PickedDesign | null> {
-    const picker = window.showOpenFilePicker
-    if (picker) {
-      try {
-        const [h] = await picker({
-          types: [{ description: 'ArchPlan design', accept: { 'application/json': ['.json'] } }],
-          multiple: false,
-        })
-        return { text: await (await h.getFile()).text(), handle: h }
-      } catch (e) {
-        if (!(e instanceof DOMException) || e.name !== 'AbortError') window.alert('Mở file lỗi.')
-        return null
-      }
-    }
-    const text = await this._pickFileFallback()
-    return text === null ? null : { text, handle: null }
-  }
-
-  private _pickFileFallback(): Promise<string | null> {
-    return new Promise((resolve) => {
-      const input = document.createElement('input')
-      input.type = 'file'
-      input.accept = 'application/json'
-      input.addEventListener('change', () => {
-        const file = input.files?.[0]
-        if (file) void file.text().then(resolve)
-        else resolve(null)
-      })
-      input.addEventListener('cancel', () => resolve(null))
-      input.click()
-    })
-  }
-
-  private _downloadFallback(text: string): void {
-    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')
-    const blob = new Blob([text], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `archplan-${stamp}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  private _exportJSON(): void {
-    const json = JSON.stringify(buildingStateToJSON(this.state), null, 2)
-    const blob = new Blob([json], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'archplan.json'
-    a.click()
-    URL.revokeObjectURL(url)
   }
 }
