@@ -18,22 +18,7 @@
 
 import './archplan-lab.css'
 
-import { makeRoof } from 'building-kit/parts/RoofShape'
-import {
-  makePositionedBalcony,
-  makePositionedColumn,
-  makePositionedFoundation,
-  makePositionedSlab,
-  makePositionedStairs,
-} from 'building-kit/parts/Structure'
-import { type PartResult } from 'building-kit/tokens'
-import {
-  assembleWall,
-  mergeWalls,
-  type WallAsmCtx,
-  type WallPlace,
-  type WallSpec,
-} from 'building-kit/wallAssembly' // shared wall assembler (editor + headless)
+import { renderBuildingState } from 'building-kit/BuildingFromState' // renderer chung lõi (Phase 1b)
 import { makeSurfaceMaterial, WallMaterialCache } from 'building-kit/wallMaterials' // material engine
 import type GUI from 'lil-gui'
 import * as THREE from 'three'
@@ -48,15 +33,6 @@ import { AsphaltGround } from 'threejs-modules/shaders/ground/AsphaltGround'
 import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
 import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
 
-import {
-  computeLocalBbox,
-  computeWallConfigs,
-  footprintXZ,
-  type FootXZ,
-  stairFootprintWorld,
-  type WorldRect,
-  worldRectToSlabOpening,
-} from './build/build'
 import { DevHud } from './gui/devhud' // perf HUD dev (fps/budget/leak) — tách monolith
 import { type APGuiCtx, setupGridPanel, setupGroundPanel, setupGUI, setupSunPanel } from './gui/gui'
 import { type HighlightHost, HighlightOverlay } from './interaction/highlight' // flash viền phần đang chỉnh — tách monolith
@@ -71,16 +47,13 @@ import {
 } from './scene/scene'
 import { DesignStore } from './state/persistence' // I/O save/load/autosave/export — tách monolith
 import {
-  type BalconyState,
   type BuildingState,
   defaultBuildingState,
   mkColumn,
   mkFloor,
   mkInstance,
-  type SegmentState,
   SHAPE_CONFIGS,
   type ShapeInstance,
-  type WallConfig,
 } from './state/state'
 
 // File System Access API — TS 5.9 lib.dom đã có FileSystemFileHandle/WritableFileStream
@@ -904,120 +877,21 @@ export class ArchPlanLab extends BaseWorld {
   // để live-drag tái dùng (render-only) mà không spam undo/localStorage.
   private _renderScene(): void {
     this._clearBuilding()
-    // Gom geometry tường theo key material+color+scale (world-space) → merge 1 lần ở cuối.
-    const buckets = new Map<string, THREE.BufferGeometry[]>()
-    const ctx: WallAsmCtx = {
-      cache: this.wallMats,
-      buckets,
+    // Dựng walls+structure+roof+paint qua renderer CHUNG ở lõi (building-kit/BuildingFromState). Trả
+    // Placement[] (toạ độ pick-box) → editor tự gắn lớp pick vô hình (brush/Move). Renderer headless,
+    // KHÔNG đụng pick/chrome/sun.
+    const placements = renderBuildingState(this.state, {
+      wallCache: this.wallMats,
       group: this.buildingGroup,
       geos: this.buildingGeos,
+      mats: this.buildingMats,
       brick3d: this.brick3dWalls,
       wood: this.woodWalls,
       strip: this.stripWalls,
-    }
-    // Footprint cầu thang tầng fi → lỗ khoét slab tầng fi+1.
-    const stairHoles = this._collectStairHoles()
-    let yAcc = 0
-    for (let fi = 0; fi < this.state.floors.length; fi++) {
-      yAcc += this._buildFloor(fi, yAcc, stairHoles.get(fi) ?? [], ctx)
-    }
-    mergeWalls(ctx)
-    this.wallMats.sweep(new Set(buckets.keys())) // dispose material không còn dùng
+    })
+    for (const p of placements) this._addPick(p.cx, p.cy, p.cz, p.sx, p.sy, p.sz, p.rotDeg, p.ud)
     if (this.sun) this.sun.shadow.needsUpdate = true // geometry đổi → shadow map vẽ lại 1 lần
     this.heightGridSystem?.update(this.buildingGroup)
-  }
-
-  // Build 1 tầng → trả về độ cao (lift + floorH) để cộng dồn cho tầng kế.
-  private _buildFloor(fi: number, yAcc: number, holesHere: WorldRect[], ctx: WallAsmCtx): number {
-    const floor = this.state.floors[fi]
-    const isGround = fi === 0
-    let maxLift = 0
-    let maxFloorH = 0
-    for (const inst of floor.instances) {
-      const yLift = isGround && inst.structure.showFoundation ? inst.structure.foundH / 1000 : 0
-      if (yLift > maxLift) maxLift = yLift
-      const wallBase = yAcc + yLift
-      const instHm =
-        inst.segments.length > 0 ? Math.max(...inst.segments.map((s) => s.wallH)) / 1000 : 3
-      if (instHm > maxFloorH) maxFloorH = instHm
-      computeWallConfigs(inst, wallBase).forEach((cfg, si) => {
-        this._assembleFromConfig(cfg, ctx)
-        this._addWallPickBox(cfg, inst.id, si) // SPIKE brush: 1 box vô hình/tường để click-paint
-        this._addOpeningPickBox(cfg, inst.id, si) // Move tool: box riêng mỗi cửa → kéo trên mặt tường
-      })
-      this._buildStructureForInstance(inst, wallBase, isGround, instHm, holesHere)
-    }
-    return maxLift + maxFloorH
-  }
-
-  // Gom footprint cầu thang mọi tầng → map[targetFloor] = list lỗ cần khoét slab.
-  private _collectStairHoles(): Map<number, WorldRect[]> {
-    const holes = new Map<number, WorldRect[]>()
-    for (let fi = 0; fi < this.state.floors.length; fi++) {
-      for (const inst of this.state.floors[fi].instances) {
-        const fp = stairFootprintWorld(inst)
-        if (!fp) continue
-        const target = fi + 1
-        let arr = holes.get(target)
-        if (!arr) {
-          arr = []
-          holes.set(target, arr)
-        }
-        arr.push(fp)
-      }
-    }
-    return holes
-  }
-
-  // Adapter editor → shared: WallConfig (m) + SegmentState (mm) → WallPlace/WallSpec (m) →
-  // assembleWall (building-kit). Dispatch material + merge + instanced = wallAssembly.ts (dùng chung
-  // headless). Pick box thêm RIÊNG ở _buildFloor (editor-only).
-  private _assembleFromConfig(cfg: WallConfig, ctx: WallAsmCtx): void {
-    const { seg } = cfg
-    const place: WallPlace = {
-      w: cfg.w,
-      h: cfg.h,
-      depth: cfg.depth,
-      rotationY: cfg.rotationY,
-      xOffset: cfg.xOffset,
-      zOffset: cfg.zOffset,
-      yBase: cfg.yBase,
-    }
-    assembleWall(place, this._segToSpec(seg), ctx)
-  }
-
-  // SegmentState (mm) → WallSpec (m) cho shared assembler. Tách để _assembleFromConfig ≤ Rule-50.
-  private _segToSpec(seg: SegmentState): WallSpec {
-    return {
-      material: seg.material,
-      colorIndex: seg.colorIndex,
-      paintColor: seg.paintColor,
-      matScale: seg.matScale,
-      mortarColor: seg.mortarColor,
-      brickRelief: seg.brickRelief,
-      style: seg.style,
-      woodReveal: seg.woodReveal / 1000,
-      woodButt: seg.woodButt / 1000,
-      woodStepTilt: seg.woodStepTilt,
-      openings: seg.openings.map((op) => ({
-        kind: op.kind,
-        x: op.x / 1000,
-        w: op.w / 1000,
-        h: op.h / 1000,
-        yOffset: op.yOffset / 1000, // pass thẳng (kể cả ÂM) → bán nguyệt khi kéo xuống dưới sàn
-        round: op.round,
-      })),
-      panels: seg.panels.map((p) => ({
-        x: p.x / 1000,
-        y: p.y / 1000,
-        w: p.w / 1000,
-        h: p.h / 1000,
-        depth: p.depth / 1000,
-        mode: p.mode,
-        material: p.material,
-        colorIndex: p.colorIndex,
-      })),
-    }
   }
 
   // Box pick vô hình (visible=false → 0 render, Raycaster vẫn hit) ôm 1 element. userData → _paintAt.
@@ -1042,43 +916,6 @@ export class ArchPlanLab extends BaseWorld {
     this.pickGroup.add(mesh)
   }
 
-  // Tường: box ôm đúng WallConfig — sơn → seg.paintColor (merge nên qua field + cache key).
-  private _addWallPickBox(cfg: WallConfig, instId: string, segIdx: number): void {
-    const { xOffset: x, zOffset: z, yBase: y, w, h, depth, rotationY } = cfg
-    this._addPick(x, y + h / 2, z, w, h, depth, rotationY, { instId, segIdx })
-  }
-
-  // Mỗi cửa/cửa sổ: box nhỏ trên mặt NGOÀI tường (+Z local), nhô 2cm để hit TRƯỚC box tường.
-  // userData mang opIdx → Move tool kéo riêng cửa (trượt trên mặt tường). Sơn vẫn dùng segIdx.
-  private _addOpeningPickBox(cfg: WallConfig, instId: string, segIdx: number): void {
-    const { xOffset, zOffset, yBase, w, depth, rotationY, seg } = cfg
-    const th = (rotationY * Math.PI) / 180
-    seg.openings.forEach((op, opIdx) => {
-      const lx = (op.x + op.w / 2) / 1000 - w / 2
-      const lz = depth / 2 + 0.02
-      const wx = xOffset + lx * Math.cos(th) + lz * Math.sin(th)
-      const wz = zOffset - lx * Math.sin(th) + lz * Math.cos(th)
-      const wy = yBase + (op.yOffset + op.h / 2) / 1000
-      this._addPick(wx, wy, wz, op.w / 1000, op.h / 1000, 0.04, rotationY, {
-        instId,
-        segIdx,
-        opIdx,
-      })
-    })
-  }
-
-  // Element KHÔNG-tường (không merge): recolor MeshToon sau build theo inst.paint[key] (override) rồi push.
-  private _pushPainted(r: PartResult, inst: ShapeInstance, key: string): void {
-    const c = inst.paint?.[key]
-    if (c !== undefined) {
-      for (const mat of r.mats) {
-        const m = mat as THREE.Material & { color?: THREE.Color }
-        if (m.color instanceof THREE.Color) m.color.setHex(c)
-      }
-    }
-    this._pushResult(r)
-  }
-
   private _clearBuilding(): void {
     for (const geo of this.buildingGeos) geo.dispose()
     for (const mat of this.buildingMats) mat.dispose()
@@ -1094,280 +931,6 @@ export class ArchPlanLab extends BaseWorld {
     this.pickBoxGeos = []
     this.buildingGroup.clear()
     this.pickGroup.clear()
-  }
-
-  // ── Structure build ────────────────────────────────────────────────────────
-
-  private _pushResult(r: PartResult): void {
-    this.buildingGeos.push(...r.geos)
-    this.buildingMats.push(...r.mats)
-    for (const m of r.meshes) {
-      // foundation/slab/cột/mái đổ + nhận bóng (trước đây thiếu → mặt trời ko đổ bóng foundation).
-      // meshes là Object3D[] (có Group) → traverse set cho mọi Mesh con.
-      m.traverse((o) => {
-        if (o instanceof THREE.Mesh) {
-          o.castShadow = true
-          o.receiveShadow = true
-        }
-      })
-      this.buildingGroup.add(m)
-    }
-  }
-
-  private _buildStructureForInstance(
-    inst: ShapeInstance,
-    wallBase: number,
-    isGround: boolean,
-    instHm: number,
-    holesHere: WorldRect[]
-  ): void {
-    const { w, d } = computeLocalBbox(inst)
-    const wx = inst.posX / 1000
-    const wz = inst.posZ / 1000
-    const ry = inst.rotY
-    const fp = footprintXZ(computeWallConfigs(inst, wallBase)) // world footprint cho pick box
-    this._buildBaseForInstance(inst, wallBase, isGround, holesHere, fp)
-    this._buildColumnsForInstance(inst, wallBase)
-    this._buildStairsForInstance(inst, wallBase, instHm)
-    this._buildBalconyForInstance(inst, wallBase)
-    this._buildRoofForInstance(inst, wx, wz, ry, w, d, wallBase, instHm)
-    if (inst.roof.show) {
-      // Mái: box bao footprint trên đỉnh tường (sơn được dù mái dốc — bbox đủ để click).
-      this._addPick(fp.cx, wallBase + instHm + 0.75, fp.cz, fp.sx, 1.5, fp.sz, 0, {
-        instId: inst.id,
-        key: 'roof',
-      })
-    }
-  }
-
-  // Móng + sàn (ground): build + recolor theo inst.paint + pick box (found/slab).
-  private _buildBaseForInstance(
-    inst: ShapeInstance,
-    wallBase: number,
-    isGround: boolean,
-    holesHere: WorldRect[],
-    fp: FootXZ
-  ): void {
-    if (isGround && inst.structure.showFoundation) this._buildFoundation(inst, wallBase, fp)
-    if (inst.structure.showSlab) this._buildSlab(inst, wallBase, holesHere, fp)
-  }
-
-  private _buildFoundation(inst: ShapeInstance, wallBase: number, fp: FootXZ): void {
-    const { w, d } = computeLocalBbox(inst)
-    const fh = inst.structure.foundH / 1000
-    this._pushPainted(
-      makePositionedFoundation({
-        bboxW: w,
-        bboxD: d,
-        wallDepth: inst.wallDepth / 1000,
-        oh: inst.structure.foundOh,
-        h: fh,
-        worldX: inst.posX / 1000,
-        worldZ: inst.posZ / 1000,
-        rotY: inst.rotY,
-      }),
-      inst,
-      'found'
-    )
-    this._addPick(fp.cx, wallBase - fh / 2, fp.cz, fp.sx, fh, fp.sz, 0, {
-      instId: inst.id,
-      key: 'found',
-    })
-  }
-
-  private _buildSlab(inst: ShapeInstance, wallBase: number, holes: WorldRect[], fp: FootXZ): void {
-    const { w, d } = computeLocalBbox(inst)
-    const wx = inst.posX / 1000
-    const wz = inst.posZ / 1000
-    const st = inst.structure.slabThick / 1000
-    this._pushPainted(
-      makePositionedSlab({
-        bboxW: w,
-        bboxD: d,
-        thick: st,
-        yBase: wallBase,
-        worldX: wx,
-        worldZ: wz,
-        rotY: inst.rotY,
-        openings: this._slabOpenings(holes, wx, wz, inst.rotY, w, d),
-      }),
-      inst,
-      'slab'
-    )
-    this._addPick(fp.cx, wallBase + st / 2, fp.cz, fp.sx, st, fp.sz, 0, {
-      instId: inst.id,
-      key: 'slab',
-    })
-  }
-
-  // Ban công (nhiều): mỗi cái sàn vươn ra mặt ngoài 1 tường + lan can. Transform tường từ config.
-  private _buildBalconyForInstance(inst: ShapeInstance, wallBase: number): void {
-    const bals = inst.structure.balconies
-    if (!bals?.length) return
-    const configs = computeWallConfigs(inst, wallBase)
-    bals.forEach((b, i) => {
-      const cfg = configs[b.wallIdx]
-      if (!cfg) return
-      this._pushPainted(
-        makePositionedBalcony({
-          wallX: cfg.xOffset,
-          wallZ: cfg.zOffset,
-          wallRotDeg: cfg.rotationY,
-          wallDepth: cfg.depth,
-          alongOffset: (b.x + b.width / 2) / 1000 - cfg.w / 2,
-          width: b.width / 1000,
-          projection: b.depth / 1000,
-          y: wallBase + b.y / 1000,
-          slabT: b.slabT / 1000,
-          railH: b.railH / 1000,
-        }),
-        inst,
-        `bal:${i}`
-      )
-      this._addBalconyPick(inst, cfg, b, wallBase, i)
-    })
-  }
-
-  // Pick box ban công (khớp _wireBalcony): ôm sàn + lan can, đặt ngoài mặt tường.
-  private _addBalconyPick(
-    inst: ShapeInstance,
-    cfg: WallConfig,
-    b: BalconyState,
-    wallBase: number,
-    i: number
-  ): void {
-    const lx = (b.x + b.width / 2) / 1000 - cfg.w / 2
-    const lz = cfg.depth / 2 + b.depth / 2000
-    const th = (cfg.rotationY * Math.PI) / 180
-    const wx = cfg.xOffset + lx * Math.cos(th) + lz * Math.sin(th)
-    const wz = cfg.zOffset - lx * Math.sin(th) + lz * Math.cos(th)
-    const wy = wallBase + b.y / 1000 + (b.railH - b.slabT) / 2000
-    const sy = (b.railH + b.slabT) / 1000
-    this._addPick(wx, wy, wz, b.width / 1000, sy, b.depth / 1000, cfg.rotationY, {
-      instId: inst.id,
-      key: `bal:${i}`,
-    })
-  }
-
-  // Lỗ slab = footprint cầu thang tầng dưới (world) nằm trên slab này, đổi sang local.
-  private _slabOpenings(
-    holes: WorldRect[],
-    wx: number,
-    wz: number,
-    ry: number,
-    w: number,
-    d: number
-  ): { x: number; z: number; w: number; d: number; rot: number }[] {
-    if (holes.length === 0) return []
-    const swap = ry === 90 || ry === 270
-    const halfX = (swap ? d : w) / 2
-    const halfZ = (swap ? w : d) / 2
-    const out: { x: number; z: number; w: number; d: number; rot: number }[] = []
-    for (const h of holes) {
-      if (Math.abs(h.cx - wx) <= halfX && Math.abs(h.cz - wz) <= halfZ) {
-        out.push(worldRectToSlabOpening(h, wx, wz, ry))
-      }
-    }
-    return out
-  }
-
-  private _buildStairsForInstance(inst: ShapeInstance, wallBase: number, instHm: number): void {
-    const s = inst.structure.stairs
-    if (!s.show) return
-    this._pushPainted(
-      makePositionedStairs({
-        localX: s.x / 1000,
-        localZ: s.z / 1000,
-        runL: s.runL / 1000,
-        width: s.width / 1000,
-        totalH: instHm,
-        steps: s.steps,
-        rotDeg: s.rotDeg,
-        worldX: inst.posX / 1000,
-        worldZ: inst.posZ / 1000,
-        rotY: inst.rotY,
-        yBase: wallBase,
-      }),
-      inst,
-      'stairs'
-    )
-    const th = (inst.rotY * Math.PI) / 180
-    const cx = (s.x / 1000) * Math.cos(th) - (s.z / 1000) * Math.sin(th) + inst.posX / 1000
-    const cz = (s.x / 1000) * Math.sin(th) + (s.z / 1000) * Math.cos(th) + inst.posZ / 1000
-    this._addPick(
-      cx,
-      wallBase + instHm / 2,
-      cz,
-      s.runL / 1000,
-      instHm,
-      s.width / 1000,
-      inst.rotY + s.rotDeg,
-      {
-        instId: inst.id,
-        key: 'stairs',
-      }
-    )
-  }
-
-  private _buildColumnsForInstance(inst: ShapeInstance, wallBase: number): void {
-    const wx = inst.posX / 1000
-    const wz = inst.posZ / 1000
-    const ry = inst.rotY
-    const cosR = Math.cos((ry * Math.PI) / 180)
-    const sinR = Math.sin((ry * Math.PI) / 180)
-    inst.structure.columns.forEach((col, i) => {
-      const cx = (col.x / 1000) * cosR - (col.z / 1000) * sinR + wx
-      const cz = (col.x / 1000) * sinR + (col.z / 1000) * cosR + wz
-      const ch = col.h / 1000
-      this._pushPainted(
-        makePositionedColumn({
-          type: col.type,
-          worldX: cx,
-          worldZ: cz,
-          h: ch,
-          r: col.r / 1000,
-          size: col.size / 1000,
-          yBase: wallBase,
-        }),
-        inst,
-        `col:${i}`
-      )
-      const sz = (col.type === 'round' ? col.r * 2 : col.size) / 1000
-      this._addPick(cx, wallBase + ch / 2, cz, sz, ch, sz, 0, { instId: inst.id, key: `col:${i}` })
-    })
-  }
-
-  private _buildRoofForInstance(
-    inst: ShapeInstance,
-    wx: number,
-    wz: number,
-    ry: number,
-    w: number,
-    d: number,
-    wallBase: number,
-    instHm: number
-  ): void {
-    if (!inst.roof.show) return
-    this._pushPainted(
-      makeRoof(
-        {
-          type: inst.roof.type,
-          pitch: inst.roof.pitch,
-          overhang: inst.roof.overhang,
-          // rotDeg 0/90/180/270 → builder EW/NS (đúng footprint) + xoay mesh thêm 180°
-          ridgeDir: inst.roof.rotDeg % 180 === 0 ? 'EW' : 'NS',
-          parapetH: inst.roof.parapetH,
-          worldX: wx,
-          worldZ: wz,
-          rotY: ry + (inst.roof.rotDeg >= 180 ? 180 : 0),
-        },
-        w,
-        d,
-        instHm + wallBase
-      ),
-      inst,
-      'roof'
-    )
   }
 
   // ── Reset / Load file (I/O qua DesignStore — state/persistence.ts) ───────────
