@@ -493,6 +493,47 @@ function structureToJSON(s: StructureState): object {
   }
 }
 
+// 1 segment → AP4 JSON (mét). Tách khỏi instanceToJSON để giữ Rule-50. Emit ĐỦ field material
+// (material/matScale/paintColor/mortar/relief/wood…) → BuildingFromPlan render fidelity như editor.
+function segmentToJSON(seg: SegmentState, i: number, shapeKey: string | null): object {
+  const mm = (v: number): number => v / 1000
+  return {
+    index: i,
+    ...(shapeKey !== null && { wallLabel: SHAPE_CONFIGS[shapeKey]?.wallLabels[i] }),
+    length: mm(seg.length),
+    wallH: mm(seg.wallH),
+    turnBefore: seg.turnBefore,
+    colorIndex: seg.colorIndex,
+    style: seg.style,
+    material: seg.material,
+    matScale: seg.matScale,
+    paintColor: seg.paintColor, // hex sơn palette (ưu tiên hơn colorIndex) hoặc null
+    mortarColor: seg.mortarColor, // brick + brick-3d
+    brickRelief: seg.brickRelief,
+    woodReveal: mm(seg.woodReveal), // wood-strip (m)
+    woodButt: mm(seg.woodButt),
+    woodStepTilt: seg.woodStepTilt, // deg
+    openings: seg.openings.map((op) => ({
+      type: op.kind, // AP4 giữ key 'type' = kind (door/window/loading)
+      round: op.round, // v9: dáng lỗ tách riêng → render ellip đúng
+      x: mm(op.x),
+      w: mm(op.w),
+      h: mm(op.h),
+      yOffset: op.yOffset > 0 ? mm(op.yOffset) : null,
+    })),
+    panels: seg.panels.map((p) => ({
+      x: mm(p.x),
+      y: mm(p.y),
+      w: mm(p.w),
+      h: mm(p.h),
+      depth: mm(p.depth),
+      mode: p.mode,
+      material: p.material,
+      colorIndex: p.colorIndex,
+    })),
+  }
+}
+
 export function instanceToJSON(inst: ShapeInstance): object {
   const mm = (v: number): number => v / 1000
   return {
@@ -506,41 +547,7 @@ export function instanceToJSON(inst: ShapeInstance): object {
     ...(inst.shapeKey !== null && {
       dims: Object.fromEntries(Object.entries(inst.dims).map(([k, v]) => [k, mm(v)])),
     }),
-    segments: inst.segments.map((seg, i) => ({
-      index: i,
-      ...(inst.shapeKey !== null && {
-        wallLabel: SHAPE_CONFIGS[inst.shapeKey]?.wallLabels[i],
-      }),
-      length: mm(seg.length),
-      wallH: mm(seg.wallH),
-      turnBefore: seg.turnBefore,
-      colorIndex: seg.colorIndex,
-      style: seg.style,
-      material: seg.material,
-      matScale: seg.matScale,
-      ...(seg.material === 'brick' && {
-        mortarColor: seg.mortarColor,
-        brickRelief: seg.brickRelief,
-      }),
-      openings: seg.openings.map((op) => ({
-        type: op.kind, // wire AP4 giữ key 'type' = kind (door/window/loading) cho OpeningJSON
-        round: op.round, // v9: dáng lỗ tách riêng → BuildingFromPlan render ellip đúng (trước bị mất)
-        x: mm(op.x),
-        w: mm(op.w),
-        h: mm(op.h),
-        yOffset: op.yOffset > 0 ? mm(op.yOffset) : null,
-      })),
-      panels: seg.panels.map((p) => ({
-        x: mm(p.x),
-        y: mm(p.y),
-        w: mm(p.w),
-        h: mm(p.h),
-        depth: mm(p.depth),
-        mode: p.mode,
-        material: p.material,
-        colorIndex: p.colorIndex,
-      })),
-    })),
+    segments: inst.segments.map((seg, i) => segmentToJSON(seg, i, inst.shapeKey)),
   }
 }
 
