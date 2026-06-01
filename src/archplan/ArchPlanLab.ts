@@ -32,6 +32,13 @@ import {
   type PositionedPanel,
 } from 'building-kit/parts/WallSingle'
 import { type PartResult, WALL_COLORS } from 'building-kit/tokens'
+import {
+  brickOptsOf,
+  DEFAULT_BRICK,
+  makeSurfaceMaterial,
+  wallColor,
+  WallMaterialCache,
+} from 'building-kit/wallMaterials' // wall material engine (shared editor + headless)
 import type GUI from 'lil-gui'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
@@ -58,13 +65,6 @@ import {
   type WorldRect,
   worldRectToSlabOpening,
 } from './build/build'
-import {
-  brickOptsOf,
-  DEFAULT_BRICK,
-  makeSurfaceMaterial,
-  wallColor,
-  WallMaterialCache,
-} from './build/materials' // wall material cache + surface shader — tách monolith
 import { DevHud } from './gui/devhud' // perf HUD dev (fps/budget/leak) — tách monolith
 import { type APGuiCtx, setupGridPanel, setupGroundPanel, setupGUI, setupSunPanel } from './gui/gui'
 import { type HighlightHost, HighlightOverlay } from './interaction/highlight' // flash viền phần đang chỉnh — tách monolith

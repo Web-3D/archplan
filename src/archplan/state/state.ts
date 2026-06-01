@@ -7,6 +7,7 @@
  */
 
 import type { RoofOverhang, RoofType } from 'building-kit/parts/RoofShape'
+import type { WallMaterial } from 'building-kit/wallMaterials'
 
 // ── State types ────────────────────────────────────────────────────────────────
 
@@ -22,19 +23,9 @@ export interface OpeningState {
   yOffset: number // mm từ sàn
 }
 
-// AP5 — surface material per wall face. 'none' = MeshToon màu phẳng (như cũ); còn lại =
-// procedural shader từ threejs-modules/shaders/fragment (lit qua MeshStandardNodeMaterial).
-// 'brick-3d' = gạch GEOMETRY THẬT (InstancedBrickWall, box instanced). Khác 'brick' (shader phẳng).
-export type WallMaterial =
-  | 'none'
-  | 'brick'
-  | 'concrete'
-  | 'wood'
-  | 'metal'
-  | 'brick-tex'
-  | 'brick-3d'
-  | 'wood-3d'
-  | 'wood-strip'
+// WallMaterial định nghĩa trong building-kit (engine chung editor + headless); re-export để file
+// archplan khác (gui/sections.ts…) import từ đây như cũ. 'brick-3d'/'wood-3d'/'wood-strip' = geometry THẬT.
+export type { WallMaterial }
 
 // Task A — tấm decor khắc trên mặt NGOÀI tường (+Z local). Geometry THẬT (box) → đổ bóng thật,
 // vật liệu riêng từng panel. 'raised' = ô nhô hẳn ra; 'recessed' = khung gờ molding nổi quanh ô
