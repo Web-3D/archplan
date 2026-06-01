@@ -18,7 +18,7 @@
 
 import './archplan-lab.css'
 
-import { renderBuildingState } from 'building-kit/BuildingFromState' // renderer chung lõi (Phase 1b)
+import { renderBuildingState } from 'building-kit/render/fromState' // renderer chung lõi (Phase 1b)
 import { makeSurfaceMaterial, WallMaterialCache } from 'building-kit/wallMaterials' // material engine
 import type GUI from 'lil-gui'
 import * as THREE from 'three'
