@@ -137,6 +137,7 @@ export class ArchPlanLab extends BaseWorld {
   private readonly siteGroup = new THREE.Group()
   private siteGeos: THREE.BufferGeometry[] = []
   private siteMats: THREE.Material[] = []
+  private siteShaders: { dispose(): void }[] = [] // vật liệu procedural lô (GrassGround…) — dispose riêng
   private _refreshSiteReadout: (() => void) | null = null
 
   private groundGeo: THREE.PlaneGeometry | null = null
@@ -926,7 +927,12 @@ export class ArchPlanLab extends BaseWorld {
   // nằm trên nền, không cắm xuyên). show=false → lift 0 (building về y=0). Lõi headless site-kit.
   private _renderSite(): void {
     this._clearSite()
-    const ctx: SiteRenderCtx = { group: this.siteGroup, geos: this.siteGeos, mats: this.siteMats }
+    const ctx: SiteRenderCtx = {
+      group: this.siteGroup,
+      geos: this.siteGeos,
+      mats: this.siteMats,
+      shaders: this.siteShaders,
+    }
     renderSiteState(this.site, ctx)
     const lift = this.site.show ? this.site.groundThick / 1000 : 0
     this.buildingGroup.position.y = lift
@@ -936,8 +942,10 @@ export class ArchPlanLab extends BaseWorld {
   private _clearSite(): void {
     for (const g of this.siteGeos) g.dispose()
     for (const m of this.siteMats) m.dispose()
+    for (const s of this.siteShaders) s.dispose() // GrassGround… NodeMaterial
     this.siteGeos = []
     this.siteMats = []
+    this.siteShaders = []
     this.siteGroup.clear()
   }
 
