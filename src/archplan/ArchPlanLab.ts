@@ -26,32 +26,24 @@ import {
   makePositionedSlab,
   makePositionedStairs,
 } from 'building-kit/parts/Structure'
+import { type PartResult } from 'building-kit/tokens'
 import {
-  makePositionedWall,
-  type PositionedOpening,
-  type PositionedPanel,
-} from 'building-kit/parts/WallSingle'
-import { type PartResult, WALL_COLORS } from 'building-kit/tokens'
-import {
-  brickOptsOf,
-  DEFAULT_BRICK,
-  makeSurfaceMaterial,
-  wallColor,
-  WallMaterialCache,
-} from 'building-kit/wallMaterials' // wall material engine (shared editor + headless)
+  assembleWall,
+  mergeWalls,
+  type WallAsmCtx,
+  type WallPlace,
+  type WallSpec,
+} from 'building-kit/wallAssembly' // shared wall assembler (editor + headless)
+import { makeSurfaceMaterial, WallMaterialCache } from 'building-kit/wallMaterials' // material engine
 import type GUI from 'lil-gui'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js'
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { PMREMGenerator } from 'three/webgpu'
-import {
-  type BrickOpening,
-  InstancedBrickWall,
-} from 'threejs-modules/components/InstancedBrickWall'
-import { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
-import { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
+import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
+import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
+import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
 import { AsphaltGround } from 'threejs-modules/shaders/ground/AsphaltGround'
 import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
 import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
@@ -914,25 +906,29 @@ export class ArchPlanLab extends BaseWorld {
     this._clearBuilding()
     // Gom geometry tường theo key material+color+scale (world-space) → merge 1 lần ở cuối.
     const buckets = new Map<string, THREE.BufferGeometry[]>()
+    const ctx: WallAsmCtx = {
+      cache: this.wallMats,
+      buckets,
+      group: this.buildingGroup,
+      geos: this.buildingGeos,
+      brick3d: this.brick3dWalls,
+      wood: this.woodWalls,
+      strip: this.stripWalls,
+    }
     // Footprint cầu thang tầng fi → lỗ khoét slab tầng fi+1.
     const stairHoles = this._collectStairHoles()
     let yAcc = 0
     for (let fi = 0; fi < this.state.floors.length; fi++) {
-      yAcc += this._buildFloor(fi, yAcc, stairHoles.get(fi) ?? [], buckets)
+      yAcc += this._buildFloor(fi, yAcc, stairHoles.get(fi) ?? [], ctx)
     }
-    this._mergeWallBuckets(buckets)
+    mergeWalls(ctx)
     this.wallMats.sweep(new Set(buckets.keys())) // dispose material không còn dùng
     if (this.sun) this.sun.shadow.needsUpdate = true // geometry đổi → shadow map vẽ lại 1 lần
     this.heightGridSystem?.update(this.buildingGroup)
   }
 
   // Build 1 tầng → trả về độ cao (lift + floorH) để cộng dồn cho tầng kế.
-  private _buildFloor(
-    fi: number,
-    yAcc: number,
-    holesHere: WorldRect[],
-    buckets: Map<string, THREE.BufferGeometry[]>
-  ): number {
+  private _buildFloor(fi: number, yAcc: number, holesHere: WorldRect[], ctx: WallAsmCtx): number {
     const floor = this.state.floors[fi]
     const isGround = fi === 0
     let maxLift = 0
@@ -945,7 +941,7 @@ export class ArchPlanLab extends BaseWorld {
         inst.segments.length > 0 ? Math.max(...inst.segments.map((s) => s.wallH)) / 1000 : 3
       if (instHm > maxFloorH) maxFloorH = instHm
       computeWallConfigs(inst, wallBase).forEach((cfg, si) => {
-        this._assembleFromConfig(cfg, buckets)
+        this._assembleFromConfig(cfg, ctx)
         this._addWallPickBox(cfg, inst.id, si) // SPIKE brush: 1 box vô hình/tường để click-paint
         this._addOpeningPickBox(cfg, inst.id, si) // Move tool: box riêng mỗi cửa → kéo trên mặt tường
       })
@@ -973,182 +969,54 @@ export class ArchPlanLab extends BaseWorld {
     return holes
   }
 
-  private _assembleFromConfig(cfg: WallConfig, buckets: Map<string, THREE.BufferGeometry[]>): void {
+  // Adapter editor → shared: WallConfig (m) + SegmentState (mm) → WallPlace/WallSpec (m) →
+  // assembleWall (building-kit). Dispatch material + merge + instanced = wallAssembly.ts (dùng chung
+  // headless). Pick box thêm RIÊNG ở _buildFloor (editor-only).
+  private _assembleFromConfig(cfg: WallConfig, ctx: WallAsmCtx): void {
     const { seg } = cfg
-    if (seg.material === 'brick-3d') {
-      this._assembleBrickWall(cfg) // geometry thật instanced, không merge
-      return
-    }
-    if (seg.material === 'wood-3d') {
-      this._assembleWoodWall(cfg) // ván gỗ ngang instanced
-      return
-    }
-    if (seg.material === 'wood-strip') {
-      this._assembleStripWall(cfg) // ván gỗ 1 khối ribbon (merge được)
-      return
-    }
-    // Tường phẳng (none + surface shader): round=true → lỗ ELLIP thật (custom holes-geo trong
-    // makePositionedWall). kind giữ door/window/loading cho semantics; round = cờ cắt ellip (v9 tách rời).
-    const openings: PositionedOpening[] = seg.openings.map((op) => ({
-      type: op.kind,
-      x: op.x / 1000,
-      w: op.w / 1000,
-      h: op.h / 1000,
-      yOffset: op.yOffset / 1000, // pass thẳng (kể cả ÂM) → bán nguyệt khi kéo xuống dưới sàn
-      round: op.round,
-    }))
-    // AP5: material thật theo key (none=MeshToon, còn lại=surface shader lit). Material truyền
-    // vào makePositionedWall chỉ cho temp mesh — geometry bake xong rồi bỏ (merge theo key sau).
-    const key = this.wallMats.wallKey(seg)
-    const result = makePositionedWall({
+    const place: WallPlace = {
       w: cfg.w,
       h: cfg.h,
       depth: cfg.depth,
-      style: seg.style,
+      rotationY: cfg.rotationY,
       xOffset: cfg.xOffset,
       zOffset: cfg.zOffset,
       yBase: cfg.yBase,
-      rotationY: cfg.rotationY,
-      openings,
-      wallMaterial: this.wallMats.ensureMat(
-        key,
-        seg.material,
-        wallColor(seg),
-        seg.matScale,
-        brickOptsOf(seg)
-      ),
-      panels: this._resolvePanels(seg), // task A — decor mesh có userData.matKey riêng
-    })
-    // Bake world transform: clone từng mesh, applyMatrix4(matrixWorld), gom bucket theo matKey
-    // (tường = key mặc định; decor panel = matKey riêng → merge cùng vật liệu, ít draw call).
-    this._bakeToBucket(buckets, key, result.meshes)
-    for (const geo of result.geos) geo.dispose()
-  }
-
-  // Bake mesh → bucket theo userData.matKey (panel decor) hoặc defaultKey (tường).
-  private _bakeToBucket(
-    buckets: Map<string, THREE.BufferGeometry[]>,
-    defaultKey: string,
-    meshes: THREE.Object3D[]
-  ): void {
-    for (const mesh of meshes) {
-      mesh.updateMatrixWorld(true)
-      mesh.traverse((obj) => {
-        if (!(obj instanceof THREE.Mesh)) return
-        const baked = obj.geometry.clone()
-        baked.applyMatrix4(obj.matrixWorld)
-        const mk = typeof obj.userData.matKey === 'string' ? obj.userData.matKey : defaultKey
-        let bucket = buckets.get(mk)
-        if (!bucket) {
-          bucket = []
-          buckets.set(mk, bucket)
-        }
-        bucket.push(baked)
-      })
     }
+    assembleWall(place, this._segToSpec(seg), ctx)
   }
 
-  // Resolve panels của 1 segment → PositionedPanel (mét + material/matKey từ cache chung).
-  private _resolvePanels(seg: SegmentState): PositionedPanel[] {
-    return seg.panels.map((p) => {
-      const pColor = WALL_COLORS[p.colorIndex % WALL_COLORS.length]
-      const key = this.wallMats.matKey(p.material, pColor, 1, DEFAULT_BRICK)
-      return {
+  // SegmentState (mm) → WallSpec (m) cho shared assembler. Tách để _assembleFromConfig ≤ Rule-50.
+  private _segToSpec(seg: SegmentState): WallSpec {
+    return {
+      material: seg.material,
+      colorIndex: seg.colorIndex,
+      paintColor: seg.paintColor,
+      matScale: seg.matScale,
+      mortarColor: seg.mortarColor,
+      brickRelief: seg.brickRelief,
+      style: seg.style,
+      woodReveal: seg.woodReveal / 1000,
+      woodButt: seg.woodButt / 1000,
+      woodStepTilt: seg.woodStepTilt,
+      openings: seg.openings.map((op) => ({
+        kind: op.kind,
+        x: op.x / 1000,
+        w: op.w / 1000,
+        h: op.h / 1000,
+        yOffset: op.yOffset / 1000, // pass thẳng (kể cả ÂM) → bán nguyệt khi kéo xuống dưới sàn
+        round: op.round,
+      })),
+      panels: seg.panels.map((p) => ({
         x: p.x / 1000,
         y: p.y / 1000,
         w: p.w / 1000,
         h: p.h / 1000,
         depth: p.depth / 1000,
         mode: p.mode,
-        material: this.wallMats.ensureMat(key, p.material, pColor, 1, DEFAULT_BRICK),
-        matKey: key,
-      }
-    })
-  }
-
-  // brick-3d: dựng InstancedBrickWall (nền vữa + InstancedMesh gạch thật), đặt đúng transform tường,
-  // thêm thẳng vào buildingGroup (KHÔNG merge). Track để dispose. Cull gạch trong lỗ cửa/sổ.
-  private _assembleBrickWall(cfg: WallConfig): void {
-    const { seg } = cfg
-    const openings: BrickOpening[] = seg.openings.map((op) => ({
-      x: op.x / 1000,
-      y: op.yOffset / 1000, // pass thẳng (kể cả ÂM) → module clamp render vào tường, ellipse clip = bán nguyệt
-      w: op.w / 1000,
-      h: op.h / 1000,
-      round: op.round,
-    }))
-    const wall = new InstancedBrickWall({
-      width: cfg.w,
-      height: cfg.h,
-      depth: cfg.depth,
-      brickColor: wallColor(seg),
-      mortarColor: seg.mortarColor,
-      openings,
-    })
-    const g = wall.getGroup()
-    g.position.set(cfg.xOffset, cfg.yBase, cfg.zOffset)
-    g.rotation.y = (cfg.rotationY * Math.PI) / 180
-    this.buildingGroup.add(g)
-    this.brick3dWalls.push(wall)
-  }
-
-  // wood-3d: WoodSidingWall (ván gỗ ngang instanced) — màu gỗ từ colorIndex. Chưa cull lỗ cửa.
-  private _assembleWoodWall(cfg: WallConfig): void {
-    const { seg } = cfg
-    const wall = new WoodSidingWall({
-      width: cfg.w,
-      height: cfg.h,
-      depth: cfg.depth,
-      woodColor: wallColor(seg),
-    })
-    const g = wall.getGroup()
-    g.position.set(cfg.xOffset, cfg.yBase, cfg.zOffset)
-    g.rotation.y = (cfg.rotationY * Math.PI) / 180
-    this.buildingGroup.add(g)
-    this.woodWalls.push(wall)
-  }
-
-  // wood-strip: WoodSidingStrip (ván gỗ 1 khối ribbon) — màu gỗ từ colorIndex. 1 mesh, merge được.
-  // Khoét lỗ cửa/sổ: clip dải gỗ + jamb reveal (cửa yOffset=0, sổ mặc định bệ 900mm).
-  private _assembleStripWall(cfg: WallConfig): void {
-    const { seg } = cfg
-    const openings = seg.openings.map((op) => ({
-      x: op.x / 1000,
-      y: op.yOffset / 1000, // pass thẳng (kể cả ÂM) → module clamp render vào tường, ellipse clip = bán nguyệt
-      w: op.w / 1000,
-      h: op.h / 1000,
-      round: op.round,
-    }))
-    const wall = new WoodSidingStrip({
-      width: cfg.w,
-      height: cfg.h,
-      depth: cfg.depth,
-      reveal: seg.woodReveal / 1000,
-      butt: seg.woodButt / 1000,
-      stepTiltDeg: seg.woodStepTilt,
-      woodColor: wallColor(seg),
-      openings,
-    })
-    const m = wall.getMesh()
-    m.position.set(cfg.xOffset, cfg.yBase, cfg.zOffset)
-    m.rotation.y = (cfg.rotationY * Math.PI) / 180
-    this.buildingGroup.add(m)
-    this.stripWalls.push(wall)
-  }
-
-  // Merge các geometry tường cùng key (material+color+scale) thành 1 mesh → tối thiểu draw calls.
-  private _mergeWallBuckets(buckets: Map<string, THREE.BufferGeometry[]>): void {
-    for (const [key, geos] of buckets) {
-      if (geos.length === 0) continue
-      const merged = mergeGeometries(geos, false)
-      for (const g of geos) g.dispose() // clones đã copy vào merged → giải phóng
-      const entry = this.wallMats.getEntry(key)
-      if (!merged || !entry) continue
-      this.buildingGeos.push(merged)
-      const mesh = new THREE.Mesh(merged, entry.mat)
-      mesh.castShadow = true
-      mesh.receiveShadow = true
-      this.buildingGroup.add(mesh)
+        material: p.material,
+        colorIndex: p.colorIndex,
+      })),
     }
   }
 
