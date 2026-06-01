@@ -1,9 +1,9 @@
 /**
  * VỊ TRÍ   — archplan/src/archplan/state/persistence.ts
  * VAI TRÒ  — I/O thiết kế: autosave localStorage + Save/Load file (File System Access API + fallback)
- *            + export AP4 JSON. THUẦN I/O — không đụng scene/GUI (caller tự rebuild sau load).
- * LIÊN HỆ  — Tách từ ArchPlanLab. Dùng serializeDesign/parseDesign/buildingStateToJSON ở ./state.
- *            Save = snapshot ĐẦY ĐỦ (nạp lại được); exportJSON = AP4 (1 chiều cho BuildingFromPlan).
+ *            + download 1 bản copy (lossless). THUẦN I/O — không đụng scene/GUI (caller tự rebuild sau load).
+ * LIÊN HỆ  — Tách từ ArchPlanLab. Dùng serializeDesign/parseDesign ở ./state.
+ *            Save = ghi vào file-handle (đè); exportJSON = download bản copy (CÙNG format lossless, load lại được).
  *
  * CÁCH DÙNG:
  *   const store = new DesignStore()
@@ -17,7 +17,7 @@
  * DISPOSE: không giữ GPU/listener — chỉ 1 FileSystemFileHandle (GC tự lo).
  */
 
-import { type BuildingState, buildingStateToJSON, parseDesign, serializeDesign } from './state'
+import { type BuildingState, parseDesign, serializeDesign } from './state'
 
 const STORAGE_KEY = 'archplan:autosave'
 type PickedDesign = { text: string; handle: FileSystemFileHandle | null }
@@ -87,9 +87,10 @@ export class DesignStore {
     return st
   }
 
-  // Export AP4 (1 chiều cho BuildingFromPlan render) → download. KHÁC saveFile (snapshot đầy đủ).
+  // Download 1 bản copy LOSSLESS (serializeDesign) — khác saveFile ở chỗ KHÔNG gắn/đè file-handle.
+  // Format = đúng cái Load đọc được + BuildingRenderer/headless dùng (BuildingState). AP4 lossy đã bỏ.
   exportJSON(state: BuildingState): void {
-    this._download(JSON.stringify(buildingStateToJSON(state), null, 2), 'archplan.json')
+    this._download(serializeDesign(state), 'archplan.json')
   }
 
   // { text, handle } hoặc null (cancel/lỗi). FSA → có handle; fallback input → handle null.
