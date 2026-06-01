@@ -25,7 +25,7 @@ function sliderRow(
   row.style.cssText = 'display:flex;align-items:center;gap:4px;margin-bottom:3px'
   const lbl = document.createElement('span')
   lbl.textContent = label
-  lbl.style.cssText = 'width:64px;flex-shrink:0;font-size:10px'
+  lbl.style.cssText = 'width:64px;flex-shrink:0'
   const sl = document.createElement('input')
   sl.type = 'range'
   sl.min = String(min)
@@ -50,7 +50,7 @@ function toggleRow(label: string, initial: boolean, onChange: (on: boolean) => v
   cb.addEventListener('change', () => onChange(cb.checked))
   const lbl = document.createElement('span')
   lbl.textContent = label
-  lbl.style.cssText = 'cursor:pointer;font-size:11px'
+  lbl.style.cssText = 'cursor:pointer'
   lbl.addEventListener('click', () => {
     cb.checked = !cb.checked
     onChange(cb.checked)
@@ -70,7 +70,7 @@ function selectRow<T extends string>(
   row.style.cssText = 'display:flex;align-items:center;gap:4px;margin-bottom:4px'
   const lbl = document.createElement('span')
   lbl.textContent = label
-  lbl.style.cssText = 'width:64px;flex-shrink:0;font-size:10px'
+  lbl.style.cssText = 'width:64px;flex-shrink:0'
   const sel = document.createElement('select')
   sel.className = 'ap-ground-sel'
   sel.style.flex = '1'
