@@ -1,0 +1,37 @@
+import { resolve } from 'path'
+import checker from 'vite-plugin-checker'
+import tsconfigPaths from 'vite-tsconfig-paths'
+
+export default {
+  root: 'src/',
+
+  resolve: {
+    dedupe: ['three'], // 1 instance Three.js dùng chung archplan + building-kit + threejs-modules
+    alias: {
+      '@': resolve(__dirname, 'src'),
+      'threejs-modules': resolve(__dirname, '../threejs-modules'),
+      'building-kit': resolve(__dirname, '../threejs-modules/building'), // shared building engine
+    },
+  },
+
+  server: {
+    host: true,
+    port: 3002, // 3001 = Doraemon
+    open: !('SANDBOX_URL' in process.env || 'CODESANDBOX_HOST' in process.env),
+  },
+
+  build: {
+    outDir: '../dist',
+    emptyOutDir: true,
+    sourcemap: true,
+    rollupOptions: {
+      input: { main: resolve(__dirname, 'src/index.html') },
+      output: { manualChunks: { 'three-vendor': ['three'] } },
+    },
+  },
+
+  plugins: [
+    tsconfigPaths(),
+    checker({ typescript: true, eslint: { useFlatConfig: true, lintCommand: 'eslint .' } }),
+  ],
+}

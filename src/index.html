@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ArchPlan — Building Tool</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0e1a16;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      /* #stage = positioned container: ArchPlanLab gắn GUI/HUD/palette vào canvas.parentElement */
+      #stage {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+      }
+      #app {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <canvas id="app"></canvas>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

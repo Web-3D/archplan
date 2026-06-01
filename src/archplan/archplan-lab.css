@@ -1,0 +1,1094 @@
+/**
+ * archplan-lab.css — ArchPlan Lab custom UI
+ * File này dành riêng cho styling của ArchPlanLab GUI.
+ * Chỉnh sửa thoải mái — không ảnh hưởng BuildingLab hay UI chính.
+ *
+ * Cách dùng:
+ *   - CSS variables ở :root để thay màu nhanh toàn bộ
+ *   - Class "archplan-lab" trên root GUI element
+ *   - Class "ap-actions" trên folder Actions → compact pill buttons
+ *   - Class "ap-shape-sel" → dropdown "＋" thêm shape, cuối hàng tab shape
+ *   - Class "ap-tab-bar" / "ap-tab-btn" → tab ngang chuyển instance/section
+ *   - Class "ap-transform-row" → X/Z coord + rotation select cùng 1 hàng
+ *   - Class "ap-btn-reset" / "ap-btn-remove" trên controller để màu riêng
+ *
+ * NOTE: lil-gui dùng prefix "lil-" cho tất cả class — lil-children, lil-controller,
+ *       lil-widget, lil-title. Không dùng unprefixed versions.
+ */
+
+/* ── Variables — đổi ở đây để thay đổi toàn bộ giao diện ────────────────── */
+:root {
+  /* Jade đậm — bộ nền phân cấp (ngoài → trong) + accent vàng */
+  --bg-1: #0e2e26; /* root panel — ngoài cùng, tối nhất */
+  --bg-2: #14443a; /* floor */
+  --bg-3: #1c5c4c; /* shape */
+  --bg-4: #2a7862; /* section */
+  --bg-5: #459a80; /* widget/input + panel cấp 4 (Foundation/Stairs/Wall) */
+  --bg-6: #62c2a4; /* panel cấp 5 (opening) + nút "open" + widget cấp 4 */
+  --bg-7: #8ad9c0; /* widget/input cấp 5 — sáng nhất, nổi trên panel bg-6 */
+  --ap-accent: #c9a24e; /* nhấn vàng (thanh slide / thumb) */
+  --ap-text: #d8e2dc; /* chữ trên nền tối */
+  --ap-text-dark: #0e2e26; /* chữ trên nền sáng (bg-5) */
+
+  --ap-bg: var(--bg-1);
+  --ap-border: rgba(201, 162, 78, 0.3); /* viền theo accent */
+  --ap-title-bg: rgba(7, 22, 18, 0.95); /* tối hơn bg-1 */
+  --ap-title-color: var(--ap-accent);
+  --ap-title-grab-bg: rgba(14, 46, 38, 0.98);
+
+  --ap-action-gap: 5px;
+  --ap-action-radius: 14px;
+  --ap-action-h: 28px;
+  --ap-action-bg: rgba(14, 46, 38, 0.85); /* tab/nút thường — tối hơn active */
+  --ap-action-bg-hover: rgba(42, 120, 98, 0.9); /* tone bg-4 */
+  --ap-action-color: var(--ap-text);
+  --ap-action-border: var(--ap-border);
+
+  --ap-reset-color: var(--ap-accent);
+  --ap-remove-color: #c06060;
+}
+
+/* ── Root panel ───────────────────────────────────────────────────────────── */
+.lil-gui.archplan-lab {
+  --background-color: var(--ap-bg);
+  --widget-color: var(--bg-5);
+  --hover-color: #50ad90; /* bg-5 sáng hơn chút */
+  --focus-color: #5cb89b;
+  --number-color: var(--ap-text-dark);
+  --string-color: var(--ap-text-dark);
+  --font-size: 9px;
+  --input-font-size: 9px;
+  border: 1px solid var(--ap-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Tiêu đề root — cursor:grab vì kéo được ─────────────────────────────── */
+.lil-gui.archplan-lab > .lil-title {
+  background: var(--ap-title-bg);
+  color: var(--ap-title-color);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: grab;
+  user-select: none;
+  border-radius: 5px 5px 0 0;
+}
+
+.lil-gui.archplan-lab > .lil-title:hover {
+  background: var(--ap-title-grab-bg);
+}
+
+/* ── Footer cố định đáy panel — Build / Reset / JSON (thay folder Actions) ─── */
+.ap-footer {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--ap-border);
+  background: var(--ap-title-bg);
+  border-radius: 0 0 5px 5px;
+}
+.ap-footer-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 24px;
+  border-radius: 8px;
+  background: var(--ap-action-bg);
+  border: 1px solid var(--ap-action-border);
+  color: var(--ap-action-color);
+  font-size: 9px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+.ap-footer-btn:hover {
+  background: var(--ap-action-bg-hover);
+  color: #eef3f0;
+}
+.ap-footer-reset {
+  color: var(--ap-reset-color);
+}
+
+/* ── Shape select "＋" — cuối hàng tab shape, chỉ hiện dấu + (ẩn mũi tên ▾) ── */
+.ap-shape-sel {
+  flex: 0 0 auto;
+  width: 22px; /* gọn như nút "＋" của floor */
+  height: 18px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  background: var(--bg-5);
+  border: 1px solid var(--ap-border);
+  color: var(--ap-text-dark);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-align: center;
+  text-align-last: center; /* căn giữa dấu + cả khi đóng */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+}
+
+/* ── Undo / Redo row — 2 nút thấp ở đáy shape panel, chia đều bề ngang ──── */
+.ap-undo-row {
+  display: flex;
+  gap: 4px;
+  padding: 2px 8px 4px;
+  box-sizing: border-box;
+}
+
+.ap-undo-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 15px;
+  padding: 0;
+  box-sizing: border-box;
+  border-radius: 6px;
+  background: var(--ap-action-bg);
+  border: 1px solid var(--ap-action-border);
+  color: var(--ap-action-color);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s;
+  font-family: inherit;
+}
+
+.ap-undo-btn:hover {
+  background: var(--ap-action-bg-hover);
+  color: #eef3f0;
+}
+
+/* ── Reset Shape button — amber hint ────────────────────────────────────── */
+.ap-btn-reset > .lil-widget > button {
+  color: var(--ap-reset-color) !important;
+  opacity: 0.75;
+}
+.ap-btn-reset > .lil-widget > button:hover {
+  opacity: 1;
+}
+
+/* ── Remove / Close buttons (Shape/Col/Floor) — nửa bề ngang, căn giữa, nền bậc 1, chữ đỏ ── */
+.ap-btn-remove > .lil-widget {
+  justify-content: center;
+}
+.ap-btn-remove > .lil-widget > button {
+  width: 50%;
+  color: var(--ap-remove-color) !important;
+  background: var(--bg-1);
+  opacity: 0.85;
+}
+.ap-btn-remove > .lil-widget > button:hover {
+  opacity: 1;
+}
+
+/* ── Add Column — nút nhỏ, gọn, nền xanh bậc 4 ───────────────────────────── */
+.ap-addcol > .lil-widget {
+  justify-content: flex-start;
+}
+.ap-addcol > .lil-widget > button {
+  width: auto;
+  min-width: 0;
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--ap-text);
+  background: var(--bg-5);
+  border: 1px solid var(--ap-border);
+  border-radius: 3px;
+}
+.ap-addcol > .lil-widget > button:hover {
+  background: var(--hover-color);
+  color: var(--ap-text-dark);
+}
+
+/* ── Wall depth control — highlight subtle ───────────────────────────────── */
+.ap-wall-depth > .lil-name {
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* ── Transform row — X/Z + rotation on one line ─────────────────────────── */
+.ap-transform-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px 4px;
+}
+
+.ap-coord-field {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.ap-coord-field > span {
+  font-size: 8px;
+  color: var(--ap-action-color);
+  flex-shrink: 0;
+  font-family: var(--font-family-mono, monospace);
+}
+
+.ap-coord-field > input[type='number'] {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-6); /* bậc kế sáng hơn bg-5 — đồng bộ ô input số/chuỗi */
+  border: 1px solid var(--ap-border);
+  border-radius: 3px;
+  color: var(--ap-text-dark);
+  font-size: 8px;
+  font-family: inherit;
+  padding: 1px 4px;
+  height: 18px;
+  -moz-appearance: textfield;
+}
+.ap-coord-field > input[type='number']::-webkit-outer-spin-button,
+.ap-coord-field > input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.ap-rot-sel {
+  flex: 0 0 54px;
+  background: var(--bg-6);
+  border: 1px solid var(--ap-border);
+  border-radius: 3px;
+  color: var(--ap-text-dark);
+  font-size: 8px;
+  font-family: inherit;
+  height: 18px;
+}
+
+/* .lil-name của Foundation/Slab chứa [label][tick] — CỐ ĐỊNH 1/3 bề ngang hàng,
+   slider + ô số chiếm 2/3 còn lại. */
+.ap-cb-ctrl > .lil-name {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 43.33%;
+  min-width: 0;
+  overflow: hidden;
+}
+/* Nhãn (Foundation / Slab) trước ô tick — co giãn trong vùng name, ellipsis nếu dài. */
+.ap-name-pre {
+  flex: 1;
+  min-width: 0;
+  font-size: 8px;
+  color: var(--ap-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Ô tick sau nhãn. Selector ĐỦ MẠNH (0,4,1) để đè rule ô-số của lil-gui (.lil-has-slider
+   input: width 27% + min-width 38px) vốn cũng match checkbox này. appearance:none +
+   min-width:0 để width/height 5px thật sự ăn. Hộp đặc màu accent khi bật. */
+.ap-cb-ctrl.lil-number.lil-has-slider input.ap-name-cb {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 10px;
+  min-width: 0;
+  height: 10px;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+  border: 1px solid var(--ap-border);
+  border-radius: 2px;
+  background: var(--bg-5);
+  /* dấu ✓ của lil-gui dùng --checkbox-size cho font-size (mặc định 13.5px → tràn ô).
+     Thu lại cho vừa ô 10px; màu tối để nổi trên nền vàng khi bật. */
+  --checkbox-size: 8px;
+  color: var(--ap-text-dark);
+}
+.ap-cb-ctrl.lil-number.lil-has-slider input.ap-name-cb:checked {
+  background: var(--ap-accent);
+  border-color: var(--ap-accent);
+}
+/* Ô nhập số của 2 hàng này hẹp đi 5px (giảm cả width % lẫn min-width để chắc chắn). */
+.ap-cb-ctrl.lil-number.lil-has-slider input {
+  width: calc(var(--slider-input-width) - 5px);
+  min-width: calc(var(--slider-input-min-width) - 5px);
+}
+
+/* ── Xếp controller NGANG bằng class (KHÔNG wrapper div → lil-gui destroy không lỗi) ──── */
+/* inline-flex để các controller liền kề flow ngang; controller block kế tiếp xuống dòng mới. */
+.archplan-lab .lil-controller.ap-half {
+  display: inline-flex;
+  width: 49%;
+  box-sizing: border-box;
+  vertical-align: top;
+  padding-left: 6px;
+  padding-right: 2px;
+}
+.archplan-lab .lil-controller.ap-half > .lil-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 3 cột chia đều 1 hàng: Height | Width | Color (mỗi cột 33%, chừa 1% tránh wrap). */
+.archplan-lab .lil-controller.ap-third {
+  display: inline-flex;
+  width: 33%;
+  box-sizing: border-box;
+  vertical-align: top;
+  padding-left: 6px;
+  padding-right: 2px;
+}
+/* Color (.ap-noname): ẩn nhãn, select chiếm hết nửa hàng (option đầu "Color" tự làm nhãn). */
+.archplan-lab .lil-controller.ap-noname > .lil-name {
+  display: none;
+}
+.archplan-lab .lil-controller.ap-noname > .lil-widget,
+.archplan-lab .lil-controller.ap-noname > .lil-widget select {
+  width: 100%;
+  min-width: 0;
+}
+/* Material 4 select: mỗi ô CỐ ĐỊNH 50px (text dài KHÔNG nới) + canh đều: khe giữa = lề 2 mép = g,
+   với g=(100%−4×50px)/5. Mỗi ô lề 2 bên g/2; ô ĐẦU thêm g/2 bên trái, ô CUỐI thêm g/2 bên phải
+   → mọi khoảng cách bằng g. Tổng = 200px + 5g ≈ 100% (chừa 2px tránh wrap). */
+.archplan-lab .lil-controller.ap-mat {
+  display: inline-flex;
+  width: 50px;
+  box-sizing: border-box;
+  vertical-align: top;
+  margin: 0 calc((100% - 202px) / 10);
+  padding: 0;
+}
+.archplan-lab .lil-controller.ap-mat.ap-mat-first {
+  margin-left: calc((100% - 202px) / 5);
+}
+.archplan-lab .lil-controller.ap-mat.ap-mat-last {
+  margin-right: calc((100% - 202px) / 5);
+}
+.archplan-lab .lil-controller.ap-mat > .lil-name {
+  display: none;
+}
+/* widget flex:1 → lấp hết 50px; select width:100% + overflow:hidden → clip chữ dài, KHÔNG nới ô. */
+.archplan-lab .lil-controller.ap-mat > .lil-widget {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+.archplan-lab .lil-controller.ap-mat > .lil-widget select {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Height/Width (.ap-dim): nhãn hiện ĐỦ (không cắt) + ô số FILL phần còn lại của cell (33% hoặc 49%). */
+.archplan-lab .lil-controller.ap-dim > .lil-name {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  overflow: visible;
+  padding-right: 8px;
+}
+.archplan-lab .lil-controller.ap-dim > .lil-widget {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  min-width: 0;
+}
+.archplan-lab .lil-controller.ap-dim > .lil-widget input {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 0;
+}
+/* (Đã gỡ margin-top:6px của ap-open-type select. Trước: tách select khỏi tab. Nay: để rule
+   .ap-tab-section>.lil-children>.lil-controller:first-child{margin-top:0} áp dụng → select sát
+   mép trên panel, KHỬ margin-collapse hở bg cấp trên → tab opening DÍNH liền panel như wall/cols.) */
+/* Opening 2 hàng (mesure / coordinate): nhãn trái cố định + 2 ô x/z chia đều phần còn lại. */
+.ap-open-rowlabel {
+  flex: 0 0 64px;
+  align-self: center;
+  font-size: 8px;
+  color: var(--ap-action-color);
+  font-family: var(--font-family-mono, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Tab bar — horizontal tabs for section switching ────────────────────── */
+.ap-tab-bar {
+  display: flex;
+  gap: 2px;
+  padding: 4px 8px 0; /* bottom 0 → tab active chạm liền panel bên dưới */
+  flex-wrap: nowrap;
+}
+
+.ap-tab-btn {
+  flex: 0 1 auto; /* không giãn full width → dồn trái; co được nếu quá nhiều tab */
+  max-width: 48px; /* cố định trần — tab nhỏ gọn */
+  min-width: 0;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px 4px 0 0; /* bo góc trên — kiểu tab website */
+  background: var(--ap-action-bg);
+  border: 1px solid var(--ap-action-border);
+  color: var(--ap-action-color);
+  font-size: 7px;
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    color 0.1s;
+  font-family: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ap-tab-btn:hover {
+  background: var(--ap-action-bg-hover);
+  color: #eef3f0;
+}
+
+/* Tab active: bỏ border đáy + màu nền set per-level (= màu panel → nối liền mạch).
+   margin-bottom -1px + z-index → tab đè lên mép trên panel, khử hairline hở giữa tab
+   và panel (liền mạch thật sự). */
+.ap-tab-btn.ap-tab-active {
+  border-color: rgba(201, 162, 78, 0.55);
+  border-bottom-color: transparent;
+  color: #eef3f0;
+  margin-bottom: -1px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Nút "＋" thêm tầng — hẹp, cố định cuối hàng tab (không co giãn như tab).
+   padding:0 + đủ rộng để chứa "＋" → không bị text-overflow thành "…". */
+.ap-tab-add {
+  flex: 0 0 22px;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: clip;
+}
+
+/* Nút "open" (thêm cửa/sổ) — bg-6 = ĐÚNG màu panel opening (cấp 5) để ĐỒNG NHẤT sáng, chữ tối.
+   DÍNH panel bên dưới như tab active: border-bottom trong suốt + margin-bottom -1px + z-index →
+   đè mép trên panel, khử hairline hở (cùng cơ chế .ap-tab-active của struct/wall/cols). */
+.archplan-lab .ap-tab-bar .ap-tab-btn.ap-tab-open {
+  background: var(--bg-6);
+  color: var(--ap-text-dark);
+  border-bottom-color: transparent;
+  margin-bottom: -1px;
+  position: relative;
+  z-index: 1;
+}
+.archplan-lab .ap-tab-bar .ap-tab-btn.ap-tab-open:hover {
+  background: #7ad0b6; /* bg-6 sáng hơn chút */
+  color: var(--ap-text-dark);
+}
+
+/* ── Section folders in tab mode — strip title + border ─────────────────── */
+.lil-gui.ap-tab-section > .lil-title {
+  display: none !important;
+}
+
+.lil-gui.ap-tab-section {
+  --background-color: transparent;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+}
+/* PARENT-CHILD DÍNH (luật chung MỌI cấp): phần tử ĐẦU TIÊN trong panel (controller / tab-bar con /
+   transform row / folder) nếu có margin-top → margin-collapse lòi ra ngoài panel → hở màu cấp trên
+   giữa tab và panel. Ép 0 cho MỌI first-child (không chỉ .lil-controller) → mọi panel ở mọi cấp
+   (floor/shape/section/wall/cols/opening + override riêng như ap-open-type) dính sát hàng tab. */
+.ap-tab-section > .lil-children > :first-child {
+  margin-top: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TABS TEMPLATE — folder-style nested tabs · TẠO 1 LẦN, MỌI CẤP DÙNG CHUNG.
+   Pattern web "Tabs": ấn 1 tab ngang → mở tabpanel đó + đóng cái khác.
+   ARIA map: tablist=.ap-tab-bar · tab=.ap-tab-btn · tabpanel=.ap-tab-section.
+   DÍNH: tab active CÙNG MÀU panel con (--ap-kids-bg) + .ap-tab-active(-1px) → liền khối.
+   THÊM CẤP MỚI = 1 selector set 4 biến (template lo phần còn lại):
+     --ap-bg (nền panel) · --ap-kids-bg (tab active + panel con, 1 bậc sáng hơn)
+     --ap-fs (font nội dung) · --ap-tab-fs (font tab trong panel này).
+   Plain CSS không đếm độ sâu → vẫn cần selector theo số ancestor nhưng CHỈ để GÁN MÀU.
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* TEMPLATE — cấu trúc + connection, KHÔNG lặp lại giữa các cấp. */
+.lil-gui.ap-tab-section {
+  background: var(--ap-bg);
+  --font-size: var(--ap-fs);
+  --input-font-size: var(--ap-fs);
+}
+.ap-tab-section > .lil-children > .ap-tab-bar > .ap-tab-btn,
+.archplan-lab > .lil-children > .ap-tab-bar > .ap-tab-btn {
+  font-size: var(--ap-tab-fs, 7px);
+}
+.ap-tab-section > .lil-children > .ap-tab-bar > .ap-tab-btn.ap-tab-active,
+.archplan-lab > .lil-children > .ap-tab-bar > .ap-tab-btn.ap-tab-active {
+  background: var(--ap-kids-bg);
+}
+
+/* KHAI BÁO MÀU THEO CẤP — sáng dần bg-2 → bg-6 (chỉ phần khác nhau). */
+.archplan-lab {
+  --ap-kids-bg: var(--bg-2); /* tab floor */
+  --ap-tab-fs: 9px;
+}
+.archplan-lab > .lil-children > .ap-tab-section {
+  /* cấp 1 · FLOOR */
+  --ap-bg: var(--bg-2);
+  --ap-kids-bg: var(--bg-3);
+  --ap-fs: 9px;
+  --ap-tab-fs: 8px;
+}
+
+.ap-tab-section > .lil-children > .ap-tab-section {
+  /* cấp 2 · SHAPE */
+  --ap-bg: var(--bg-3);
+  --ap-kids-bg: var(--bg-4);
+  --ap-fs: 8px;
+  --ap-tab-fs: 7px;
+}
+
+.ap-tab-section .ap-tab-section > .lil-children > .ap-tab-section {
+  /* cấp 3 · SECTION (Struct/Roof/Cols/Walls) */
+  --ap-bg: var(--bg-4);
+  --ap-kids-bg: var(--bg-5);
+  --ap-fs: 7px;
+  --ap-tab-fs: 7px;
+}
+
+.ap-tab-section .ap-tab-section .ap-tab-section > .lil-children > .ap-tab-section {
+  /* cấp 4 · WALL / SUBSTRUCT / COLUMN */
+  --ap-bg: var(--bg-5);
+  --ap-kids-bg: var(--bg-6);
+  --ap-fs: 7px;
+  --ap-tab-fs: 7px;
+  --widget-color: var(--bg-6);
+}
+
+.ap-tab-section .ap-tab-section .ap-tab-section .ap-tab-section > .lil-children > .ap-tab-section {
+  /* cấp 5 · OPENING (sâu nhất — clamp bg-6; panel bg-6 = nút open → dính đồng nhất) */
+  --ap-bg: var(--bg-6);
+  --ap-kids-bg: var(--bg-6);
+  --ap-fs: 7px;
+  --ap-tab-fs: 7px;
+  --widget-color: var(--bg-7);
+}
+/* OPENING extras (cấp 5): panel sáng bg-6 → input bg-7 + label chữ tối cho đọc rõ. */
+/* Input số/chuỗi trong opening: bg-7 (sáng hơn panel bg-6) — ghi đè rule input bg-6 toàn cục. */
+.ap-tab-section
+  .ap-tab-section
+  .ap-tab-section
+  .ap-tab-section
+  > .lil-children
+  > .ap-tab-section
+  .lil-number
+  input,
+.ap-tab-section
+  .ap-tab-section
+  .ap-tab-section
+  .ap-tab-section
+  > .lil-children
+  > .ap-tab-section
+  .lil-string
+  input {
+  background: var(--bg-7);
+}
+/* Label opening: chữ JADE ĐẬM (--ap-text-dark) — trầm, đọc rõ trên panel bg-6 sáng. */
+.ap-tab-section
+  .ap-tab-section
+  .ap-tab-section
+  .ap-tab-section
+  > .lil-children
+  > .ap-tab-section
+  .lil-controller
+  > .lil-name {
+  color: var(--ap-text-dark);
+}
+
+/* Bỏ thanh gạch dọc xám (lil-gui nesting indicator) + indent bên trái mọi panel con. */
+.lil-gui.archplan-lab .lil-gui .lil-gui > .lil-children {
+  border-left: none;
+  margin-left: 0;
+}
+
+/* Stairs + Foundation (subfolder trong Structure) — bộ phận bên trong fontsize 7px */
+.lil-gui.archplan-lab .ap-stairs,
+.lil-gui.archplan-lab .ap-found {
+  --font-size: 7px;
+  --input-font-size: 7px;
+}
+
+/* ── Chuẩn hóa controller nhập số/slider (lil-gui) — 1 khuôn dùng chung ────── */
+/* Style 1 lần cho .lil-number / .lil-string → Structure/Roof/Dims/Walls/Segments
+   và mọi mục nhập thêm sau tự theo. Input khớp ô tọa độ (.ap-coord-field), slider
+   nhỏ gọn + bo tròn mượt. Đổi var lil-gui = chỉnh toàn bộ cùng lúc. */
+.lil-gui.archplan-lab {
+  --widget-height: 18px;
+  --padding: 3px;
+  --spacing: 3px;
+  --widget-border-radius: 4px;
+  --slider-input-min-width: 38px;
+}
+
+/* Ô select (Color/material/type) — đồng bộ tông bg-6 với ô điền. */
+.archplan-lab .lil-controller select {
+  background: var(--bg-6);
+  color: var(--ap-text-dark);
+}
+/* Select TYPE cửa/sổ (window/door…) — nền VÀNG accent hệ thống cho nổi, phân biệt với select khác. */
+.archplan-lab .lil-controller.ap-open-type select {
+  background: var(--ap-accent);
+  color: var(--ap-text-dark);
+}
+/* Ô input số/chuỗi — đồng bộ với .ap-coord-field input. Nền bg-6 (bậc kế sáng hơn bg-5). */
+.archplan-lab .lil-controller.lil-number input,
+.archplan-lab .lil-controller.lil-string input {
+  background: var(--bg-6);
+  border: 1px solid var(--ap-border);
+  border-radius: 3px;
+  color: var(--ap-text-dark);
+  height: 18px;
+  padding: 1px 4px;
+}
+
+/* Slider — giống Grid Scanner: thanh ngang MỎNG + nút tròn nhỏ (thumb) để kéo.
+   Số liệu để ô riêng bên phải (style ở rule input phía trên). */
+.archplan-lab .lil-controller.lil-number .lil-slider {
+  height: 3px; /* mảnh — nửa so với trước */
+  border-radius: 2px;
+  overflow: visible; /* cho nút tròn lòi ra khỏi thanh mỏng */
+  background: #ffffff; /* track trắng — nút (thumb) vàng accent nổi trên nền trắng */
+}
+/* Giữ track trắng cả khi hover/kéo (đè --hover-color/--focus-color của lil-gui) */
+.lil-gui.archplan-lab .lil-controller.lil-number .lil-slider:hover,
+.lil-gui.archplan-lab .lil-controller.lil-number .lil-slider.lil-active {
+  background: #ffffff;
+}
+.archplan-lab .lil-controller.lil-number .lil-fill {
+  position: relative;
+  background: transparent; /* track đồng màu như native range */
+  border-right: none; /* bỏ vạch knob 2px mặc định của lil-gui */
+}
+/* Nút tròn (thumb) tại vị trí giá trị = mép phải của fill */
+.archplan-lab .lil-controller.lil-number .lil-fill::after {
+  content: '';
+  position: absolute;
+  right: -5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--ap-accent);
+  border: 1px solid rgba(10, 16, 30, 0.55);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+/* Tên controller — đồng tông xanh nhạt như label tọa độ */
+.archplan-lab .lil-controller > .lil-name {
+  color: var(--ap-action-color);
+}
+
+/* ── Grid Scanner panel — bộ màu Thanh Hóa coban (RIÊNG, không dùng jade) ──── */
+/* Panel đứng riêng ngoài .archplan-lab → tự theme coban: #16265C→#DCE6F2 + accent
+   #2A4D9B. 2 tab ngang Coordinate | Measure. */
+/* Wrapper cột trái — Scanner + Sun panel xếp dọc (Sun nằm dưới Scanner, co giãn theo expand). */
+.ap-left-tools {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ap-scan-panel {
+  width: 75px;
+  background: rgba(22, 38, 92, 0.9); /* bg-1 #16265C */
+  border: 1px solid #2a4d9b; /* accent coban */
+  border-radius: 4px;
+  padding: 5px 7px;
+  color: #dce6f2; /* text sứ trắng-xanh */
+  font: 10px/1.6 monospace;
+  backdrop-filter: blur(4px);
+}
+.ap-scan-title {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-weight: bold;
+  font-size: 8px;
+  margin-bottom: 4px;
+  color: #6e92c4; /* bg-4 */
+  cursor: pointer;
+}
+/* Thanh slide trong scanner — mảnh, thumb coban nhỏ */
+.ap-scan-panel input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 2px;
+  background: #2a4d9b;
+  border-radius: 2px;
+}
+.ap-scan-panel input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #dce6f2;
+  cursor: pointer;
+}
+
+/* Ô select panel Ground — full-width, theme coban khớp panel, gọn 7px (panel hẹp 75px). */
+.ap-ground-sel {
+  width: 100%;
+  box-sizing: border-box;
+  font: 7px/1.4 monospace;
+  color: #dce6f2;
+  background: #1c2f6b;
+  border: 1px solid #2a4d9b;
+  border-radius: 3px;
+  padding: 2px 4px;
+  cursor: pointer;
+  outline: none;
+}
+.ap-ground-sel:hover {
+  border-color: #4569c8;
+}
+
+/* 🎨 Palette swatch grid — lưới swatch cuộn được (scale nhiều màu/khay). Click = nạp màu cọ. */
+/* 🎨 Bảng pha màu thật — board oval, dab màu cong theo vành, lỗ ngón cái đáy, giếng pha tâm. */
+.ap-swatch-palette {
+  position: relative;
+  margin: 8px auto 4px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 32%, #b48a5e, #8a5d36 60%, #66421f); /* nâu gỗ ĐẶC */
+  box-shadow:
+    inset 0 0 12px #00000045,
+    0 2px 9px #00000050;
+  /* lỗ ngón cái = KHOÉT THẬT (mask) ở đáy-phải → trong suốt, nhìn xuyên 3D (bỏ chấm xanh dương) */
+  -webkit-mask: radial-gradient(circle 12px at 78% 77%, transparent 0 12px, #000 12px);
+  mask: radial-gradient(circle 12px at 78% 77%, transparent 0 12px, #000 12px);
+}
+.ap-swatch {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid #ffffff70;
+  border-radius: 50%;
+  cursor: pointer;
+  outline: none;
+  box-shadow: 0 1px 3px #00000055;
+  transition: transform 0.08s;
+}
+.ap-swatch:hover {
+  transform: scale(1.2);
+  border-color: #fff;
+  z-index: 2;
+}
+.ap-swatch.ap-swatch-on {
+  border-color: #ffd54a;
+  box-shadow:
+    0 0 0 2px #ffd54a,
+    0 1px 3px #00000055;
+  z-index: 3;
+}
+/* giếng pha tâm — màu cọ đang cầm */
+.ap-pal-mix {
+  position: absolute;
+  left: 36%;
+  top: 60%;
+  width: 30px;
+  height: 30px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid #00000035;
+  box-shadow: inset 0 1px 5px #00000055;
+  pointer-events: none;
+}
+
+/* 🎨 Palette browser — nút "khay đang chọn" + popover (search + group + preview strip) cho scale 100+ khay. */
+.ap-palette-panel {
+  position: relative; /* neo popover absolute */
+  width: 188px; /* rộng hơn panel thường (75px) để chứa board pha màu oval dẹt */
+  background: transparent; /* nền GUI palette TRONG SUỐT hẳn — float trên 3D; đè .ap-scan-panel */
+  border-color: transparent;
+  backdrop-filter: none;
+}
+.ap-pal-current {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent; /* ô chọn khay TRONG SUỐT */
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 3px 4px;
+  cursor: pointer;
+  color: #dce6f2;
+  font: 7px/1.3 monospace;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); /* đọc rõ trên nền trong suốt */
+}
+.ap-pal-current:hover {
+  border-color: #4569c8;
+}
+.ap-pal-strip {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid #00000040;
+}
+.ap-pal-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.ap-pal-caret {
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+
+/* popover nổi bên phải panel */
+.ap-pal-pop {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 0;
+  width: 230px;
+  z-index: 60;
+  background: rgba(14, 28, 64, 0.98);
+  border: 1px solid #2a4d9b;
+  border-radius: 5px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 60vh;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+.ap-pal-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #dce6f2;
+  font: bold 9px monospace;
+}
+.ap-pal-x {
+  background: none;
+  border: none;
+  color: #9fb3d6;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0 2px;
+}
+.ap-pal-x:hover {
+  color: #fff;
+}
+.ap-pal-search {
+  width: 100%;
+  box-sizing: border-box;
+  font: 9px monospace;
+  color: #dce6f2;
+  background: #14224d;
+  border: 1px solid #2a4d9b;
+  border-radius: 3px;
+  padding: 3px 5px;
+}
+.ap-pal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+.ap-pal-group {
+  font: bold 7px monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7f9bd0;
+  padding: 4px 2px 1px;
+  position: sticky;
+  top: 0;
+  background: rgba(14, 28, 64, 0.98);
+}
+.ap-pal-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 3px 4px;
+  cursor: pointer;
+  color: #dce6f2;
+  font: 9px monospace;
+  text-align: left;
+}
+.ap-pal-item:hover {
+  background: #1c2f6b;
+}
+.ap-pal-item.ap-pal-on {
+  border-color: #ffd54a;
+}
+.ap-pal-item .ap-pal-strip {
+  width: 46px;
+  height: 12px;
+}
+.ap-pal-iname {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ap-pal-empty {
+  color: #7f9bd0;
+  font: italic 8px monospace;
+  padding: 6px;
+  text-align: center;
+}
+/* nút ✕ ẩn / ↩ hiện lại ở cuối mỗi dòng khay */
+.ap-pal-act {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 3px;
+  color: #9fb3d6;
+  font-size: 9px;
+  cursor: pointer;
+}
+.ap-pal-act:hover {
+  background: #c0606040;
+  color: #ff9a9a;
+}
+.ap-pal-item.ap-pal-hidden {
+  opacity: 0.55;
+}
+.ap-pal-item.ap-pal-hidden .ap-pal-act:hover {
+  background: #4569c840;
+  color: #9fd0ff;
+}
+.ap-pal-hidden-head {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-top: 1px solid #2a4d9b50;
+  margin-top: 3px;
+  padding: 5px 2px 2px;
+  color: #7f9bd0;
+  font: 7px monospace;
+  cursor: pointer;
+}
+.ap-pal-hidden-head:hover {
+  color: #dce6f2;
+}
+/* tiêu đề panel Palette = tay cầm kéo (cũng là nút thu/mở) */
+.ap-palette-panel > .ap-scan-title {
+  cursor: grab;
+  touch-action: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); /* đọc rõ trên nền trong suốt */
+}
+.ap-palette-panel > .ap-scan-title:active {
+  cursor: grabbing;
+}
+
+/* 🤚 Move tool toggle — full-width trong panel hẹp; bật = nền vàng như swatch-on. */
+.ap-move-btn {
+  width: 100%;
+  box-sizing: border-box;
+  font: 8px/1.4 monospace;
+  font-weight: bold;
+  color: #dce6f2;
+  background: #1c2f6b;
+  border: 1px solid #2a4d9b;
+  border-radius: 3px;
+  padding: 4px;
+  cursor: pointer;
+}
+.ap-move-btn:hover {
+  border-color: #4569c8;
+}
+.ap-move-btn.ap-move-on {
+  color: #1a1300;
+  background: #ffd54a;
+  border-color: #ffd54a;
+}
+
+/* 3D → GUI: flash viền vàng ~0.8s khi click vật thể trong scene → folder tương ứng được trỏ tới. */
+.ap-focus-flash {
+  animation: ap-focus-pulse 0.8s ease-out;
+}
+@keyframes ap-focus-pulse {
+  0% {
+    box-shadow:
+      0 0 0 2px #ffd54a inset,
+      0 0 6px 1px #ffd54a;
+  }
+  100% {
+    box-shadow:
+      0 0 0 0 transparent inset,
+      0 0 0 0 transparent;
+  }
+}
+
+/* Dev HUD perf — toggle phím ` (Backquote). Đọc renderer.info: draw calls/triangles/geometries/textures. */
+.ap-perf-hud {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  padding: 3px 10px;
+  font:
+    11px/1.4 ui-monospace,
+    'Cascadia Code',
+    monospace;
+  color: #b9f6ca;
+  background: rgba(0, 0, 0, 0.62);
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+/* 3 dòng HUD dùng chung màu state: xanh ổn / vàng cảnh báo / đỏ vượt budget · nghi leak. */
+.ap-perf-hud > div + div {
+  margin-top: 1px;
+}
+.ap-perf-leak {
+  font-size: 10px;
+}
+.ap-perf-hud [data-state='ok'] {
+  color: #8ad9c0;
+}
+.ap-perf-hud [data-state='warn'] {
+  color: #ffd54a;
+}
+.ap-perf-hud [data-state='bad'] {
+  color: #ff6e6e;
+  font-weight: 700;
+}
