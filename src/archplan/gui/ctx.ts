@@ -6,6 +6,7 @@
 
 import type GUI from 'lil-gui'
 import type * as THREE from 'three'
+import type { CoverageStats, SiteState } from 'threejs-modules/site/state'
 
 import type { GridOpts, GroundType, SunOpts } from '../scene/scene'
 import type { BuildingState, ShapeInstance } from '../state/state'
@@ -27,6 +28,11 @@ export interface APGuiCtx {
   sunOpts: SunOpts
   groundType: GroundType
   setGround(t: GroundType): void
+  // 🌳 Sân vườn (site/lô): SiteState sống ở Lab; panel sửa trực tiếp rồi gọi applySite.
+  site: SiteState
+  applySite(persist: boolean): void // re-render lô + đôn nhà; persist=true → autosave (false = live drag)
+  siteStats(): CoverageStats // đối chiếu nhà/lô (lotArea/coveragePct/gardenArea) cho bảng số liệu
+  registerSiteReadout(fn: () => void): void // panel đăng ký refresh → Lab gọi khi build nhà (footprint đổi)
   applySun(): void
   getZGridGroup(): THREE.Group | null
   getXGridGroup(): THREE.Group | null

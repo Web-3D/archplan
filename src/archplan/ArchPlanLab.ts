@@ -18,6 +18,7 @@
 
 import './archplan-lab.css'
 
+import { computeLocalBbox } from 'building-kit/build' // footprint nhà (m²) cho bảng số liệu lô
 import { renderBuildingState } from 'building-kit/render/fromState' // renderer chung lõi (Phase 1b)
 import { makeSurfaceMaterial, WallMaterialCache } from 'building-kit/wallMaterials' // material engine
 import type GUI from 'lil-gui'
@@ -30,11 +31,14 @@ import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBri
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
 import { AsphaltGround } from 'threejs-modules/shaders/ground/AsphaltGround'
+import { renderSiteState, type SiteRenderCtx } from 'threejs-modules/site/render/fromState'
+import { coverageStats, defaultSiteState, type SiteState } from 'threejs-modules/site/state'
 import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
 import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
 
 import { DevHud } from './gui/devhud' // perf HUD dev (fps/budget/leak) — tách monolith
 import { type APGuiCtx, setupGridPanel, setupGroundPanel, setupGUI, setupSunPanel } from './gui/gui'
+import { setupSitePanel } from './gui/site' // 🌳 panel sân vườn (site/lô)
 import { type HighlightHost, HighlightOverlay } from './interaction/highlight' // flash viền phần đang chỉnh — tách monolith
 import { type ManipulateHost, ManipulateTool } from './interaction/manipulate' // 🤚 Move + 🎯 Focus — tách monolith
 import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 khay swatch atelier — tách monolith
@@ -126,6 +130,14 @@ export class ArchPlanLab extends BaseWorld {
   // Wall material cache (material+color+scale → 1 material, merge tường ít draw call) — tách ra
   // build/materials.ts (pure, không host). Brick textures + dispose nằm trong cache.
   private wallMats = new WallMaterialCache()
+
+  // 🌳 Sân vườn (site/lô) — group + arrays riêng (dispose độc lập building). Persist cùng design qua
+  // DesignStore. show=true → đôn building lên groundThick để foundation nằm trên mặt nền.
+  private site: SiteState = defaultSiteState()
+  private readonly siteGroup = new THREE.Group()
+  private siteGeos: THREE.BufferGeometry[] = []
+  private siteMats: THREE.Material[] = []
+  private _refreshSiteReadout: (() => void) | null = null
 
   private groundGeo: THREE.PlaneGeometry | null = null
   private groundMat: THREE.MeshToonMaterial | null = null // nền tối mặc định ('none')
@@ -322,7 +334,10 @@ export class ArchPlanLab extends BaseWorld {
 
   protected async onInit(): Promise<void> {
     const saved = this.store.loadAutosave() // khôi phục thiết kế lần trước TRƯỚC khi dựng GUI/scene
-    if (saved) this.state = saved
+    if (saved) {
+      this.state = saved.state
+      this.site = saved.site
+    }
     this._setupScene()
     await this._setupEnvironment() // IBL → MeshStandardNodeMaterial phản chiếu specular (bớt nhựa)
     this._setupCamera()
@@ -334,6 +349,7 @@ export class ArchPlanLab extends BaseWorld {
     this.heightGridSystem.build()
     this.coordPicker = new CoordPicker(this.scene)
     this.coordPicker.build()
+    this.scene.add(this.siteGroup) // 🌳 nền + rào lô (dưới building)
     this.scene.add(this.buildingGroup)
     this.scene.add(this.pickGroup) // SPIKE: lớp pick vô hình cho brush paint
     this.manipulate = new ManipulateTool(this._manipulateHost()) // trước _setupGUI: nhận registerFocus
@@ -412,6 +428,7 @@ export class ArchPlanLab extends BaseWorld {
     this.opFolders.clear()
     this._activeTabs.clear()
     this._clearBuilding()
+    this._clearSite() // 🌳 dispose nền + rào lô
     this._disposeSceneResources()
   }
 
@@ -595,6 +612,10 @@ export class ArchPlanLab extends BaseWorld {
       sunOpts: this.sunOpts,
       groundType: this.groundType,
       setGround: (t) => this._setGroundType(t),
+      site: this.site,
+      applySite: (persist) => this._applySite(persist),
+      siteStats: () => this._siteStats(),
+      registerSiteReadout: (fn) => (this._refreshSiteReadout = fn),
       applySun: () => this._applySun(),
       getZGridGroup: () => this.heightGridSystem?.getZGridGroup() ?? null,
       getXGridGroup: () => this.heightGridSystem?.getXGridGroup() ?? null,
@@ -610,8 +631,8 @@ export class ArchPlanLab extends BaseWorld {
       removeFloor: (id) => this._removeFloor(id),
       addFloor: () => this._addFloor(),
       resetState: () => this._resetState(),
-      exportJSON: () => this.store.exportJSON(this.state),
-      saveFile: () => void this.store.saveFile(this.state),
+      exportJSON: () => this.store.exportJSON(this.state, this.site),
+      saveFile: () => void this.store.saveFile(this.state, this.site),
       loadFile: () => void this._loadFile(),
       addColumn: (inst) => this._addColumn(inst),
       removeColumn: (inst, idx) => this._removeColumn(inst, idx),
@@ -626,7 +647,11 @@ export class ArchPlanLab extends BaseWorld {
       registerFocus: (k, f) => this.manipulate?.registerFocus(k, f),
     }
     this.gui = setupGUI(ctx)
-    // Wrapper xếp Scanner + Sun thành cột dọc (Sun nằm dưới Scanner).
+    this._buildLeftTools(ctx)
+  }
+
+  // Cột panel trái (.ap-left-tools): Scanner / Sun / Ground / Sân vườn / Move / Palette (theo thứ tự).
+  private _buildLeftTools(ctx: APGuiCtx): void {
     const tools = document.createElement('div')
     tools.className = 'ap-left-tools'
     this.canvas.parentElement?.appendChild(tools)
@@ -634,6 +659,7 @@ export class ArchPlanLab extends BaseWorld {
     setupGridPanel(ctx, tools)
     setupSunPanel(ctx, tools)
     setupGroundPanel(ctx, tools)
+    setupSitePanel(ctx, tools) // 🌳 nền + rào + bảng số liệu lô
     this._buildMovePanel(tools) // 🤚 toggle kéo element trong 3D
     this._mountPalette(tools) // 🎨 khay swatch atelier — build SAU Move → mặc định nằm dưới Move
   }
@@ -663,7 +689,7 @@ export class ArchPlanLab extends BaseWorld {
     return {
       parent: () => this.leftTools,
       getState: () => this.state,
-      persist: () => this.store.autosave(this.state),
+      persist: () => this.store.autosave(this.state, this.site),
       getBrush: () => this._brushColor,
       setBrush: (c) => {
         this._brushColor = c
@@ -858,7 +884,7 @@ export class ArchPlanLab extends BaseWorld {
     }
     this._recordHistory()
     this._prevState = JSON.stringify(this.state)
-    this.store.autosave(this.state) // autosave mỗi build → reload/mở lại là ra nguyên thiết kế
+    this.store.autosave(this.state, this.site) // autosave mỗi build → reload/mở lại là ra nguyên thiết kế
     this._renderScene()
   }
 
@@ -890,8 +916,54 @@ export class ArchPlanLab extends BaseWorld {
       strip: this.stripWalls,
     })
     for (const p of placements) this._addPick(p.cx, p.cy, p.cz, p.sx, p.sy, p.sz, p.rotDeg, p.ud)
+    this._renderSite() // 🌳 nền + rào lô + đôn building lên mặt nền (theo site.show)
+    this._refreshSiteReadout?.() // footprint nhà đổi → cập nhật phủ% trong bảng số liệu
     if (this.sun) this.sun.shadow.needsUpdate = true // geometry đổi → shadow map vẽ lại 1 lần
     this.heightGridSystem?.update(this.buildingGroup)
+  }
+
+  // 🌳 Dựng lại nền + rào lô vào siteGroup; đôn building + pick lên mặt nền khi show (foundation
+  // nằm trên nền, không cắm xuyên). show=false → lift 0 (building về y=0). Lõi headless site-kit.
+  private _renderSite(): void {
+    this._clearSite()
+    const ctx: SiteRenderCtx = { group: this.siteGroup, geos: this.siteGeos, mats: this.siteMats }
+    renderSiteState(this.site, ctx)
+    const lift = this.site.show ? this.site.groundThick / 1000 : 0
+    this.buildingGroup.position.y = lift
+    this.pickGroup.position.y = lift // giữ pick-box khớp building đã đôn
+  }
+
+  private _clearSite(): void {
+    for (const g of this.siteGeos) g.dispose()
+    for (const m of this.siteMats) m.dispose()
+    this.siteGeos = []
+    this.siteMats = []
+    this.siteGroup.clear()
+  }
+
+  // Re-render lô (không đụng building geometry — chỉ siteGroup + lift + readout). persist=true →
+  // autosave (commit: tick/select/buông slider); false = live drag slider. Site KHÔNG vào undo (G0).
+  private _applySite(persist: boolean): void {
+    this._renderSite()
+    this._refreshSiteReadout?.()
+    if (this.sun) this.sun.shadow.needsUpdate = true
+    if (persist) this.store.autosave(this.state, this.site)
+  }
+
+  // Diện tích nhà phủ (m²) = Σ bbox shape tầng trệt — đối chiếu 建ぺい率 trong bảng số liệu.
+  private _footprintArea(): number {
+    const gf = this.state.floors[0]
+    if (!gf) return 0
+    let area = 0
+    for (const inst of gf.instances) {
+      const { w, d } = computeLocalBbox(inst) // mét
+      area += w * d
+    }
+    return area
+  }
+
+  private _siteStats(): ReturnType<typeof coverageStats> {
+    return coverageStats(this.site, this._footprintArea())
   }
 
   // Box pick vô hình (visible=false → 0 render, Raycaster vẫn hit) ôm 1 element. userData → _paintAt.
@@ -940,6 +1012,7 @@ export class ArchPlanLab extends BaseWorld {
     this._redoStack = []
     this._prevState = ''
     this.state = defaultBuildingState()
+    this.site = defaultSiteState() // 🌳 lô về mặc định
     this.store.forgetHandle() // dự án mới → quên file đang gắn, Save kế tiếp hỏi nơi lưu
     this._rebuildGUI()
     this._buildScene()
@@ -947,12 +1020,13 @@ export class ArchPlanLab extends BaseWorld {
 
   // Load file → reset undo + rebuild scene. Toàn bộ I/O + alert nằm trong DesignStore.
   private async _loadFile(): Promise<void> {
-    const st = await this.store.loadFile()
-    if (!st) return
+    const loaded = await this.store.loadFile()
+    if (!loaded) return
     this._undoStack = []
     this._redoStack = []
     this._prevState = ''
-    this.state = st
+    this.state = loaded.state
+    this.site = loaded.site
     this._rebuildGUI()
     this._buildScene()
   }

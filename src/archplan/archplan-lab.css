@@ -771,6 +771,26 @@
   border-color: #4569c8;
 }
 
+/* 🌳 Bảng số liệu lô (đối chiếu nhà/lô — 建ぺい率). Mỗi hàng: nhãn trái + số phải. */
+.ap-site-readout {
+  margin-top: 6px;
+  padding: 4px 6px;
+  border: 1px solid #2a4d9b;
+  border-radius: 3px;
+  background: #11214d;
+  font: 9px/1.5 monospace;
+  color: #aab8d4;
+}
+.ap-site-readout div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ap-site-readout b {
+  color: #e8eefa;
+  font-weight: 600;
+}
+
 /* 🎨 Palette swatch grid — lưới swatch cuộn được (scale nhiều màu/khay). Click = nạp màu cọ. */
 /* 🎨 Bảng pha màu thật — board oval, dab màu cong theo vành, lỗ ngón cái đáy, giếng pha tâm. */
 .ap-swatch-palette {
