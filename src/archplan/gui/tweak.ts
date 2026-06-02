@@ -76,6 +76,21 @@ function subHeader(text: string): HTMLElement {
   return h
 }
 
+function toggleRow(label: string, initial: boolean, onChange: (on: boolean) => void): HTMLElement {
+  const row = document.createElement('div')
+  row.style.cssText = 'display:flex;align-items:center;gap:5px;margin-bottom:3px'
+  const cb = document.createElement('input')
+  cb.type = 'checkbox'
+  cb.checked = initial
+  cb.style.cssText = 'width:11px;height:11px;flex-shrink:0;cursor:pointer'
+  cb.addEventListener('change', () => onChange(cb.checked))
+  const lbl = document.createElement('span')
+  lbl.textContent = label
+  row.appendChild(cb)
+  row.appendChild(lbl)
+  return row
+}
+
 // Structural (dựng lại khi BUÔNG): mật độ / cao lá / rộng lá.
 function buildGrassStructural(body: HTMLElement, ctx: APGuiCtx): void {
   const g = ctx.site.grass3d
@@ -123,7 +138,7 @@ function buildGrassStructural(body: HTMLElement, ctx: APGuiCtx): void {
   )
 }
 
-// Uniform (LIVE, không dựng lại): gió / tốc độ gió / màu gốc / màu ngọn.
+// Uniform gió (LIVE): cường độ / tốc độ.
 function buildGrassUniform(body: HTMLElement, ctx: APGuiCtx): void {
   const g = ctx.site.grass3d
   body.appendChild(
@@ -138,25 +153,43 @@ function buildGrassUniform(body: HTMLElement, ctx: APGuiCtx): void {
       ctx.tuneGrass((b) => b.setWindSpeed(v), c)
     })
   )
+}
+
+// Màu 2 trục (LIVE): gốc/ngọn (dọc) + mép (ngang) + toggle đổ bóng.
+function buildGrassColor(body: HTMLElement, ctx: APGuiCtx): void {
+  const g = ctx.site.grass3d
   const recolor = (commit: boolean): void =>
-    ctx.tuneGrass((b) => b.setColors(g.baseColor, g.tipColor), commit)
+    ctx.tuneGrass((b) => b.setColors(g.baseColor, g.tipColor, g.edgeColor), commit)
+  const colors: [string, 'baseColor' | 'tipColor' | 'edgeColor'][] = [
+    ['Màu gốc', 'baseColor'],
+    ['Màu ngọn', 'tipColor'],
+    ['Màu mép', 'edgeColor'],
+  ]
+  for (const [lbl, key] of colors) {
+    body.appendChild(
+      colorRow(lbl, g[key], (hex, c) => {
+        g[key] = hex
+        recolor(c)
+      })
+    )
+  }
   body.appendChild(
-    colorRow('Màu gốc', g.baseColor, (hex, c) => {
-      g.baseColor = hex
-      recolor(c)
-    })
-  )
-  body.appendChild(
-    colorRow('Màu ngọn', g.tipColor, (hex, c) => {
-      g.tipColor = hex
-      recolor(c)
+    toggleRow('Đổ bóng (nặng)', g.shadow, (on) => {
+      g.shadow = on
+      ctx.tuneGrass((b) => b.setCastShadow(on), true)
     })
   )
 }
 
-// Hình dáng (LIVE, không dựng lại): cong tĩnh / xoắn ribbon / nhọn ngọn.
+// Hình dáng (LIVE): thon ellipse / cong / xoắn / cao-thấp ngẫu nhiên.
 function buildGrassShape(body: HTMLElement, ctx: APGuiCtx): void {
   const g = ctx.site.grass3d
+  body.appendChild(
+    sliderRow('Độ thon', 0.3, 2.5, 0.05, g.taper, (v, c) => {
+      g.taper = v
+      ctx.tuneGrass((b) => b.setTaper(v), c)
+    })
+  )
   body.appendChild(
     sliderRow('Độ cong', 0, 1.5, 0.05, g.curve, (v, c) => {
       g.curve = v
@@ -170,9 +203,27 @@ function buildGrassShape(body: HTMLElement, ctx: APGuiCtx): void {
     })
   )
   body.appendChild(
-    sliderRow('Độ nhọn', 0, 1, 0.02, g.taper, (v, c) => {
-      g.taper = v
-      ctx.tuneGrass((b) => b.setTaper(v), c)
+    sliderRow('Cao-thấp NN', 0, 1, 0.05, g.heightVar, (v, c) => {
+      g.heightVar = v
+      ctx.tuneGrass((b) => b.setHeightVar(v), c)
+    })
+  )
+}
+
+// Ngả theo 1 chiều (LIVE): biên độ + hướng (độ). Cả bãi nghiêng cùng phía.
+function buildGrassLean(body: HTMLElement, ctx: APGuiCtx): void {
+  const g = ctx.site.grass3d
+  const apply = (c: boolean): void => ctx.tuneGrass((b) => b.setLean(g.leanAmt, g.leanAngle), c)
+  body.appendChild(
+    sliderRow('Ngả 1 chiều', 0, 1.5, 0.05, g.leanAmt, (v, c) => {
+      g.leanAmt = v
+      apply(c)
+    })
+  )
+  body.appendChild(
+    sliderRow('Hướng ngả °', 0, 360, 5, (g.leanAngle * 180) / Math.PI, (v, c) => {
+      g.leanAngle = (v * Math.PI) / 180
+      apply(c)
     })
   )
 }
@@ -187,7 +238,9 @@ export function setupTweakPanel(ctx: APGuiCtx, container: Element | null): HTMLE
   body.appendChild(subHeader('🌿 Cỏ 3D'))
   buildGrassStructural(body, ctx)
   buildGrassShape(body, ctx)
+  buildGrassLean(body, ctx)
   buildGrassUniform(body, ctx)
+  buildGrassColor(body, ctx)
   let open = true
   const render = (): void => {
     ttl.textContent = `${open ? '▾' : '▸'} 🎛️ Tinh chỉnh`

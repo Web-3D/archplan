@@ -947,9 +947,10 @@ export class ArchPlanLab extends BaseWorld {
     this.pickGroup.position.y = lift // giữ pick-box khớp building đã đôn
   }
 
-  // 🎛️ Chỉnh uniform LIVE trên cỏ 3D đang sống (gió/màu) — KHÔNG dựng lại → né recompile NodeMaterial.
+  // 🎛️ Chỉnh uniform LIVE trên cỏ 3D đang sống (gió/màu/hình dáng/đổ-bóng) — KHÔNG dựng lại → né recompile.
   private _tuneGrass(apply: (g: GrassBlades) => void, persist: boolean): void {
     if (this._siteGrass) apply(this._siteGrass)
+    if (this.sun) this.sun.shadow.needsUpdate = true // refresh shadow map khi đổi (đổ-bóng/hình)
     if (persist) this.store.autosave(this.state, this.site)
   }
 
