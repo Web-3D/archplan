@@ -34,6 +34,7 @@ import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
 import { AsphaltGround } from 'threejs-modules/shaders/ground/AsphaltGround'
 import { renderSiteState, type SiteRenderCtx } from 'threejs-modules/site/render/fromState'
 import { coverageStats, defaultSiteState, type SiteState } from 'threejs-modules/site/state'
+import { Tabs } from 'threejs-modules/ui/Tabs' // 🗂️ tab ngang drawer (Building|Ground|Tinh chỉnh)
 import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
 import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
 
@@ -92,6 +93,11 @@ export class ArchPlanLab extends BaseWorld {
   private state: BuildingState = defaultBuildingState()
   private gui: GUI | null = null
   private leftTools: HTMLElement | null = null // wrapper xếp scanner + sun panel thành cột
+  private drawer: HTMLElement | null = null // 🗄️ drawer phải (shell bền qua rebuild): nhà + Sân vườn + Tinh chỉnh
+  private drawerBody: HTMLElement | null = null // cột cuộn trong drawer — gui + panels dựng vào đây
+  private drawerTabs: Tabs | null = null // tab ngang đầu drawer (Building | Ground | Tinh chỉnh)
+  private drawerPanels: HTMLElement[] = [] // panel non-gui trong drawer (Ground+Tinh chỉnh) — gỡ khi teardown
+  private _drawerTab = 0 // tab drawer đang mở — nhớ qua _rebuildGUI
   private controls: OrbitControls | null = null
 
   // Đèn mặt trời + tham số (điều khiển qua panel ☀ Sun). Default ≈ vị trí cũ (10,18,10).
@@ -361,6 +367,7 @@ export class ArchPlanLab extends BaseWorld {
     this.scene.add(this.pickGroup) // SPIKE: lớp pick vô hình cho brush paint
     this.manipulate = new ManipulateTool(this._manipulateHost()) // trước _setupGUI: nhận registerFocus
     this.highlight = new HighlightOverlay(this._highlightHost())
+    this._setupDrawer() // 🗄️ shell bền — tạo 1 lần trước GUI; gui+panels rebuild bên trong
     this._setupGUI()
     this._buildScene()
     window.addEventListener('keydown', this._onKeyDown)
@@ -429,13 +436,10 @@ export class ArchPlanLab extends BaseWorld {
     this.controls?.dispose()
     this.controls = null
     this.palette?.dispose() // gỡ listener doc (mousedown/keydown) của popover palette
-    this.preview?.dispose() // 🔎 mini WebGPU preview: stop loop + dispose renderer/blade
-    this.preview = null
-    this._previewGrass = null
-    this.gui?.destroy()
-    this.gui = null
-    this.leftTools?.remove() // gỡ wrapper → bỏ cả Scanner + Sun panel
-    this.leftTools = null
+    this._teardownPanels() // preview + gui nhà + 2 nhóm panel
+    this.drawer?.remove() // 🗄️ gỡ shell drawer (handle + body) — chỉ ở dispose, KHÔNG ở _rebuildGUI
+    this.drawer = null
+    this.drawerBody = null
     this.opFolders.clear()
     this._activeTabs.clear()
     this._clearBuilding()
@@ -658,25 +662,84 @@ export class ArchPlanLab extends BaseWorld {
       highlightPart: (t) => this.highlight?.show(t),
       registerFocus: (k, f) => this.manipulate?.registerFocus(k, f),
     }
-    this.gui = setupGUI(ctx)
-    this._buildLeftTools(ctx)
+    const body = this.drawerBody
+    if (!body) return
+    this.gui = setupGUI(ctx, body) // lil-gui vào drawer (container) → hết fixed, title=thu/mở
+    this._buildLeftTools(ctx, body)
   }
 
-  // Cột panel trái (.ap-left-tools): Scanner / Sun / Ground / Sân vườn / Move / Palette (theo thứ tự).
-  private _buildLeftTools(ctx: APGuiCtx): void {
+  // 🗄️ Drawer phải: shell bền (tạo 1 lần) — tay kéo [»/«] trượt ẩn/hiện; body = cột cuộn chứa mọi gui.
+  private _setupDrawer(): void {
+    const drawer = document.createElement('div')
+    drawer.className = 'ap-drawer'
+    drawer.style.width = `${Math.max(240, Math.round(window.innerWidth / 5) + 10)}px`
+    const handle = document.createElement('button')
+    handle.className = 'ap-drawer-handle'
+    handle.textContent = '»'
+    handle.title = 'Thu / mở bảng điều khiển'
+    const body = document.createElement('div')
+    body.className = 'ap-drawer-body'
+    handle.addEventListener('click', () => {
+      const closed = drawer.classList.toggle('ap-drawer-closed')
+      handle.textContent = closed ? '«' : '»'
+    })
+    drawer.appendChild(handle)
+    drawer.appendChild(body)
+    this.canvas.parentElement?.appendChild(drawer)
+    this.drawer = drawer
+    this.drawerBody = body
+  }
+
+  // TRONG drawer: 3 panel (Building=gui nhà · Ground=lô · Tinh chỉnh) là CON TRỰC TIẾP drawerBody →
+  // Tabs ngang quản lý (ẩn/hiện). NGOÀI drawer: float góc trái (Scanner/Sun/Ground/Move/Palette).
+  private _buildLeftTools(ctx: APGuiCtx, drawerBody: HTMLElement): void {
+    const sitePanel = setupSitePanel(ctx, drawerBody) // 🌳 Ground (lô): nền + rào + 建ぺい率
+    const tweak = setupTweakPanel(ctx, drawerBody) // 🎛️ Tinh chỉnh — { panel, previewHost }
+    this.preview = new GrassPreview(tweak.previewHost) // 🔎 preview 1 lá GỘP trong panel Tinh chỉnh
+    void this.preview.init().then(() => this._previewRebuild())
+    this.drawerPanels = [sitePanel, tweak.panel] // gỡ khi teardown (gui.domElement do gui.destroy lo)
+    this._buildDrawerTabs(drawerBody, sitePanel, tweak.panel)
+    this._buildFloatingTools(ctx)
+  }
+
+  // Tab ngang đầu drawer: Building | Ground | Tinh chỉnh — tái dùng Tabs + ap-tab CSS, nhớ tab active.
+  private _buildDrawerTabs(host: HTMLElement, ground: HTMLElement, tweak: HTMLElement): void {
+    const guiEl = this.gui?.domElement
+    if (!guiEl) return
+    this.drawerTabs = new Tabs(
+      host,
+      [
+        { label: '🏠 Building', panel: guiEl, title: 'Điều khiển nhà' },
+        { label: '🌳 Ground', panel: ground, title: 'Nền / rào / lô (sân vườn)' },
+        { label: '🎛️ Tinh chỉnh', panel: tweak, title: 'Cỏ 3D…' },
+      ],
+      {
+        initial: this._drawerTab,
+        classes: {
+          bar: 'ap-tab-bar ap-drawer-tabs',
+          tab: 'ap-tab-btn',
+          panel: 'ap-drawer-panel',
+          active: 'ap-tab-active',
+        },
+        injectCss: false,
+        onChange: (idx) => {
+          this._drawerTab = idx
+        },
+      }
+    )
+  }
+
+  // Float góc trái (absolute, NGOÀI drawer): Scanner / Sun / Ground(nền editor) / Move / Palette.
+  private _buildFloatingTools(ctx: APGuiCtx): void {
     const tools = document.createElement('div')
     tools.className = 'ap-left-tools'
     this.canvas.parentElement?.appendChild(tools)
     this.leftTools = tools
-    setupGridPanel(ctx, tools)
-    setupSunPanel(ctx, tools)
-    setupGroundPanel(ctx, tools)
-    setupSitePanel(ctx, tools) // 🌳 nền + rào + bảng số liệu lô
-    setupTweakPanel(ctx, tools) // 🎛️ tinh chỉnh decor (cỏ 3D…)
-    this.preview = new GrassPreview(tools) // 🔎 preview 1 lá — init async rồi dựng lá đầu
-    void this.preview.init().then(() => this._previewRebuild())
+    setupGridPanel(ctx, tools) // 🔍 Scanner
+    setupSunPanel(ctx, tools) // ☀ Sun
+    setupGroundPanel(ctx, tools) // 🌱 Surface (nền editor tham chiếu: Grid/Stone/Asphalt)
     this._buildMovePanel(tools) // 🤚 toggle kéo element trong 3D
-    this._mountPalette(tools) // 🎨 khay swatch atelier — build SAU Move → mặc định nằm dưới Move
+    this._mountPalette(tools) // 🎨 khay swatch atelier
   }
 
   // Nút toggle Move tool — đặt dưới khay Palette. Bật → kéo element trong 3D (loại trừ paint/pick).
@@ -737,15 +800,28 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
+  // Gỡ preview + gui nhà + 2 nhóm panel (dùng chung dispose & _rebuildGUI). Drawer SHELL giữ nguyên.
+  // Dispose preview ở đây → hết leak WebGPU renderer mỗi lần rebuild (trước: tạo mới đè, KHÔNG dispose cũ).
+  private _teardownPanels(): void {
+    this.preview?.dispose() // 🔎 mini WebGPU preview: stop loop + dispose renderer/blade
+    this.preview = null
+    this._previewGrass = null
+    this.drawerTabs?.dispose() // gỡ tab bar drawer (KHÔNG đụng panel — caller sở hữu)
+    this.drawerTabs = null
+    for (const p of this.drawerPanels) p.remove() // Ground + Tinh chỉnh (con trực tiếp drawerBody)
+    this.drawerPanels = []
+    this.gui?.destroy()
+    this.gui = null
+    this.leftTools?.remove() // float trái: Scanner/Sun/Ground/Move/Palette
+    this.leftTools = null
+  }
+
   private _rebuildGUI(): void {
     this._setPickMode(false) // panel dựng lại → checkbox pick về unchecked, đồng bộ state
     this._setPaintMode(false) // SPIKE: brush về off khi rebuild GUI (checkbox mới = unchecked)
     this._setMoveMode(false) // Move về off — nút dựng lại ở trạng thái off
     this.palette?.closeBrowser() // gỡ listener doc + popover trước khi dựng lại panel
-    this.gui?.destroy()
-    this.gui = null
-    this.leftTools?.remove() // gỡ wrapper → bỏ cả Scanner + Sun panel
-    this.leftTools = null
+    this._teardownPanels()
     this.opFolders.clear()
     this._setupGUI()
   }

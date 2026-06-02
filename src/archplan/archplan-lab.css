@@ -1139,3 +1139,127 @@
   color: #ff6e6e;
   font-weight: 700;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   🗄️ DRAWER PHẢI — chứa TẤT CẢ gui (lil-gui nhà + panels) xếp dọc, trượt ẩn/hiện.
+   Shell bền (tạo 1 lần); gui+panels rebuild bên trong drawerBody. Width set inline (JS).
+   ═══════════════════════════════════════════════════════════════════════════ */
+.ap-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  z-index: 200;
+  transform: translateX(0);
+  transition: transform 0.24s ease;
+}
+.ap-drawer.ap-drawer-closed {
+  transform: translateX(100%); /* trượt khỏi mép phải → chỉ chừa tay kéo */
+}
+.ap-drawer-body {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  background: rgba(7, 22, 18, 0.55);
+  backdrop-filter: blur(5px);
+  border-left: 1px solid var(--ap-border, rgba(201, 162, 78, 0.3));
+}
+/* Tay kéo — tab thò ra mép trái drawer, luôn thấy cả khi đóng (neo vào drawer đã transform). */
+.ap-drawer-handle {
+  position: absolute;
+  left: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ap-title-bg, rgba(7, 22, 18, 0.95));
+  color: var(--ap-accent, #c9a24e);
+  border: 1px solid var(--ap-border, rgba(201, 162, 78, 0.3));
+  border-right: none;
+  border-radius: 7px 0 0 7px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  font-family: inherit;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.4);
+}
+.ap-drawer-handle:hover {
+  background: var(--ap-title-grab-bg, rgba(14, 46, 38, 0.98));
+  color: #eef3f0;
+}
+
+/* lil-gui nhà TRONG drawer: fill bề ngang, title = thu/mở (không grab/kéo nữa). */
+.ap-drawer .lil-gui.archplan-lab {
+  width: 100% !important;
+  max-width: 100%;
+}
+/* Tab "Building" đã là nhãn → ẩn title gốc lil-gui (khỏi lặp). Root luôn mở trong drawer. */
+.ap-drawer .lil-gui.archplan-lab > .lil-title {
+  display: none;
+}
+
+/* ── Tab ngang đầu drawer (Building | Ground | Tinh chỉnh) — dùng Tabs + ap-tab look ───── */
+.ap-drawer-tabs {
+  position: sticky; /* dính đầu drawer khi cuộn nội dung */
+  top: 0;
+  z-index: 3;
+  margin: -6px -6px 0; /* tràn bù padding 6px của drawer-body → full bề ngang */
+  padding: 6px 6px 0;
+  background: rgba(7, 22, 18, 0.92);
+  backdrop-filter: blur(5px);
+  flex-wrap: wrap;
+}
+.ap-drawer-tabs > .ap-tab-btn {
+  flex: 1 1 0; /* 3 tab chia đều full bề ngang */
+  max-width: none;
+  height: 22px;
+  font-size: 9px;
+}
+.ap-drawer-tabs > .ap-tab-btn.ap-tab-active {
+  background: var(--bg-2, #14443a);
+  border-color: rgba(201, 162, 78, 0.55);
+  color: #eef3f0;
+}
+.ap-drawer-panel {
+  margin-top: 5px; /* khe dưới hàng tab dính */
+}
+
+/* leftTools + mọi panel coban TRONG drawer: bỏ absolute, fill bề ngang drawer. */
+.ap-drawer .ap-left-tools {
+  position: static;
+  top: auto;
+  left: auto;
+  width: 100%;
+}
+.ap-drawer .ap-scan-panel {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* 🔎 Preview GỘP trong panel Tinh chỉnh: bỏ chrome lồng, canvas 130×150 căn giữa panel rộng. */
+.ap-drawer .ap-preview-host {
+  display: flex;
+  justify-content: center;
+}
+.ap-drawer .ap-tweak-panel .ap-preview-panel {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 4px 0 0;
+  backdrop-filter: none;
+}
+
+/* Palette popover: drawer ở mép phải → mở sang TRÁI (không tràn ngoài màn hình). */
+.ap-drawer .ap-pal-pop {
+  left: auto;
+  right: calc(100% + 6px);
+}

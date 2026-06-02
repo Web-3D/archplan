@@ -23,9 +23,10 @@ export type { APGuiCtx, HighlightTarget } from './ctx'
 
 // ── Root GUI ───────────────────────────────────────────────────────────────────
 
-export function setupGUI(ctx: APGuiCtx): GUI {
+export function setupGUI(ctx: APGuiCtx, container?: HTMLElement | null): GUI {
   const gui = new GUI({
-    title: 'ArchPlan Lab',
+    container: container ?? undefined, // có → vào drawer (static flow); không → auto-place fixed
+    title: 'Building',
     width: Math.max(190, Math.round(window.innerWidth / 5) + 10),
   })
   gui.domElement.classList.add('archplan-lab')
@@ -42,7 +43,7 @@ export function setupGUI(ctx: APGuiCtx): GUI {
   addFloorBtn.addEventListener('click', () => ctx.addFloor())
   buildTabBar(rootCh, floorPanels, addFloorBtn)
   buildActionsFooter(gui, ctx)
-  makeDraggable(gui)
+  if (!container) makeDraggable(gui) // chỉ kéo khi đứng riêng; trong drawer → title click = thu/mở
   return gui
 }
 
@@ -242,7 +243,7 @@ export function setupGroundPanel(ctx: APGuiCtx, container: Element | null): HTML
   body.appendChild(sel)
   let open = true
   const render = (): void => {
-    ttl.textContent = `${open ? '▾' : '▸'} 🌱 Ground`
+    ttl.textContent = `${open ? '▾' : '▸'} 🌱 Surface`
     body.style.display = open ? '' : 'none'
   }
   ttl.addEventListener('click', () => {

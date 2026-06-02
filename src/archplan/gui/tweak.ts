@@ -69,13 +69,6 @@ function colorRow(
   return row
 }
 
-function subHeader(text: string): HTMLElement {
-  const h = document.createElement('div')
-  h.textContent = text
-  h.style.cssText = 'font-weight:600;margin:4px 0 2px;opacity:.85'
-  return h
-}
-
 // B0 — Structural (dựng lại khi BUÔNG): mật độ / cao lá / rộng lá / số đốt.
 function buildGrassStructural(body: HTMLElement, ctx: APGuiCtx): void {
   const g = ctx.site.grass3d
@@ -114,28 +107,26 @@ function buildGrassColor(body: HTMLElement, ctx: APGuiCtx): void {
   )
 }
 
-// Panel "🎛️ Tinh chỉnh" (collapsible) — section per-element. Thêm đá/effect sau = thêm subHeader + builder.
-export function setupTweakPanel(ctx: APGuiCtx, container: Element | null): HTMLElement {
+// Panel "🎛️ Tinh chỉnh" — section per-element. Thêm đá/effect sau = thêm subHeader + builder.
+// Trả { panel, previewHost }: panel cho Tabs drawer quản lý; previewHost để caller gắn GrassPreview vào.
+// (Trong drawer-tabs: Tabs lo ẩn/hiện cả panel → bỏ nút thu/mở ▾ riêng, tiêu đề chỉ còn nhãn.)
+export function setupTweakPanel(
+  ctx: APGuiCtx,
+  container: Element | null
+): { panel: HTMLElement; previewHost: HTMLElement } {
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-tweak-panel'
-  const ttl = document.createElement('button')
+  const ttl = document.createElement('div')
   ttl.className = 'ap-scan-title'
+  ttl.textContent = '🌿 Cỏ 3D'
   const body = document.createElement('div')
-  body.appendChild(subHeader('🌿 Cỏ 3D'))
   buildGrassStructural(body, ctx)
   buildGrassColor(body, ctx)
-  let open = true
-  const render = (): void => {
-    ttl.textContent = `${open ? '▾' : '▸'} 🎛️ Tinh chỉnh`
-    body.style.display = open ? '' : 'none'
-  }
-  ttl.addEventListener('click', () => {
-    open = !open
-    render()
-  })
-  render()
+  const previewHost = document.createElement('div')
+  previewHost.className = 'ap-preview-host' // 🔎 chỗ neo preview 1 lá, ngay dưới slider+màu
+  body.appendChild(previewHost)
   p.appendChild(ttl)
   p.appendChild(body)
   container?.appendChild(p)
-  return p
+  return { panel: p, previewHost }
 }
