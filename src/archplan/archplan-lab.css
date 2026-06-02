@@ -758,15 +758,27 @@
    panel rộng hơn (75→132px) cho dễ đọc, đồng bộ "tỉ lệ chiều ngang" với GUI. Scanner/Sun/Move giữ 75px. */
 .ap-scan-panel.ap-ground-panel,
 .ap-scan-panel.ap-site-panel,
-.ap-scan-panel.ap-tweak-panel {
+.ap-scan-panel.ap-tweak-panel,
+.ap-scan-panel.ap-preview-panel {
   width: 132px;
   font: 9px/1.6 'Segoe UI', system-ui, sans-serif;
 }
 .ap-scan-panel.ap-ground-panel .ap-scan-title,
 .ap-scan-panel.ap-site-panel .ap-scan-title,
-.ap-scan-panel.ap-tweak-panel .ap-scan-title {
+.ap-scan-panel.ap-tweak-panel .ap-scan-title,
+.ap-scan-panel.ap-preview-panel .ap-scan-title {
   font-size: 9px;
   font-family: inherit;
+}
+
+/* 🔎 Preview 1 lá — canvas mini WebGPU riêng (130×150). */
+.ap-preview-canvas {
+  display: block;
+  width: 130px;
+  height: 150px;
+  margin-top: 3px;
+  border-radius: 3px;
+  border: 1px solid #2a4d9b;
 }
 
 /* Ô select panel Ground/Sân vườn — full-width, theme coban; sans-serif 9px khớp GUI. */

@@ -38,6 +38,7 @@ import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
 import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
 
 import { DevHud } from './gui/devhud' // perf HUD dev (fps/budget/leak) — tách monolith
+import { GrassPreview } from './gui/grass-preview' // 🔎 preview 1 lá cỏ cạnh Tinh chỉnh
 import { type APGuiCtx, setupGridPanel, setupGroundPanel, setupGUI, setupSunPanel } from './gui/gui'
 import { setupSitePanel } from './gui/site' // 🌳 panel sân vườn (site/lô)
 import { setupTweakPanel } from './gui/tweak' // 🎛️ tinh chỉnh decor (cỏ 3D, sau: đá/effect)
@@ -141,6 +142,8 @@ export class ArchPlanLab extends BaseWorld {
   private siteMats: THREE.Material[] = []
   private siteShaders: { dispose(): void; setTime?(s: number): void }[] = [] // GrassGround… — dispose + gió theo time
   private _siteGrass: GrassBlades | null = null // ref cỏ 3D đang sống → tinh chỉnh uniform live (no rebuild)
+  private preview: GrassPreview | null = null // 🔎 bảng preview 1 lá (mini WebGPU riêng)
+  private _previewGrass: GrassBlades | null = null // lá trong preview → tune cùng lúc với bãi ngoài
   private _refreshSiteReadout: (() => void) | null = null
 
   private groundGeo: THREE.PlaneGeometry | null = null
@@ -426,6 +429,9 @@ export class ArchPlanLab extends BaseWorld {
     this.controls?.dispose()
     this.controls = null
     this.palette?.dispose() // gỡ listener doc (mousedown/keydown) của popover palette
+    this.preview?.dispose() // 🔎 mini WebGPU preview: stop loop + dispose renderer/blade
+    this.preview = null
+    this._previewGrass = null
     this.gui?.destroy()
     this.gui = null
     this.leftTools?.remove() // gỡ wrapper → bỏ cả Scanner + Sun panel
@@ -667,6 +673,8 @@ export class ArchPlanLab extends BaseWorld {
     setupGroundPanel(ctx, tools)
     setupSitePanel(ctx, tools) // 🌳 nền + rào + bảng số liệu lô
     setupTweakPanel(ctx, tools) // 🎛️ tinh chỉnh decor (cỏ 3D…)
+    this.preview = new GrassPreview(tools) // 🔎 preview 1 lá — init async rồi dựng lá đầu
+    void this.preview.init().then(() => this._previewRebuild())
     this._buildMovePanel(tools) // 🤚 toggle kéo element trong 3D
     this._mountPalette(tools) // 🎨 khay swatch atelier — build SAU Move → mặc định nằm dưới Move
   }
@@ -945,11 +953,17 @@ export class ArchPlanLab extends BaseWorld {
     this.pickGroup.position.y = lift // giữ pick-box khớp building đã đôn
   }
 
-  // 🎛️ Chỉnh uniform LIVE trên cỏ 3D đang sống (gió/màu/hình dáng/đổ-bóng) — KHÔNG dựng lại → né recompile.
+  // 🎛️ Chỉnh uniform LIVE — áp ĐỒNG THỜI bãi ngoài (_siteGrass) + lá preview (_previewGrass). Né recompile.
   private _tuneGrass(apply: (g: GrassBlades) => void, persist: boolean): void {
     if (this._siteGrass) apply(this._siteGrass)
+    if (this._previewGrass) apply(this._previewGrass)
     if (this.sun) this.sun.shadow.needsUpdate = true // refresh shadow map khi đổi (đổ-bóng/hình)
     if (persist) this.store.autosave(this.state, this.site)
+  }
+
+  // 🔎 Dựng lại lá trong bảng preview từ grass3d (structural đổi). Giữ ref để tune uniform live cùng bãi.
+  private _previewRebuild(): void {
+    this._previewGrass = this.preview?.rebuild(this.site.grass3d) ?? null
   }
 
   private _clearSite(): void {
@@ -967,6 +981,7 @@ export class ArchPlanLab extends BaseWorld {
   // autosave (commit: tick/select/buông slider); false = live drag slider. Site KHÔNG vào undo (G0).
   private _applySite(persist: boolean): void {
     this._renderSite()
+    this._previewRebuild() // structural (mật độ/cao/rộng lá…) → đồng bộ lá preview
     this._refreshSiteReadout?.()
     if (this.sun) this.sun.shadow.needsUpdate = true
     if (persist) this.store.autosave(this.state, this.site)
