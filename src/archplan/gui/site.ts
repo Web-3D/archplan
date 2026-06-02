@@ -147,6 +147,29 @@ function buildGroundControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => vo
   }
 }
 
+// Cỏ 3D nhú lên (tier B — GrassBlades). Chỉ hiệu lực khi nền = Cỏ. Toggle + mật độ + cao lá.
+function buildGrass3dControls(body: HTMLElement, ctx: APGuiCtx): void {
+  const g = ctx.site.grass3d
+  body.appendChild(
+    toggleRow('🌿 Cỏ 3D (nền Cỏ)', g.enabled, (on) => {
+      g.enabled = on
+      ctx.applySite(true)
+    })
+  )
+  body.appendChild(
+    sliderRow('Mật độ /m²', 20, 300, 10, g.density, (v, c) => {
+      g.density = Math.round(v)
+      ctx.applySite(c)
+    })
+  )
+  body.appendChild(
+    sliderRow('Cao lá cm', 10, 55, 1, g.height * 100, (v, c) => {
+      g.height = v / 100
+      ctx.applySite(c)
+    })
+  )
+}
+
 // Hàng rào (bật, kiểu gỗ/tường, chiều cao).
 function buildFenceControls(body: HTMLElement, ctx: APGuiCtx): void {
   const site = ctx.site
@@ -184,6 +207,7 @@ export function setupSitePanel(ctx: APGuiCtx, container: Element | null): HTMLEl
   const { el: roEl, refresh } = readout(ctx)
   ctx.registerSiteReadout(refresh)
   buildGroundControls(body, ctx, refresh)
+  buildGrass3dControls(body, ctx)
   buildFenceControls(body, ctx)
   body.appendChild(roEl)
   let open = true
