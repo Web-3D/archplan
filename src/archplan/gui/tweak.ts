@@ -126,7 +126,7 @@ function buildGrassStructural(body: HTMLElement, ctx: APGuiCtx): void {
     sliderRow(
       'Rộng lá mm',
       1,
-      6,
+      12,
       0.5,
       g.bladeWidth * 1000,
       (v, c) => {

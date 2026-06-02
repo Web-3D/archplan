@@ -27,7 +27,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js'
 import { PMREMGenerator } from 'three/webgpu'
-import { GrassBlades } from 'threejs-modules/components/GrassBlades'
+import type { GrassBlades } from 'threejs-modules/components/GrassBlades'
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
@@ -939,9 +939,7 @@ export class ArchPlanLab extends BaseWorld {
       mats: this.siteMats,
       shaders: this.siteShaders,
     }
-    renderSiteState(this.site, ctx)
-    this._siteGrass =
-      this.siteShaders.find((s): s is GrassBlades => s instanceof GrassBlades) ?? null
+    this._siteGrass = renderSiteState(this.site, ctx).grass // handle trực tiếp (không instanceof → live ổn)
     const lift = this.site.show ? this.site.groundThick / 1000 : 0
     this.buildingGroup.position.y = lift
     this.pickGroup.position.y = lift // giữ pick-box khớp building đã đôn
