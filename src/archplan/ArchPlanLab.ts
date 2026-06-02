@@ -137,7 +137,7 @@ export class ArchPlanLab extends BaseWorld {
   private readonly siteGroup = new THREE.Group()
   private siteGeos: THREE.BufferGeometry[] = []
   private siteMats: THREE.Material[] = []
-  private siteShaders: { dispose(): void }[] = [] // vật liệu procedural lô (GrassGround…) — dispose riêng
+  private siteShaders: { dispose(): void; setTime?(s: number): void }[] = [] // GrassGround… — dispose + gió theo time
   private _refreshSiteReadout: (() => void) | null = null
 
   private groundGeo: THREE.PlaneGeometry | null = null
@@ -369,9 +369,10 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
-  protected onUpdate(_time: number, deltaTime: number): void {
+  protected onUpdate(time: number, deltaTime: number): void {
     this._applyWASD()
     this.controls?.update()
+    for (const s of this.siteShaders) s.setTime?.(time) // 🌿 gió lùa cỏ (GrassGround) chạy theo elapsed
     this.css2dRenderer?.render(this.scene, this.camera)
     this.guard?.check()
     this.devHud?.update(this.renderer.info, deltaTime)
