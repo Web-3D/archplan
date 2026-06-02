@@ -68,7 +68,7 @@ export class GrassPreview {
     this.grass?.dispose()
     this.grass = null
     if (!cfg.enabled) return null
-    // width/depth siêu nhỏ + maxBlades 1 → đúng 1 lá ở tâm (camera frame sẵn).
+    // width/depth siêu nhỏ + maxBlades 1 → đúng 1 lá ở tâm (camera frame sẵn). DÙNG CHUNG model với bãi.
     this.grass = new GrassBlades({
       width: 0.01,
       depth: 0.01,
@@ -77,17 +77,8 @@ export class GrassPreview {
       maxBlades: 1,
       bladeHeight: cfg.height,
       bladeWidth: cfg.bladeWidth,
-      wind: cfg.wind,
-      windSpeed: cfg.windSpeed,
-      baseColor: cfg.baseColor,
-      tipColor: cfg.tipColor,
-      edgeColor: cfg.edgeColor,
-      curve: cfg.curve,
-      twist: cfg.twist,
-      taper: cfg.taper,
-      heightVar: cfg.heightVar,
-      leanAmt: cfg.leanAmt,
-      leanAngle: cfg.leanAngle,
+      segments: cfg.segments,
+      color: cfg.color,
     })
     this.scene.add(this.grass.getMesh())
     return this.grass
