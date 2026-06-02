@@ -8,7 +8,7 @@ import GUI from 'lil-gui'
 import type * as THREE from 'three'
 import { Tabs } from 'threejs-modules/ui/Tabs'
 
-import type { GroundType, SunOpts } from '../scene/scene'
+import type { GroundType } from '../scene/scene'
 import { type FloorDef, ROT_OPTIONS, type ShapeInstance } from '../state/state'
 import type { APGuiCtx } from './ctx'
 import {
@@ -85,39 +85,54 @@ export function makeDraggable(gui: GUI): void {
   document.addEventListener('mouseup', onUp)
 }
 
-// ── Grid Scanner panel ─────────────────────────────────────────────────────────
+// ── Tools panel (gộp Surface + Scanner + Pick/Move) ──────────────────────────────
 
 type GridPosKey = 'zPos' | 'xPos' | 'cyPos'
 type GridVisKey = 'zVisible' | 'xVisible' | 'cyVisible'
 
-// Dropdown gọn: title "Scanner" bấm để mở/đóng danh sách X/Y/Z. X/Z = mặt đứng đo kích
-// thước; Y = mặt ngang tọa độ. Mặc định đóng (collapse).
-export function setupGridPanel(ctx: APGuiCtx, container: Element | null): HTMLElement {
+// 1 panel float trái: Surface (ô tick + symbol, TRÊN CÙNG) · Scanner X/Y/Z (bung ra) ·
+// hàng đáy [Pick XZ: tick+📍 | Move: 🤚]. Không chữ — chỉ symbol.
+export function setupToolsPanel(ctx: APGuiCtx, container: Element | null): HTMLElement {
   const p = document.createElement('div')
-  p.className = 'ap-scan-panel'
-  const ttl = document.createElement('button')
-  ttl.className = 'ap-scan-title'
-  const body = document.createElement('div')
-  body.appendChild(mkGridRow('X', 'xPos', 'xVisible', 'x', -30, 30, () => ctx.getXGridGroup(), ctx))
-  body.appendChild(
-    mkGridRow('Y', 'cyPos', 'cyVisible', 'y', 0, 60, () => ctx.getCYGridGroup(), ctx)
-  )
-  body.appendChild(mkGridRow('Z', 'zPos', 'zVisible', 'z', -30, 30, () => ctx.getZGridGroup(), ctx))
-  body.appendChild(mkPickRow(ctx))
-  let open = false
-  const render = (): void => {
-    ttl.textContent = `${open ? '▾' : '▸'} Scanner`
-    body.style.display = open ? '' : 'none'
-  }
-  ttl.addEventListener('click', () => {
-    open = !open
-    render()
-  })
-  render()
-  p.appendChild(ttl)
-  p.appendChild(body)
+  p.className = 'ap-scan-panel ap-tools-panel'
+  p.appendChild(mkSurfaceRow(ctx))
+  p.appendChild(mkGridRow('X', 'xPos', 'xVisible', 'x', -30, 30, () => ctx.getXGridGroup(), ctx))
+  p.appendChild(mkGridRow('Y', 'cyPos', 'cyVisible', 'y', 0, 60, () => ctx.getCYGridGroup(), ctx))
+  p.appendChild(mkGridRow('Z', 'zPos', 'zVisible', 'z', -30, 30, () => ctx.getZGridGroup(), ctx))
+  p.appendChild(mkPickMoveRow(ctx))
   container?.appendChild(p)
   return p
+}
+
+// Surface (trên cùng): mỗi nền = 1 symbol (no ô tick). Click → setGround + symbol đó VIỀN SÁNG (active).
+function mkSurfaceRow(ctx: APGuiCtx): HTMLElement {
+  const row = document.createElement('div')
+  row.className = 'ap-surface-row'
+  let active: GroundType = ctx.groundType
+  const opts: [string, GroundType][] = [
+    ['🔲', 'none'], // Grid (nền editor)
+    ['🧱', 'stone'], // Stone paving
+    ['🛣️', 'asphalt'], // Asphalt
+  ]
+  const btns: { val: GroundType; el: HTMLButtonElement }[] = []
+  const sync = (): void => {
+    for (const b of btns) b.el.classList.toggle('ap-surface-on', active === b.val)
+  }
+  for (const [sym, val] of opts) {
+    const b = document.createElement('button')
+    b.className = 'ap-surface-opt'
+    b.title = val
+    b.textContent = sym
+    b.addEventListener('click', () => {
+      active = val
+      ctx.setGround(val)
+      sync()
+    })
+    row.appendChild(b)
+    btns.push({ val, el: b })
+  }
+  sync()
+  return row
 }
 
 function mkGridRow(
@@ -164,125 +179,30 @@ function mkGridRow(
   return row
 }
 
-// Toggle "📍 Pick XZ": tick → click/rê chuột trên mặt phẳng XZ ra tọa độ (tắt orbit).
-function mkPickRow(ctx: APGuiCtx): HTMLElement {
+// Hàng đáy: Pick XZ (ô tick + 📍, không chữ) bên trái · Move (🤚, không chữ) bên phải. Đều toggle.
+function mkPickMoveRow(ctx: APGuiCtx): HTMLElement {
   const row = document.createElement('div')
-  row.style.cssText = 'display:flex;align-items:center;gap:3px;margin-top:4px'
-  const cb = document.createElement('input')
-  cb.type = 'checkbox'
-  cb.style.cssText = 'width:11px;height:11px;flex-shrink:0;cursor:pointer'
-  cb.addEventListener('change', () => ctx.setPickMode(cb.checked))
-  // Cho ArchPlanLab đồng bộ ô tick khi thoát pick bằng chuột phải
+  row.className = 'ap-pickmove-row'
+  const pick = document.createElement('label')
+  pick.className = 'ap-pick-opt'
+  pick.title = 'Pick XZ — click/rê mặt phẳng XZ ra tọa độ'
+  const pcb = document.createElement('input')
+  pcb.type = 'checkbox'
+  pcb.className = 'ap-pick-cb'
+  pcb.addEventListener('change', () => ctx.setPickMode(pcb.checked))
   ctx.registerPickToggle((on) => {
-    cb.checked = on
+    pcb.checked = on // đồng bộ khi thoát pick bằng chuột phải
   })
-  const lbl = document.createElement('span')
-  lbl.textContent = '📍 Pick XZ'
-  lbl.style.cssText = 'cursor:pointer'
-  lbl.addEventListener('click', () => {
-    cb.checked = !cb.checked
-    ctx.setPickMode(cb.checked)
-  })
-  row.appendChild(cb)
-  row.appendChild(lbl)
-  return row
-}
-
-// ── Sun panel ────────────────────────────────────────────────────────────────
-
-// Panel ☀ Sun (dropdown) nằm dưới Scanner trong wrapper .ap-left-tools. Az/El/Intensity →
-// xoay/đổi cường độ DirectionalLight real-time (ctx.applySun đọc ctx.sunOpts).
-export function setupSunPanel(ctx: APGuiCtx, container: Element | null): HTMLElement {
-  const p = document.createElement('div')
-  p.className = 'ap-scan-panel ap-sun-panel' // dùng lại theme coban + slider của scanner
-  const ttl = document.createElement('button')
-  ttl.className = 'ap-scan-title'
-  const body = document.createElement('div')
-  body.appendChild(mkSunRow('Az', 'azimuth', 0, 360, 1, ctx))
-  body.appendChild(mkSunRow('El', 'elevation', 5, 85, 1, ctx))
-  body.appendChild(mkSunRow('Int', 'intensity', 0, 5, 0.1, ctx))
-  let open = false
-  const render = (): void => {
-    ttl.textContent = `${open ? '▾' : '▸'} ☀ Sun`
-    body.style.display = open ? '' : 'none'
-  }
-  ttl.addEventListener('click', () => {
-    open = !open
-    render()
-  })
-  render()
-  p.appendChild(ttl)
-  p.appendChild(body)
-  container?.appendChild(p)
-  return p
-}
-
-// Panel chọn nền môi trường (cỏ/xi măng/lưới). Đổi nền → swap material + màu bounce hemisphere.
-export function setupGroundPanel(ctx: APGuiCtx, container: Element | null): HTMLElement {
-  const p = document.createElement('div')
-  p.className = 'ap-scan-panel ap-ground-panel'
-  const ttl = document.createElement('button')
-  ttl.className = 'ap-scan-title'
-  const body = document.createElement('div')
-  // Bỏ nhãn "Surface" — chỉ còn select full-width (title "🌱 Ground" đã đủ ngữ cảnh).
-  const sel = document.createElement('select')
-  sel.className = 'ap-ground-sel' // style theme cobalt full-width (xem archplan-lab.css)
-  const opts: [string, GroundType][] = [
-    ['Grid', 'none'],
-    ['Stone paving', 'stone'],
-    ['Asphalt', 'asphalt'],
-  ]
-  for (const [text, val] of opts) {
-    const o = document.createElement('option')
-    o.value = val
-    o.textContent = text
-    if (val === ctx.groundType) o.selected = true
-    sel.appendChild(o)
-  }
-  sel.addEventListener('change', () => ctx.setGround(sel.value as GroundType))
-  body.appendChild(sel)
-  let open = true
-  const render = (): void => {
-    ttl.textContent = `${open ? '▾' : '▸'} 🌱 Surface`
-    body.style.display = open ? '' : 'none'
-  }
-  ttl.addEventListener('click', () => {
-    open = !open
-    render()
-  })
-  render()
-  p.appendChild(ttl)
-  p.appendChild(body)
-  container?.appendChild(p)
-  return p
-}
-
-function mkSunRow(
-  label: string,
-  key: keyof SunOpts,
-  min: number,
-  max: number,
-  step: number,
-  ctx: APGuiCtx
-): HTMLElement {
-  const row = document.createElement('div')
-  row.style.cssText = 'display:flex;align-items:center;gap:3px;margin-bottom:3px'
-  const lbl = document.createElement('span')
-  lbl.textContent = label
-  lbl.style.cssText = 'width:16px;flex-shrink:0'
-  const sl = document.createElement('input')
-  sl.type = 'range'
-  sl.min = String(min)
-  sl.max = String(max)
-  sl.step = String(step)
-  sl.value = String(ctx.sunOpts[key])
-  sl.style.cssText = 'flex:1;min-width:0;cursor:pointer'
-  sl.addEventListener('input', () => {
-    ctx.sunOpts[key] = parseFloat(sl.value)
-    ctx.applySun()
-  })
-  row.appendChild(lbl)
-  row.appendChild(sl)
+  const pin = document.createElement('span')
+  pin.textContent = '📍'
+  pick.append(pcb, pin)
+  const move = document.createElement('button')
+  move.className = 'ap-move-btn ap-move-sym'
+  move.textContent = '🤚'
+  move.title = 'Move — kéo tường/cột/cầu thang/cửa trong 3D. Chuột phải = thoát.'
+  move.addEventListener('click', () => ctx.setMoveMode(!ctx.getMoveMode()))
+  ctx.registerMoveToggle((on) => move.classList.toggle('ap-move-on', on))
+  row.append(pick, move)
   return row
 }
 

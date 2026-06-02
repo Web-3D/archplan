@@ -43,6 +43,9 @@ export interface APGuiCtx {
   getCYGridGroup(): THREE.Group | null
   setPickMode(on: boolean): void
   registerPickToggle(setChecked: (on: boolean) => void): void
+  setMoveMode(on: boolean): void // 🤚 Move tool — kéo element trong 3D (loại trừ paint/pick)
+  getMoveMode(): boolean
+  registerMoveToggle(setOn: (on: boolean) => void): void // sync nút 🤚 khi mode đổi (vd thoát chuột phải)
   build(): void // commit: history + persist + render (select/nút/buông slider)
   buildLive(): void // live drag: chỉ render geometry, throttle rAF (kéo slider)
   rebuild(): void

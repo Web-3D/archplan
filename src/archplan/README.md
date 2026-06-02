@@ -64,17 +64,27 @@ ArchPlanLab (extends BaseWorld)
   │
   ├── state: BuildingState        ← floors[] → instances[] → segments[]
   │
-  ├── GUI (lil-gui)
-  │     ├── Floor folders (floorH + shape row + instance folders)
-  │     │     └── Instance folder (undo/redo + position/structure/roof/dims/walls)
-  │     └── Actions folder (+ Floor | Build | Reset | JSON)
+  ├── 🗄️ Drawer PHẢI (.ap-drawer) ← shell bền qua rebuild; cobalt trong suốt; Tabs ngang:
+  │     ├── 🏠 Building            ← lil-gui (floors → instances → structure/roof/dims/walls)
+  │     ├── 🌳 Ground (Sân vườn)   ← nền lô + cỏ 3D + rào (bộ màu NÂU đất; tab nút cũng nâu)
+  │     └── 🎛️ Tinh chỉnh          ← cỏ B0 (Cao/Rộng/Số đốt + màu) + 🔎 preview 1 lá
   │
-  ├── Left tools (.ap-left-tools) ← cột dọc: Scanner panel + ☀ Sun panel
-  │     ├── Scanner               ← laser grid X/Y/Z + Pick XZ
-  │     └── ☀ Sun                 ← Azimuth / Elevation / Intensity → DirectionalLight
+  ├── 🗄️ Drawer TRÁI (.ap-ldrawer)← ẩn mép trái, kéo nhô; gui Tools:
+  │     ├── Surface               ← symbol 🔲/🧱/🛣️ (none/stone/asphalt) — viền sáng khi chọn
+  │     ├── Grid X/Y/Z            ← laser grid tọa độ
+  │     └── Pick + 🤚 Move        ← cùng hàng (ô stick + symbol)
+  │
+  ├── ☀ Sun GIZMO (3D)            ← quả cầu kéo trên vòm → đổi hướng nắng; trục Y dây-dọi + bóng chân
+  │     └── dock panel cố định    ← toggle ☀/🌙 + slider sáng DỌC + ô màu (KHÔNG bám sun)
+  │
+  ├── 🎨 Palette                  ← tool TỰ DO float (khay swatch atelier + cọ sơn 3D)
   │
   └── Undo/Redo stacks            ← JSON snapshot trước mỗi build, max 50
 ```
+
+> **Cỏ né foundation:** nền cỏ (Ground=grass) KHÔNG mọc trong footprint foundation — `_foundationRects()`
+> gom rect (bbox + overhang `foundOh`) các instance tầng trệt có `showFoundation`, truyền qua
+> `renderSiteState(…, { exclude })` → `GrassBlades` bỏ lá rơi trong rect. "Nơi có foundation thì không đặt nền cỏ."
 
 ---
 

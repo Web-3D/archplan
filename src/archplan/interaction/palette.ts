@@ -87,8 +87,9 @@ export class PalettePanel {
     p.className = 'ap-scan-panel ap-palette-panel'
     const ttl = document.createElement('button')
     ttl.className = 'ap-scan-title'
-    ttl.textContent = '▾ 🎨 Palette'
+    ttl.textContent = '▸ 🎨 Palette' // mặc định ĐÓNG (không thả khay trước)
     const body = document.createElement('div')
+    body.style.display = 'none'
     const cur = document.createElement('button')
     cur.className = 'ap-pal-current'
     cur.addEventListener('click', () => this._togglePaletteBrowser())

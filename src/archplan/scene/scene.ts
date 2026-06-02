@@ -26,6 +26,8 @@ export type SunOpts = {
   azimuth: number // deg — hướng la bàn quanh trục Y
   elevation: number // deg — cao độ so với mặt phẳng ngang
   intensity: number
+  color: number // màu sáng (hex) — điều khiển qua ô màu trên gizmo sun
+  enabled: boolean // bật/tắt sun (nút trên gizmo) — tắt → chỉ còn hemisphere fill
 }
 
 // Loại nền môi trường: 'none' = ground tối + lưới tọa độ (như cũ); còn lại = vật liệu tự nhiên

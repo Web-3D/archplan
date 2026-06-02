@@ -1166,9 +1166,9 @@
   flex-direction: column;
   gap: 6px;
   padding: 6px;
-  background: rgba(7, 22, 18, 0.55);
+  background: rgba(22, 38, 92, 0.2); /* cobalt #16265C — gần như trong suốt */
   backdrop-filter: blur(5px);
-  border-left: 1px solid var(--ap-border, rgba(201, 162, 78, 0.3));
+  border-left: 1px solid rgba(42, 77, 155, 0.6); /* viền cobalt */
 }
 /* Tay kéo — tab thò ra mép trái drawer, luôn thấy cả khi đóng (neo vào drawer đã transform). */
 .ap-drawer-handle {
@@ -1202,9 +1202,11 @@
   width: 100% !important;
   max-width: 100%;
 }
-/* Tab "Building" đã là nhãn → ẩn title gốc lil-gui (khỏi lặp). Root luôn mở trong drawer. */
+/* Building GUI BẮT ĐẦU từ màu xanh đậm (title bar = rgba(7,22,18) — màu cũ của drawer) ở trên cùng;
+   drawer giờ cobalt trong suốt → màu xanh đậm "dời" vào dẫn đầu Building. */
 .ap-drawer .lil-gui.archplan-lab > .lil-title {
-  display: none;
+  display: block;
+  cursor: pointer;
 }
 
 /* ── Tab ngang đầu drawer (Building | Ground | Tinh chỉnh) — dùng Tabs + ap-tab look ───── */
@@ -1214,7 +1216,7 @@
   z-index: 3;
   margin: -6px -6px 0; /* tràn bù padding 6px của drawer-body → full bề ngang */
   padding: 6px 6px 0;
-  background: rgba(7, 22, 18, 0.92);
+  background: rgba(22, 38, 92, 0.62); /* cobalt — đậm hơn body chút để đọc tab */
   backdrop-filter: blur(5px);
   flex-wrap: wrap;
 }
@@ -1228,6 +1230,21 @@
   background: var(--bg-2, #14443a);
   border-color: rgba(201, 162, 78, 0.55);
   color: #eef3f0;
+}
+/* 🌳 Nút tab Ground (con thứ 2 — phụ thuộc thứ tự Building·Ground·Tinh chỉnh) nhuốm
+   đúng bộ màu NÂU ĐẤT của panel Ground → nhìn tab là biết hệ nâu. */
+.ap-drawer-tabs > .ap-tab-btn:nth-child(2) {
+  background: rgba(92, 68, 35, 0.35); /* bg-2 mờ */
+  border-color: rgba(181, 138, 60, 0.5); /* bg-4 */
+  color: #e8c87a; /* bg-5 — kem nâu */
+}
+.ap-drawer-tabs > .ap-tab-btn:nth-child(2):hover {
+  border-color: #e0b860; /* bg-5 */
+}
+.ap-drawer-tabs > .ap-tab-btn:nth-child(2).ap-tab-active {
+  background: #5c4423; /* bg-2 nâu đậm */
+  border-color: #b5532a; /* accent đỏ-gạch */
+  color: #f5ead2; /* text kem */
 }
 .ap-drawer-panel {
   margin-top: 5px; /* khe dưới hàng tab dính */
@@ -1262,4 +1279,231 @@
 .ap-drawer .ap-pal-pop {
   left: auto;
   right: calc(100% + 6px);
+}
+
+/* ── ◀ Drawer TRÁI (bảng Tools: Surface + tọa độ) — ẩn vào trái mặc định, tay kéo nhô ra ───── */
+.ap-ldrawer {
+  position: absolute;
+  top: 5px;
+  left: 0;
+  z-index: 200;
+  transform: translateX(0);
+  transition: transform 0.24s ease;
+}
+.ap-ldrawer.ap-ldrawer-closed {
+  transform: translateX(-100%); /* trượt ẩn vào mép trái — chỉ chừa tay kéo */
+}
+.ap-ldrawer .ap-left-tools {
+  position: static; /* trong drawer → bỏ absolute top/left */
+  top: auto;
+  left: auto;
+}
+.ap-ldrawer-handle {
+  position: absolute;
+  right: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ap-title-bg, rgba(7, 22, 18, 0.95));
+  color: var(--ap-accent, #c9a24e);
+  border: 1px solid var(--ap-border, rgba(201, 162, 78, 0.3));
+  border-left: none;
+  border-radius: 0 7px 7px 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  font-family: inherit;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.4);
+}
+.ap-ldrawer-handle:hover {
+  background: var(--ap-title-grab-bg, rgba(14, 46, 38, 0.98));
+  color: #eef3f0;
+}
+
+/* 🎨 Palette = tool TỰ DO: float riêng (offset parent cho kéo), né drawer trái. Kéo title để dời. */
+.ap-palette-float {
+  position: absolute;
+  top: 6px;
+  left: 200px;
+  z-index: 150;
+}
+
+/* ── 🌳 Ground tab — bộ màu NÂU ĐẤT (thay coban) ─────────────────────────────────
+   bg-1 nền · bg-2..4 surface · bg-5 highlight · accent đỏ-gạch · text kem. */
+.ap-scan-panel.ap-site-panel {
+  --gr-bg-1: #3e2f1c;
+  --gr-bg-2: #5c4423;
+  --gr-bg-3: #8a6a2f;
+  --gr-bg-4: #b58a3c;
+  --gr-bg-5: #e0b860;
+  --gr-accent: #b5532a;
+  --gr-text: #f5ead2;
+  background: rgba(62, 47, 28, 0.92); /* bg-1 */
+  border-color: var(--gr-accent);
+  color: var(--gr-text);
+}
+.ap-scan-panel.ap-site-panel .ap-scan-title {
+  color: var(--gr-bg-5); /* highlight */
+}
+.ap-scan-panel.ap-site-panel input[type='range'] {
+  background: var(--gr-bg-3); /* track */
+}
+.ap-scan-panel.ap-site-panel input[type='range']::-webkit-slider-thumb {
+  background: var(--gr-bg-5); /* thumb highlight */
+}
+.ap-scan-panel.ap-site-panel input[type='checkbox'] {
+  accent-color: var(--gr-accent);
+}
+.ap-scan-panel.ap-site-panel .ap-ground-sel {
+  background: var(--gr-bg-2);
+  border-color: var(--gr-bg-4);
+  color: var(--gr-text);
+}
+.ap-scan-panel.ap-site-panel .ap-ground-sel:hover {
+  border-color: var(--gr-bg-5);
+}
+.ap-scan-panel.ap-site-panel .ap-site-readout {
+  background: rgba(92, 68, 35, 0.55); /* bg-2 */
+  border-color: var(--gr-bg-4);
+  color: var(--gr-text);
+}
+.ap-scan-panel.ap-site-panel .ap-site-readout b {
+  color: var(--gr-bg-5);
+}
+
+/* ☀ Sun gizmo — panel CSS2D bám theo quả sun trong scene: [toggle][slider sáng][ô màu]. */
+.ap-sun-ctrl {
+  position: absolute; /* DOCK CỐ ĐỊNH mép trái-dưới — không bám sun → hết che/jitter khi orbit */
+  left: 8px;
+  bottom: 8px;
+  z-index: 160;
+  display: flex;
+  flex-direction: column; /* dọc */
+  align-items: center;
+  gap: 5px;
+  padding: 6px 4px;
+  border-radius: 9px;
+  background: rgba(7, 22, 18, 0.82);
+  border: 1px solid var(--ap-border, rgba(201, 162, 78, 0.4));
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  user-select: none;
+}
+.ap-sun-toggle {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 18px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid var(--ap-border, rgba(201, 162, 78, 0.4));
+  background: rgba(201, 162, 78, 0.18);
+  color: #ffe9a8;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ap-sun-toggle:hover {
+  background: rgba(201, 162, 78, 0.32);
+}
+.ap-sun-int {
+  writing-mode: vertical-lr;
+  direction: rtl; /* min ở DƯỚI, max ở TRÊN */
+  width: 14px;
+  height: 64px;
+  cursor: pointer;
+  accent-color: var(--ap-accent, #c9a24e);
+}
+.ap-sun-color {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--ap-border, rgba(201, 162, 78, 0.4));
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+/* Nhãn trục XYZ (mờ xanh dương nhạt) — hiện khi kéo sun. */
+.ap-axis-label {
+  color: #bcd8ff;
+  font: bold 11px monospace;
+  text-shadow: 0 0 4px rgba(20, 40, 80, 0.9);
+  opacity: 0.75;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── 🛠 Tools panel (gộp Surface + Scanner + Pick/Move) — float trái, Palette nằm phải ───── */
+.ap-left-tools {
+  flex-direction: row; /* Tools | Palette cạnh nhau (palette bên phải) */
+  align-items: flex-start;
+}
+.ap-scan-panel.ap-tools-panel {
+  width: 138px;
+  font: 9px/1.5 'Segoe UI', system-ui, sans-serif;
+}
+/* Surface (trên cùng): hàng ô tick + symbol, chia đều. */
+.ap-surface-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 5px;
+}
+.ap-surface-opt {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 3px 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s,
+    background 0.12s;
+}
+.ap-surface-opt:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+/* Active: symbol viền vàng sáng + glow (thay ô tick). */
+.ap-surface-opt.ap-surface-on {
+  border-color: #ffd54a;
+  box-shadow: 0 0 6px 1px rgba(255, 213, 74, 0.6);
+}
+/* Hàng đáy: Pick (tick+📍) trái · Move (🤚) phải. */
+.ap-pickmove-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 5px;
+}
+.ap-pick-opt {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.ap-pick-cb {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: #2a4d9b;
+}
+/* Move = nút symbol gọn (đè .ap-move-btn full-width). Bật = nền vàng. */
+.ap-move-btn.ap-move-sym {
+  width: auto;
+  padding: 1px 7px;
+  font-size: 14px;
+  line-height: 1.2;
 }

@@ -27,7 +27,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js'
 import { PMREMGenerator } from 'three/webgpu'
-import type { GrassBlades } from 'threejs-modules/components/GrassBlades'
+import type { GrassBlades, GrassExcludeRect } from 'threejs-modules/components/GrassBlades'
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
@@ -40,12 +40,13 @@ import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
 
 import { DevHud } from './gui/devhud' // perf HUD dev (fps/budget/leak) — tách monolith
 import { GrassPreview } from './gui/grass-preview' // 🔎 preview 1 lá cỏ cạnh Tinh chỉnh
-import { type APGuiCtx, setupGridPanel, setupGroundPanel, setupGUI, setupSunPanel } from './gui/gui'
+import { type APGuiCtx, setupGUI, setupToolsPanel } from './gui/gui'
 import { setupSitePanel } from './gui/site' // 🌳 panel sân vườn (site/lô)
 import { setupTweakPanel } from './gui/tweak' // 🎛️ tinh chỉnh decor (cỏ 3D, sau: đá/effect)
 import { type HighlightHost, HighlightOverlay } from './interaction/highlight' // flash viền phần đang chỉnh — tách monolith
 import { type ManipulateHost, ManipulateTool } from './interaction/manipulate' // 🤚 Move + 🎯 Focus — tách monolith
 import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 khay swatch atelier — tách monolith
+import { SunGizmo, type SunGizmoHost } from './interaction/sunGizmo' // ☀ sun = vật thể kéo trong scene
 import {
   CoordPicker,
   type GroundType,
@@ -98,11 +99,21 @@ export class ArchPlanLab extends BaseWorld {
   private drawerTabs: Tabs | null = null // tab ngang đầu drawer (Building | Ground | Tinh chỉnh)
   private drawerPanels: HTMLElement[] = [] // panel non-gui trong drawer (Ground+Tinh chỉnh) — gỡ khi teardown
   private _drawerTab = 0 // tab drawer đang mở — nhớ qua _rebuildGUI
+  private lDrawer: HTMLElement | null = null // drawer TRÁI: bảng Tools (Surface+tọa độ) — ẩn mặc định
+  private lDrawerBody: HTMLElement | null = null
+  private paletteWrap: HTMLElement | null = null // 🎨 Palette = tool TỰ DO float (ngoài drawer), kéo được
   private controls: OrbitControls | null = null
 
   // Đèn mặt trời + tham số (điều khiển qua panel ☀ Sun). Default ≈ vị trí cũ (10,18,10).
   private sun: THREE.DirectionalLight | null = null
-  private readonly sunOpts: SunOpts = { azimuth: 45, elevation: 52, intensity: 2.2 }
+  private readonly sunOpts: SunOpts = {
+    azimuth: 45,
+    elevation: 52,
+    intensity: 2.2,
+    color: 0xfff5e0,
+    enabled: true,
+  }
+  private sunGizmo: SunGizmo | null = null // ☀ sun = vật thể kéo trong scene (thay panel GUI)
 
   // opFolders — key: "${instId}:${segIdx}" → opening sub-folders per segment
   private opFolders = new Map<string, GUI[]>()
@@ -129,7 +140,7 @@ export class ArchPlanLab extends BaseWorld {
   // GIỮ ở lab (điều phối 3 mode loại trừ); phiên kéo + map anchor folder nằm trong ManipulateTool.
   private manipulate: ManipulateTool | null = null
   private moveMode = false
-  private _moveBtn: HTMLElement | null = null
+  private _syncMoveToggle: ((on: boolean) => void) | null = null // sync nút 🤚 trong gui Tools
   // _downPos = vị trí nhấn (phân biệt click vs drag/orbit) — _onPointerUp dùng cho click→Focus.
   private _downPos: { x: number; y: number } | null = null
   // brick-3d — geometry thật, không merge; track để dispose mỗi build.
@@ -213,6 +224,7 @@ export class ArchPlanLab extends BaseWorld {
   private readonly _onPointerDown = (e: PointerEvent): void => {
     if (e.button !== 0) return // chỉ chuột trái
     this._downPos = { x: e.clientX, y: e.clientY } // để _onPointerUp phân biệt click vs drag/orbit
+    if (this.sunGizmo?.tryStartDrag(e)) return // ☀ nhấn trúng quả sun → kéo (ưu tiên cao nhất, mọi mode)
     if (this.paintMode) {
       this._paintAt(e) // SPIKE brush: click → sơn tường
       return
@@ -226,6 +238,10 @@ export class ArchPlanLab extends BaseWorld {
     this._pickAt(e)
   }
   private readonly _onPointerMove = (e: PointerEvent): void => {
+    if (this.sunGizmo?.isDragging()) {
+      this.sunGizmo.drag(e) // ☀ đang kéo sun → đổi hướng nắng theo vòm
+      return
+    }
     if (this.moveMode && this.manipulate?.isDragging()) {
       this.manipulate?.dragMove(e)
       return
@@ -233,19 +249,27 @@ export class ArchPlanLab extends BaseWorld {
     if (this.pickMode && this.picking) this._pickAt(e)
   }
   private readonly _onPointerUp = (e: PointerEvent): void => {
+    if (this.sunGizmo?.isDragging()) {
+      this.sunGizmo.endDrag() // ☀ thả sun → bật lại orbit
+      this._downPos = null
+      return
+    }
     if (this.manipulate?.isDragging()) {
       this.manipulate?.dragEnd()
       this._downPos = null
       return
     }
     this.picking = false
-    // Click (không kéo) trên element ở chế độ thường → trỏ GUI tới đúng panel. Bỏ qua paint/pick.
-    if (this._downPos && !this.paintMode && !this.pickMode) {
-      const dx = e.clientX - this._downPos.x
-      const dy = e.clientY - this._downPos.y
-      if (dx * dx + dy * dy < 25) this.manipulate?.clickFocus(e) // < 5px = click, không phải orbit
-    }
+    this._maybeClickFocus(e)
     this._downPos = null
+  }
+
+  // Click (không kéo) ở chế độ thường → trỏ GUI tới đúng panel. Bỏ qua paint/pick. <5px = click.
+  private _maybeClickFocus(e: PointerEvent): void {
+    if (!this._downPos || this.paintMode || this.pickMode) return
+    const dx = e.clientX - this._downPos.x
+    const dy = e.clientY - this._downPos.y
+    if (dx * dx + dy * dy < 25) this.manipulate?.clickFocus(e)
   }
   // Chuột phải khi đang pick/paint/move → thoát mode + chặn menu chuột phải
   private readonly _onContextMenu = (e: MouseEvent): void => {
@@ -301,10 +325,7 @@ export class ArchPlanLab extends BaseWorld {
       this._setPickMode(false)
     }
     if (this.controls) this.controls.enabled = !on
-    if (this._moveBtn) {
-      this._moveBtn.classList.toggle('ap-move-on', on)
-      this._moveBtn.textContent = on ? '🤚 Move: ON — kéo vật' : '🤚 Move: off'
-    }
+    this._syncMoveToggle?.(on) // đổi class nút 🤚 (ap-move-on) — text bỏ, chỉ symbol
   }
 
   // Cọ palette: click element trong 3D → sơn màu cọ đang cầm. Chưa chọn swatch → không sơn.
@@ -351,10 +372,12 @@ export class ArchPlanLab extends BaseWorld {
       this.state = saved.state
       this.site = saved.site
     }
+    this._loadSunOpts() // khôi phục sun (az/el/intensity/màu/on-off) TRƯỚC khi _setupScene áp lên light
     this._setupScene()
     await this._setupEnvironment() // IBL → MeshStandardNodeMaterial phản chiếu specular (bớt nhựa)
     this._setupCamera()
     this._setupCSS2D()
+    if (this.sun) this.sunGizmo = new SunGizmo(this._sunGizmoHost(this.sun)) // ☀ sun kéo được trong scene
     this.humanFigure = new HumanFigure()
     this.humanFigure.build()
     this.scene.add(this.humanFigure.group)
@@ -368,6 +391,7 @@ export class ArchPlanLab extends BaseWorld {
     this.manipulate = new ManipulateTool(this._manipulateHost()) // trước _setupGUI: nhận registerFocus
     this.highlight = new HighlightOverlay(this._highlightHost())
     this._setupDrawer() // 🗄️ shell bền — tạo 1 lần trước GUI; gui+panels rebuild bên trong
+    this._setupLeftDrawer() // ◀ drawer trái (Tools) — shell bền, ẩn mặc định
     this._setupGUI()
     this._buildScene()
     window.addEventListener('keydown', this._onKeyDown)
@@ -437,9 +461,12 @@ export class ArchPlanLab extends BaseWorld {
     this.controls = null
     this.palette?.dispose() // gỡ listener doc (mousedown/keydown) của popover palette
     this._teardownPanels() // preview + gui nhà + 2 nhóm panel
-    this.drawer?.remove() // 🗄️ gỡ shell drawer (handle + body) — chỉ ở dispose, KHÔNG ở _rebuildGUI
+    this.drawer?.remove() // 🗄️ gỡ shell drawer phải (handle + body) — chỉ ở dispose, KHÔNG ở _rebuildGUI
     this.drawer = null
     this.drawerBody = null
+    this.lDrawer?.remove() // ◀ gỡ shell drawer trái (Tools)
+    this.lDrawer = null
+    this.lDrawerBody = null
     this.opFolders.clear()
     this._activeTabs.clear()
     this._clearBuilding()
@@ -463,6 +490,8 @@ export class ArchPlanLab extends BaseWorld {
     this.humanFigure = null
     this.coordPicker?.dispose()
     this.coordPicker = null
+    this.sunGizmo?.dispose() // ☀ gỡ quả sun + panel CSS2D
+    this.sunGizmo = null
     this.sun?.dispose() // dispose shadow map render target
     this.sun = null
     this.guard?.dispose()
@@ -577,7 +606,8 @@ export class ArchPlanLab extends BaseWorld {
     return { mat: e.mat, shader: e.shader, bounce: 0x8a8880 }
   }
 
-  // Đặt vị trí (cầu az/el, bán kính 24m trong tầm shadow camera) + intensity của sun từ sunOpts.
+  // Đặt vị trí (cầu az/el, bán kính 24m trong tầm shadow camera) + intensity/màu/on-off của sun từ
+  // sunOpts. Cuối hàm sync gizmo (vị trí quả sun bám theo light). Mọi nguồn đổi sun đều qua đây.
   private _applySun(): void {
     if (!this.sun) return
     const az = (this.sunOpts.azimuth * Math.PI) / 180
@@ -586,7 +616,52 @@ export class ArchPlanLab extends BaseWorld {
     const cosEl = Math.cos(el)
     this.sun.position.set(r * cosEl * Math.cos(az), r * Math.sin(el), r * cosEl * Math.sin(az))
     this.sun.intensity = this.sunOpts.intensity
+    this.sun.color.set(this.sunOpts.color)
+    this.sun.visible = this.sunOpts.enabled // tắt → chỉ còn hemisphere fill, không đổ bóng
     this.sun.shadow.needsUpdate = true // sun dời → shadow map cần vẽ lại (autoUpdate đang off)
+    this.sunGizmo?.sync()
+  }
+
+  // Sun persist riêng (localStorage 'archplan:sun') — độc lập design store. Load TRƯỚC _setupScene.
+  private _loadSunOpts(): void {
+    try {
+      const raw = localStorage.getItem('archplan:sun')
+      if (!raw) return
+      const o = JSON.parse(raw) as Partial<SunOpts>
+      if (typeof o.azimuth === 'number') this.sunOpts.azimuth = ((o.azimuth % 360) + 360) % 360
+      if (typeof o.elevation === 'number')
+        this.sunOpts.elevation = Math.max(5, Math.min(89, o.elevation))
+      if (typeof o.intensity === 'number')
+        this.sunOpts.intensity = Math.max(0, Math.min(5, o.intensity))
+      if (typeof o.color === 'number') this.sunOpts.color = Math.floor(o.color) & 0xffffff
+      if (typeof o.enabled === 'boolean') this.sunOpts.enabled = o.enabled
+    } catch {
+      /* JSON hỏng → giữ default */
+    }
+  }
+
+  private _saveSunOpts(): void {
+    try {
+      localStorage.setItem('archplan:sun', JSON.stringify(this.sunOpts))
+    } catch {
+      /* quota/private mode → bỏ qua */
+    }
+  }
+
+  // Host cho SunGizmo: bơm scene/camera/canvas/light + opts + tắt-orbit-khi-kéo + apply + persist.
+  private _sunGizmoHost(light: THREE.DirectionalLight): SunGizmoHost {
+    return {
+      scene: this.scene,
+      camera: this.camera,
+      canvas: this.canvas,
+      light,
+      opts: this.sunOpts,
+      setOrbit: (on) => {
+        if (this.controls) this.controls.enabled = on
+      },
+      apply: () => this._applySun(),
+      persist: () => this._saveSunOpts(),
+    }
   }
 
   private _setupCamera(): void {
@@ -594,7 +669,7 @@ export class ArchPlanLab extends BaseWorld {
     this.camera.near = 0.1
     this.camera.far = 300
     this.camera.updateProjectionMatrix()
-    this.camera.position.set(16, 12, 18)
+    this.camera.position.set(0, 12, 18) // x=0 → nhìn thẳng trục Z (mặc định)
     this.camera.lookAt(0, 2, 0)
 
     this.controls = new OrbitControls(this.camera, this.canvas)
@@ -620,7 +695,16 @@ export class ArchPlanLab extends BaseWorld {
 
   private _setupGUI(): void {
     this.manipulate?.clearFocus() // 3D→GUI: map folder dựng lại mỗi lần build GUI
-    const ctx: APGuiCtx = {
+    const body = this.drawerBody
+    if (!body) return
+    const ctx = this._makeGuiCtx()
+    this.gui = setupGUI(ctx, body) // lil-gui vào drawer (container) → hết fixed, title=thu/mở
+    this._buildLeftTools(ctx, body)
+  }
+
+  // Gom callbacks GUI (state + handlers) thành APGuiCtx — tách khỏi _setupGUI cho gọn (Rule-50).
+  private _makeGuiCtx(): APGuiCtx {
+    return {
       state: this.state,
       opFolders: this.opFolders,
       gridOpts: this.gridOpts,
@@ -638,6 +722,9 @@ export class ArchPlanLab extends BaseWorld {
       getCYGridGroup: () => this.heightGridSystem?.getCYGridGroup() ?? null,
       setPickMode: (on) => this._setPickMode(on),
       registerPickToggle: (fn) => (this._syncPickCheckbox = fn),
+      setMoveMode: (on) => this._setMoveMode(on),
+      getMoveMode: () => this.moveMode,
+      registerMoveToggle: (fn) => (this._syncMoveToggle = fn),
       build: () => this._buildScene(),
       buildLive: () => this._buildSceneLive(),
       rebuild: () => this._rebuildGUI(),
@@ -662,10 +749,6 @@ export class ArchPlanLab extends BaseWorld {
       highlightPart: (t) => this.highlight?.show(t),
       registerFocus: (k, f) => this.manipulate?.registerFocus(k, f),
     }
-    const body = this.drawerBody
-    if (!body) return
-    this.gui = setupGUI(ctx, body) // lil-gui vào drawer (container) → hết fixed, title=thu/mở
-    this._buildLeftTools(ctx, body)
   }
 
   // 🗄️ Drawer phải: shell bền (tạo 1 lần) — tay kéo [»/«] trượt ẩn/hiện; body = cột cuộn chứa mọi gui.
@@ -688,6 +771,26 @@ export class ArchPlanLab extends BaseWorld {
     this.canvas.parentElement?.appendChild(drawer)
     this.drawer = drawer
     this.drawerBody = body
+  }
+
+  // ◀ Drawer TRÁI: bảng Tools (Surface + tọa độ) ẩn vào mép trái mặc định; tay kéo »/« nhô ra/ẩn vào.
+  private _setupLeftDrawer(): void {
+    const drawer = document.createElement('div')
+    drawer.className = 'ap-ldrawer ap-ldrawer-closed' // ẩn vào trái mặc định
+    const handle = document.createElement('button')
+    handle.className = 'ap-ldrawer-handle'
+    handle.textContent = '»'
+    handle.title = 'Hiện / ẩn bảng Tools (Surface + tọa độ)'
+    const body = document.createElement('div')
+    body.className = 'ap-ldrawer-body'
+    handle.addEventListener('click', () => {
+      const closed = drawer.classList.toggle('ap-ldrawer-closed')
+      handle.textContent = closed ? '»' : '«'
+    })
+    drawer.append(handle, body)
+    this.canvas.parentElement?.appendChild(drawer)
+    this.lDrawer = drawer
+    this.lDrawerBody = body
   }
 
   // TRONG drawer: 3 panel (Building=gui nhà · Ground=lô · Tinh chỉnh) là CON TRỰC TIẾP drawerBody →
@@ -729,31 +832,19 @@ export class ArchPlanLab extends BaseWorld {
     )
   }
 
-  // Float góc trái (absolute, NGOÀI drawer): Scanner / Sun / Ground(nền editor) / Move / Palette.
+  // Float góc trái (absolute, NGOÀI drawer): [gui Tools = Surface+Scanner+Pick/Move] · Palette (bên phải).
   private _buildFloatingTools(ctx: APGuiCtx): void {
     const tools = document.createElement('div')
     tools.className = 'ap-left-tools'
-    this.canvas.parentElement?.appendChild(tools)
+    this.lDrawerBody?.appendChild(tools) // vào drawer TRÁI (ẩn mặc định)
     this.leftTools = tools
-    setupGridPanel(ctx, tools) // 🔍 Scanner
-    setupSunPanel(ctx, tools) // ☀ Sun
-    setupGroundPanel(ctx, tools) // 🌱 Surface (nền editor tham chiếu: Grid/Stone/Asphalt)
-    this._buildMovePanel(tools) // 🤚 toggle kéo element trong 3D
-    this._mountPalette(tools) // 🎨 khay swatch atelier
-  }
-
-  // Nút toggle Move tool — đặt dưới khay Palette. Bật → kéo element trong 3D (loại trừ paint/pick).
-  private _buildMovePanel(tools: HTMLElement): void {
-    const p = document.createElement('div')
-    p.className = 'ap-scan-panel'
-    const btn = document.createElement('button')
-    btn.className = 'ap-move-btn'
-    btn.textContent = '🤚 Move: off'
-    btn.title = 'Bật rồi kéo tường/cột/cầu thang/ban công/cửa trong 3D. Chuột phải = thoát.'
-    btn.addEventListener('click', () => this._setMoveMode(!this.moveMode))
-    this._moveBtn = btn
-    p.appendChild(btn)
-    tools.appendChild(p)
+    setupToolsPanel(ctx, tools) // 🛠 Surface(symbol) + Scanner X/Y/Z + Pick/Move (1 panel)
+    // 🎨 Palette = tool TỰ DO: float riêng trên canvas (NGOÀI drawer), kéo được
+    const palWrap = document.createElement('div')
+    palWrap.className = 'ap-palette-float'
+    this.canvas.parentElement?.appendChild(palWrap)
+    this.paletteWrap = palWrap
+    this._mountPalette(palWrap)
   }
 
   // Tạo PalettePanel lần đầu (persist qua _rebuildGUI) rồi dựng DOM vào leftTools.
@@ -765,7 +856,7 @@ export class ArchPlanLab extends BaseWorld {
   // Host cho PalettePanel: brush color + paintMode dùng chung với paint nên giữ ở lab; palette set qua đây.
   private _paletteHost(): PaletteHost {
     return {
-      parent: () => this.leftTools,
+      parent: () => this.paletteWrap,
       getState: () => this.state,
       persist: () => this.store.autosave(this.state, this.site),
       getBrush: () => this._brushColor,
@@ -812,8 +903,10 @@ export class ArchPlanLab extends BaseWorld {
     this.drawerPanels = []
     this.gui?.destroy()
     this.gui = null
-    this.leftTools?.remove() // float trái: Scanner/Sun/Ground/Move/Palette
+    this.leftTools?.remove() // bảng Tools (trong drawer trái)
     this.leftTools = null
+    this.paletteWrap?.remove() // 🎨 palette float tự do
+    this.paletteWrap = null
   }
 
   private _rebuildGUI(): void {
@@ -1023,7 +1116,10 @@ export class ArchPlanLab extends BaseWorld {
       mats: this.siteMats,
       shaders: this.siteShaders,
     }
-    this._siteGrass = renderSiteState(this.site, ctx).grass // handle trực tiếp (không instanceof → live ổn)
+    // exclude = footprint foundation → cỏ KHÔNG mọc nơi có nhà ("không đặt nền ground nơi có foundation").
+    this._siteGrass = renderSiteState(this.site, ctx, {
+      exclude: this._foundationRects(),
+    }).grass // handle trực tiếp (không instanceof → live ổn)
     const lift = this.site.show ? this.site.groundThick / 1000 : 0
     this.buildingGroup.position.y = lift
     this.pickGroup.position.y = lift // giữ pick-box khớp building đã đôn
@@ -1077,6 +1173,28 @@ export class ArchPlanLab extends BaseWorld {
 
   private _siteStats(): ReturnType<typeof coverageStats> {
     return coverageStats(this.site, this._footprintArea())
+  }
+
+  // Rect footprint foundation (m, world XZ) cho cỏ né. Chỉ instance tầng trệt CÓ foundation. Lề =
+  // overhang foundOh lớn nhất 4 phía → rect phủ trọn móng (thừa chút an toàn, không hở cỏ ở mép).
+  private _foundationRects(): GrassExcludeRect[] {
+    const gf = this.state.floors[0]
+    if (!gf) return []
+    const rects: GrassExcludeRect[] = []
+    for (const inst of gf.instances) {
+      if (!inst.structure.showFoundation) continue
+      const { w, d } = computeLocalBbox(inst)
+      const oh = inst.structure.foundOh
+      const margin = Math.max(oh.n, oh.e, oh.s, oh.w)
+      rects.push({
+        cx: inst.posX / 1000,
+        cz: inst.posZ / 1000,
+        halfW: w / 2 + margin,
+        halfD: d / 2 + margin,
+        rot: (inst.rotY * Math.PI) / 180,
+      })
+    }
+    return rects
   }
 
   // Box pick vô hình (visible=false → 0 render, Raycaster vẫn hit) ôm 1 element. userData → _paintAt.
