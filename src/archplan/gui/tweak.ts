@@ -154,6 +154,29 @@ function buildGrassUniform(body: HTMLElement, ctx: APGuiCtx): void {
   )
 }
 
+// Hình dáng (LIVE, không dựng lại): cong tĩnh / xoắn ribbon / nhọn ngọn.
+function buildGrassShape(body: HTMLElement, ctx: APGuiCtx): void {
+  const g = ctx.site.grass3d
+  body.appendChild(
+    sliderRow('Độ cong', 0, 1.5, 0.05, g.curve, (v, c) => {
+      g.curve = v
+      ctx.tuneGrass((b) => b.setCurve(v), c)
+    })
+  )
+  body.appendChild(
+    sliderRow('Độ xoắn', 0, 1.5, 0.05, g.twist, (v, c) => {
+      g.twist = v
+      ctx.tuneGrass((b) => b.setTwist(v), c)
+    })
+  )
+  body.appendChild(
+    sliderRow('Độ nhọn', 0, 1, 0.02, g.taper, (v, c) => {
+      g.taper = v
+      ctx.tuneGrass((b) => b.setTaper(v), c)
+    })
+  )
+}
+
 // Panel "🎛️ Tinh chỉnh" (collapsible) — section per-element. Thêm đá/effect sau = thêm subHeader + builder.
 export function setupTweakPanel(ctx: APGuiCtx, container: Element | null): HTMLElement {
   const p = document.createElement('div')
@@ -163,6 +186,7 @@ export function setupTweakPanel(ctx: APGuiCtx, container: Element | null): HTMLE
   const body = document.createElement('div')
   body.appendChild(subHeader('🌿 Cỏ 3D'))
   buildGrassStructural(body, ctx)
+  buildGrassShape(body, ctx)
   buildGrassUniform(body, ctx)
   let open = true
   const render = (): void => {
