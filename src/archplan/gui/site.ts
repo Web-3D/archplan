@@ -147,25 +147,13 @@ function buildGroundControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => vo
   }
 }
 
-// Cỏ 3D nhú lên (tier B — GrassBlades). Chỉ hiệu lực khi nền = Cỏ. Toggle + mật độ + cao lá.
+// Cỏ 3D nhú lên (tier B — GrassBlades): chỉ on/off ở đây; thông số chi tiết → panel 🎛️ Tinh chỉnh.
 function buildGrass3dControls(body: HTMLElement, ctx: APGuiCtx): void {
   const g = ctx.site.grass3d
   body.appendChild(
     toggleRow('🌿 Cỏ 3D (nền Cỏ)', g.enabled, (on) => {
       g.enabled = on
       ctx.applySite(true)
-    })
-  )
-  body.appendChild(
-    sliderRow('Mật độ /m²', 20, 300, 10, g.density, (v, c) => {
-      g.density = Math.round(v)
-      ctx.applySite(c)
-    })
-  )
-  body.appendChild(
-    sliderRow('Cao lá cm', 10, 55, 1, g.height * 100, (v, c) => {
-      g.height = v / 100
-      ctx.applySite(c)
     })
   )
 }

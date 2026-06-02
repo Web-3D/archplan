@@ -27,6 +27,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js'
 import { PMREMGenerator } from 'three/webgpu'
+import { GrassBlades } from 'threejs-modules/components/GrassBlades'
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
@@ -39,6 +40,7 @@ import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
 import { DevHud } from './gui/devhud' // perf HUD dev (fps/budget/leak) — tách monolith
 import { type APGuiCtx, setupGridPanel, setupGroundPanel, setupGUI, setupSunPanel } from './gui/gui'
 import { setupSitePanel } from './gui/site' // 🌳 panel sân vườn (site/lô)
+import { setupTweakPanel } from './gui/tweak' // 🎛️ tinh chỉnh decor (cỏ 3D, sau: đá/effect)
 import { type HighlightHost, HighlightOverlay } from './interaction/highlight' // flash viền phần đang chỉnh — tách monolith
 import { type ManipulateHost, ManipulateTool } from './interaction/manipulate' // 🤚 Move + 🎯 Focus — tách monolith
 import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 khay swatch atelier — tách monolith
@@ -138,6 +140,7 @@ export class ArchPlanLab extends BaseWorld {
   private siteGeos: THREE.BufferGeometry[] = []
   private siteMats: THREE.Material[] = []
   private siteShaders: { dispose(): void; setTime?(s: number): void }[] = [] // GrassGround… — dispose + gió theo time
+  private _siteGrass: GrassBlades | null = null // ref cỏ 3D đang sống → tinh chỉnh uniform live (no rebuild)
   private _refreshSiteReadout: (() => void) | null = null
 
   private groundGeo: THREE.PlaneGeometry | null = null
@@ -618,6 +621,7 @@ export class ArchPlanLab extends BaseWorld {
       applySite: (persist) => this._applySite(persist),
       siteStats: () => this._siteStats(),
       registerSiteReadout: (fn) => (this._refreshSiteReadout = fn),
+      tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
       applySun: () => this._applySun(),
       getZGridGroup: () => this.heightGridSystem?.getZGridGroup() ?? null,
       getXGridGroup: () => this.heightGridSystem?.getXGridGroup() ?? null,
@@ -662,6 +666,7 @@ export class ArchPlanLab extends BaseWorld {
     setupSunPanel(ctx, tools)
     setupGroundPanel(ctx, tools)
     setupSitePanel(ctx, tools) // 🌳 nền + rào + bảng số liệu lô
+    setupTweakPanel(ctx, tools) // 🎛️ tinh chỉnh decor (cỏ 3D…)
     this._buildMovePanel(tools) // 🤚 toggle kéo element trong 3D
     this._mountPalette(tools) // 🎨 khay swatch atelier — build SAU Move → mặc định nằm dưới Move
   }
@@ -935,9 +940,17 @@ export class ArchPlanLab extends BaseWorld {
       shaders: this.siteShaders,
     }
     renderSiteState(this.site, ctx)
+    this._siteGrass =
+      this.siteShaders.find((s): s is GrassBlades => s instanceof GrassBlades) ?? null
     const lift = this.site.show ? this.site.groundThick / 1000 : 0
     this.buildingGroup.position.y = lift
     this.pickGroup.position.y = lift // giữ pick-box khớp building đã đôn
+  }
+
+  // 🎛️ Chỉnh uniform LIVE trên cỏ 3D đang sống (gió/màu) — KHÔNG dựng lại → né recompile NodeMaterial.
+  private _tuneGrass(apply: (g: GrassBlades) => void, persist: boolean): void {
+    if (this._siteGrass) apply(this._siteGrass)
+    if (persist) this.store.autosave(this.state, this.site)
   }
 
   private _clearSite(): void {
@@ -947,6 +960,7 @@ export class ArchPlanLab extends BaseWorld {
     this.siteGeos = []
     this.siteMats = []
     this.siteShaders = []
+    this._siteGrass = null
     this.siteGroup.clear()
   }
 
