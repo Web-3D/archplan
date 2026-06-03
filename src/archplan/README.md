@@ -64,10 +64,13 @@ ArchPlanLab (extends BaseWorld)
   │
   ├── state: BuildingState        ← floors[] → instances[] → segments[]
   │
-  ├── 🗄️ Drawer PHẢI (.ap-drawer) ← shell bền qua rebuild; cobalt trong suốt; Tabs ngang:
+  ├── 🗄️ Drawer PHẢI (.ap-drawer) ← shell bền; cobalt trong suốt; Tabs ngang (mở tab nào cũng PHỦ KÍN drawer):
   │     ├── 🏠 Building            ← lil-gui (floors → instances → structure/roof/dims/walls)
-  │     ├── 🌳 Ground (Sân vườn)   ← nền lô + cỏ 3D + rào (bộ màu NÂU đất; tab nút cũng nâu)
-  │     └── 🎛️ Tinh chỉnh          ← cỏ B0 (Cao/Rộng/Số đốt + màu) + 🔎 preview 1 lá
+  │     ├── 🌳 Ground              ← BẬC TAB con Ground|Fence|Tree folder-style (English, tông NÂU bg-1→bg-2
+  │     │                            dính liền); bảng Lot/House/Coverage/Garden luôn ở ĐÁY panel
+  │     └── 🎛️ Tinh chỉnh          ← BẬC TAB con Lá đơn|Bụi cỏ (xanh rêu): Lá đơn = dáng lá (Cao/Rộng gốc-thân/Thon/Cong
+  │                                  T→P/Cong dọc+Cụp 1 chiều/2 MẶT 2 MÀU trong-ngoài/Số đốt/fold) + màu; Bụi cỏ = Lá/bụi
+  │                                  +Xòe+Nghiêng (mặt trong vào tâm + splay chống đâm xuyên); 🔎 preview xoay/pan/zoom + nền gradient
   │
   ├── 🗄️ Drawer TRÁI (.ap-ldrawer)← ẩn mép trái, kéo nhô; gui Tools:
   │     ├── Surface               ← symbol 🔲/🧱/🛣️ (none/stone/asphalt) — viền sáng khi chọn

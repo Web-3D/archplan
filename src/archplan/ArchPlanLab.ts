@@ -97,6 +97,8 @@ export class ArchPlanLab extends BaseWorld {
   private drawer: HTMLElement | null = null // 🗄️ drawer phải (shell bền qua rebuild): nhà + Sân vườn + Tinh chỉnh
   private drawerBody: HTMLElement | null = null // cột cuộn trong drawer — gui + panels dựng vào đây
   private drawerTabs: Tabs | null = null // tab ngang đầu drawer (Building | Ground | Tinh chỉnh)
+  private siteTabs: Tabs | null = null // tab CON trong panel Ground (Ground | Fence)
+  private tweakTabs: Tabs | null = null // tab CON trong panel Tinh chỉnh (Lá đơn | Bụi cỏ)
   private drawerPanels: HTMLElement[] = [] // panel non-gui trong drawer (Ground+Tinh chỉnh) — gỡ khi teardown
   private _drawerTab = 0 // tab drawer đang mở — nhớ qua _rebuildGUI
   private lDrawer: HTMLElement | null = null // drawer TRÁI: bảng Tools (Surface+tọa độ) — ẩn mặc định
@@ -196,6 +198,7 @@ export class ArchPlanLab extends BaseWorld {
   // history/persist mỗi frame (kẻo undo stack ngập + localStorage spam). Buông chuột → _buildScene
   // commit 1 lần. 0 = chưa schedule.
   private _rafBuild = 0
+  private _siteRaf = 0 // throttle rAF cho live-drag slider site/grass (Tinh chỉnh) — né re-scatter mỗi input
 
   // Highlight 3D: viền wireframe vàng flash ~0.5s khi click tab GUI (biết đang chỉnh phần nào).
   // Group riêng (NGOÀI buildingGroup → _clearBuilding không xoá). Transient → tự dọn qua timer.
@@ -453,6 +456,10 @@ export class ArchPlanLab extends BaseWorld {
     if (this._rafBuild) {
       cancelAnimationFrame(this._rafBuild)
       this._rafBuild = 0
+    }
+    if (this._siteRaf) {
+      cancelAnimationFrame(this._siteRaf)
+      this._siteRaf = 0
     }
     this.highlight?.dispose()
     this._pickMat?.dispose() // SPIKE brush: material chung của pick layer
@@ -713,6 +720,7 @@ export class ArchPlanLab extends BaseWorld {
       setGround: (t) => this._setGroundType(t),
       site: this.site,
       applySite: (persist) => this._applySite(persist),
+      applySiteLive: () => this._applySiteLive(),
       siteStats: () => this._siteStats(),
       registerSiteReadout: (fn) => (this._refreshSiteReadout = fn),
       tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
@@ -796,12 +804,14 @@ export class ArchPlanLab extends BaseWorld {
   // TRONG drawer: 3 panel (Building=gui nhà · Ground=lô · Tinh chỉnh) là CON TRỰC TIẾP drawerBody →
   // Tabs ngang quản lý (ẩn/hiện). NGOÀI drawer: float góc trái (Scanner/Sun/Ground/Move/Palette).
   private _buildLeftTools(ctx: APGuiCtx, drawerBody: HTMLElement): void {
-    const sitePanel = setupSitePanel(ctx, drawerBody) // 🌳 Ground (lô): nền + rào + 建ぺい率
-    const tweak = setupTweakPanel(ctx, drawerBody) // 🎛️ Tinh chỉnh — { panel, previewHost }
-    this.preview = new GrassPreview(tweak.previewHost) // 🔎 preview 1 lá GỘP trong panel Tinh chỉnh
+    const site = setupSitePanel(ctx, drawerBody) // 🌳 Ground: sub-tab Ground|Fence → { panel, tabs }
+    this.siteTabs = site.tabs
+    const tweak = setupTweakPanel(ctx, drawerBody) // 🎛️ Tinh chỉnh — { panel, previewHost, tabs }
+    this.tweakTabs = tweak.tabs // tab con Lá đơn | Bụi cỏ
+    this.preview = new GrassPreview(tweak.previewHost) // 🔎 preview 1 lá/bụi GỘP trong panel Tinh chỉnh
     void this.preview.init().then(() => this._previewRebuild())
-    this.drawerPanels = [sitePanel, tweak.panel] // gỡ khi teardown (gui.domElement do gui.destroy lo)
-    this._buildDrawerTabs(drawerBody, sitePanel, tweak.panel)
+    this.drawerPanels = [site.panel, tweak.panel] // gỡ khi teardown (gui.domElement do gui.destroy lo)
+    this._buildDrawerTabs(drawerBody, site.panel, tweak.panel)
     this._buildFloatingTools(ctx)
   }
 
@@ -897,6 +907,10 @@ export class ArchPlanLab extends BaseWorld {
     this.preview?.dispose() // 🔎 mini WebGPU preview: stop loop + dispose renderer/blade
     this.preview = null
     this._previewGrass = null
+    this.siteTabs?.dispose() // gỡ tab CON Ground|Fence trước (nằm trong panel Ground)
+    this.siteTabs = null
+    this.tweakTabs?.dispose() // gỡ tab CON Lá đơn|Bụi cỏ (nằm trong panel Tinh chỉnh)
+    this.tweakTabs = null
     this.drawerTabs?.dispose() // gỡ tab bar drawer (KHÔNG đụng panel — caller sở hữu)
     this.drawerTabs = null
     for (const p of this.drawerPanels) p.remove() // Ground + Tinh chỉnh (con trực tiếp drawerBody)
@@ -1152,11 +1166,28 @@ export class ArchPlanLab extends BaseWorld {
   // Re-render lô (không đụng building geometry — chỉ siteGroup + lift + readout). persist=true →
   // autosave (commit: tick/select/buông slider); false = live drag slider. Site KHÔNG vào undo (G0).
   private _applySite(persist: boolean): void {
+    if (this._siteRaf) {
+      cancelAnimationFrame(this._siteRaf) // commit nuốt rAF live đang chờ → render cuối là bản này
+      this._siteRaf = 0
+    }
     this._renderSite()
     this._previewRebuild() // structural (mật độ/cao/rộng lá…) → đồng bộ lá preview
     this._refreshSiteReadout?.()
     if (this.sun) this.sun.shadow.needsUpdate = true
     if (persist) this.store.autosave(this.state, this.site)
+  }
+
+  // LIVE drag slider Tinh chỉnh: rebuild lô (field + preview) THROTTLE ≤1/frame qua rAF, KHÔNG persist.
+  // Buông tay → _applySite(true) commit. Né re-scatter ngàn lá mỗi input event (vd kéo Mật độ → 24000 lá).
+  private _applySiteLive(): void {
+    if (this._siteRaf) return
+    this._siteRaf = requestAnimationFrame(() => {
+      this._siteRaf = 0
+      this._renderSite()
+      this._previewRebuild()
+      this._refreshSiteReadout?.()
+      if (this.sun) this.sun.shadow.needsUpdate = true
+    })
   }
 
   // Diện tích nhà phủ (m²) = Σ bbox shape tầng trệt — đối chiếu 建ぺい率 trong bảng số liệu.

@@ -32,6 +32,7 @@ export interface APGuiCtx {
   // 🌳 Sân vườn (site/lô): SiteState sống ở Lab; panel sửa trực tiếp rồi gọi applySite.
   site: SiteState
   applySite(persist: boolean): void // re-render lô + đôn nhà; persist=true → autosave (false = live drag)
+  applySiteLive(): void // re-render lô THROTTLE ≤1/frame (rAF), không persist — cho kéo slider Tinh chỉnh
   siteStats(): CoverageStats // đối chiếu nhà/lô (lotArea/coveragePct/gardenArea) cho bảng số liệu
   registerSiteReadout(fn: () => void): void // panel đăng ký refresh → Lab gọi khi build nhà (footprint đổi)
   // 🎛️ Tinh chỉnh decor: chỉnh uniform LIVE trên GrassBlades đang sống (KHÔNG dựng lại → né recompile).
