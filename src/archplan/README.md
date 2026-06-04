@@ -78,10 +78,11 @@ ArchPlanLab (extends BaseWorld)
   ├── 🗄️ Drawer TRÁI (.ap-ldrawer)← ẩn mép trái, kéo nhô; gui Tools:
   │     ├── Surface               ← symbol 🔲/🧱/🛣️ (none/stone/asphalt) — viền sáng khi chọn
   │     ├── Grid X/Y/Z            ← laser grid tọa độ
-  │     └── Pick + 🤚 Move        ← cùng hàng (ô stick + symbol); 🤚 Move bật/tắt bằng phím Alt
+  │     └── Pick 📍               ← ô stick + symbol (🤚 Move đã LÔI RA float — xem ☀ Sun dock)
   │
   ├── ☀ Sun GIZMO (3D)            ← quả cầu kéo trên vòm → đổi hướng nắng; trục Y dây-dọi + bóng chân
-  │     └── dock panel cố định    ← toggle ☀/🌙 + slider sáng DỌC + ô màu (KHÔNG bám sun)
+  │     ├── dock panel cố định    ← toggle ☀/🌙 + slider sáng DỌC + ô màu (KHÔNG bám sun)
+  │     └── 🤚 Move FLOAT         ← nút vuông ngay PHẢI slider sáng (góc trái-dưới); toggle Move, phím tắt Z
   │
   ├── 🎨 Palette                  ← tool TỰ DO float (khay swatch atelier + cọ sơn 3D)
   │
@@ -95,8 +96,9 @@ ArchPlanLab (extends BaseWorld)
 > **Hồ nước (💧 Water, tier C):** site element RỜI (có vị trí offset cạnh nhà, khác cỏ phủ-cả-lô). `WaterSurface`
 > = `reflector()` gương thật → **+1 render pass/RTT** (đắt; DevHud sẽ thấy draw calls nhảy). Đốm nắng glint theo
 > sun (`_applySunToWater` ← `setSun`, cùng pattern vệt-cỏ); sóng chạy theo `setTime` mỗi frame (qua `siteShaders`).
-> **Kéo-thả 3D:** bật Move 🤚 (hoặc Alt) → nhấn-giữ mặt hồ kéo đi (raycast mesh trực tiếp, không pick box;
-> dời live, thả → cỏ né lại + autosave). Chỉnh số/màu/gương/sóng ở GUI sub-tab Water. Mặc định bật, hồ 4×3m ở +5m trước nhà.
+> **Kéo-thả 3D:** bật Move 🤚 (nút float góc trái-dưới hoặc **phím Z**) → nhấn-giữ mặt hồ kéo đi (raycast mesh trực tiếp,
+> không pick box; dời live, thả → cỏ né lại + autosave). Chỉnh số/màu/gương/sóng ở GUI sub-tab Water. Mặc định bật, hồ 4×3m ở +5m trước nhà.
+> **Mặt nước LÕM** dưới vành nền (`baseY = rim − lip`, lip≤depthY) → lộ vành đất = đọc ra "lỗ cắt xuyên", không phẳng lì.
 > **Form tự do:** GUI Water → `Form=Free` (seed 4 góc từ chữ nhật) → bật Move → **kéo chấm vàng ở góc** nắn polygon
 > (`ShapeGeometry` dựng lại live, cỏ né theo bbox). Thêm/bớt đỉnh = bước sau.
 

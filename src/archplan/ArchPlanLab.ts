@@ -33,7 +33,11 @@ import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
 import { AsphaltGround } from 'threejs-modules/shaders/ground/AsphaltGround'
-import { renderSiteState, type SiteRenderCtx } from 'threejs-modules/site/render/fromState'
+import {
+  pondWorldXZ,
+  renderSiteState,
+  type SiteRenderCtx,
+} from 'threejs-modules/site/render/fromState'
 import { coverageStats, defaultSiteState, type SiteState } from 'threejs-modules/site/state'
 import { Tabs } from 'threejs-modules/ui/Tabs' // 🗂️ tab ngang drawer (Building|Ground|Tinh chỉnh)
 import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
@@ -105,6 +109,7 @@ export class ArchPlanLab extends BaseWorld {
   private lDrawer: HTMLElement | null = null // drawer TRÁI: bảng Tools (Surface+tọa độ) — ẩn mặc định
   private lDrawerBody: HTMLElement | null = null
   private paletteWrap: HTMLElement | null = null // 🎨 Palette = tool TỰ DO float (ngoài drawer), kéo được
+  private moveFloat: HTMLButtonElement | null = null // 🤚 Move = nút float góc trái-dưới (cạnh thanh sáng sun)
   private controls: OrbitControls | null = null
 
   // Đèn mặt trời + tham số (điều khiển qua panel ☀ Sun). Default ≈ vị trí cũ (10,18,10).
@@ -176,14 +181,15 @@ export class ArchPlanLab extends BaseWorld {
   private _previewGrass: GrassBlades | null = null // lá trong preview → tune cùng lúc với bãi ngoài
   private _refreshSiteReadout: (() => void) | null = null
 
-  private groundGeo: THREE.PlaneGeometry | null = null
+  private groundGeo: THREE.BufferGeometry | null = null // nền backdrop editor — Plane, hoặc Shape-có-lỗ khi có hồ
   private groundMat: THREE.MeshToonMaterial | null = null // nền tối mặc định ('none')
   private groundMesh: THREE.Mesh | null = null // để swap material theo groundType
   private hemiLight: THREE.HemisphereLight | null = null // groundColor = màu bounce theo nền
   private groundShader: { dispose(): void } | null = null // shader nền procedural (grass/cement…)
   private groundType: GroundType = 'none'
   private envTexture: THREE.Texture | null = null // IBL từ PMREM(RoomEnvironment)
-  private gridHelper: THREE.GridHelper | null = null
+  private gridHelper: THREE.LineSegments | null = null // lưới editor (y=0) — tự dựng để KHOÉT lỗ hồ
+  private gridMat: THREE.LineBasicMaterial | null = null
   private css2dRenderer: CSS2DRenderer | null = null
   private css2dEl: HTMLElement | null = null
   private readonly gridOpts = {
@@ -224,14 +230,17 @@ export class ArchPlanLab extends BaseWorld {
   private readonly _onKeyDown = (e: KeyboardEvent): void => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
     if (e.code === 'Backquote' && !e.repeat) this.devHud?.toggle() // ` → bật/tắt HUD perf
-    // Alt (trái/phải) = bật/tắt Move tool 🤚. !e.repeat → giữ Alt chỉ toggle 1 lần (không nhấp nháy);
-    // preventDefault chặn Windows focus thanh menu khi nhả Alt. _setMoveMode tự đồng bộ nút.
-    if ((e.code === 'AltLeft' || e.code === 'AltRight') && !e.repeat) {
+    // Z = bật/tắt Move tool 🤚 (_setMoveMode tự đồng bộ nút float góc trái). Guard tách ra _isPlainZ.
+    if (this._isPlainZ(e)) {
       e.preventDefault()
       this._setMoveMode(!this.moveMode)
       return
     }
     this._keysDown.add(e.code)
+  }
+  // Z trơn (không Ctrl/Meta/Alt, không auto-repeat) = phím tắt Move. Né Ctrl+Z/Alt+Z (undo…).
+  private _isPlainZ(e: KeyboardEvent): boolean {
+    return e.code === 'KeyZ' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey
   }
   private readonly _onKeyUp = (e: KeyboardEvent): void => {
     this._keysDown.delete(e.code)
@@ -631,8 +640,7 @@ export class ArchPlanLab extends BaseWorld {
     this.wallMats.dispose() // dispose + clear toàn bộ material cache + brick textures
     this._disposeEnvironment()
     this._disposeGround()
-    this.gridHelper?.dispose()
-    this.gridHelper = null
+    this._disposeGrid()
     this.heightGridSystem?.dispose()
     this.heightGridSystem = null
     this.css2dEl?.remove()
@@ -723,7 +731,8 @@ export class ArchPlanLab extends BaseWorld {
     this.groundMesh = ground
     this.hemiLight = hemi
 
-    this.gridHelper = new THREE.GridHelper(80, 80, 0x1a2240, 0x0f1220)
+    this.gridMat = new THREE.LineBasicMaterial({ color: 0x1a2240 })
+    this.gridHelper = new THREE.LineSegments(this._buildGridGeo(null), this.gridMat) // tự dựng → khoét được
     this.scene.add(hemi, sun, ground, this.gridHelper)
     this._applySun()
   }
@@ -1028,6 +1037,21 @@ export class ArchPlanLab extends BaseWorld {
     this.canvas.parentElement?.appendChild(palWrap)
     this.paletteWrap = palWrap
     this._mountPalette(palWrap)
+    this._buildFloatingMove(ctx) // 🤚 Move = nút float góc trái-dưới (cạnh thanh sáng sun)
+  }
+
+  // 🤚 Move = nút float CỐ ĐỊNH góc trái-dưới (cạnh thanh sáng sun ap-sun-ctrl), NGOÀI drawer → luôn
+  // bấm được. Toggle Move mode (= phím Z). registerMoveToggle đồng bộ class khi đổi bằng phím/chuột phải.
+  private _buildFloatingMove(ctx: APGuiCtx): void {
+    const btn = document.createElement('button')
+    btn.className = 'ap-move-btn ap-move-float'
+    btn.textContent = '🤚'
+    btn.title = 'Move (Z) — kéo tường/cột/cầu thang/cửa/hồ trong 3D. Chuột phải = thoát.'
+    btn.addEventListener('click', () => ctx.setMoveMode(!ctx.getMoveMode()))
+    btn.classList.toggle('ap-move-on', ctx.getMoveMode()) // giữ trạng thái qua _rebuildGUI
+    ctx.registerMoveToggle((on) => btn.classList.toggle('ap-move-on', on))
+    this.canvas.parentElement?.appendChild(btn)
+    this.moveFloat = btn
   }
 
   // Tạo PalettePanel lần đầu (persist qua _rebuildGUI) rồi dựng DOM vào leftTools.
@@ -1094,6 +1118,8 @@ export class ArchPlanLab extends BaseWorld {
     this.leftTools = null
     this.paletteWrap?.remove() // 🎨 palette float tự do
     this.paletteWrap = null
+    this.moveFloat?.remove() // 🤚 Move float góc trái-dưới
+    this.moveFloat = null
   }
 
   private _rebuildGUI(): void {
@@ -1312,9 +1338,97 @@ export class ArchPlanLab extends BaseWorld {
     this._applySunToGrass() // _siteGrass mới → set hướng vệt theo sun hiện tại
     this._applySunToWater() // _siteWater mới → set hướng glint theo sun hiện tại
     this._rebuildWaterHandles() // 💧 handle đỉnh theo hồ mới (free + moveMode)
+    this._rebuildEditorGround() // 🕳️ khoét lỗ hồ vào nền backdrop editor → không che đáy basin
+    this._rebuildGrid() // 🕳️ khoét lưới y=0 theo bbox hồ → hết sọc lưới đè lên lòng hồ
     const lift = this.site.show ? this.site.groundThick / 1000 : 0
     this.buildingGroup.position.y = lift
     this.pickGroup.position.y = lift // giữ pick-box khớp building đã đôn
+  }
+
+  // 🕳️ Nền backdrop editor (Plane 80×80 @ y=0, đặc) sẽ CHE đáy basin (basin chạy xuống dưới y=0). Khi có
+  // hồ → thay bằng ShapeGeometry KHOÉT CÙNG lỗ hồ (pondWorldXZ lõi = single source) → nhìn xuyên thấy đáy.
+  // Geo ở mặt phẳng XY như PlaneGeometry → mesh.rotation.x=-90° (đặt sẵn) lo hướng; lỗ (q.x,−q.z) khớp lõi.
+  private _rebuildEditorGround(): void {
+    if (!this.groundMesh) return
+    this.groundGeo?.dispose()
+    const w = this.site.water
+    if (this.site.show && w.enabled) {
+      const H = 40 // nửa cạnh 80m
+      const s = new THREE.Shape()
+      s.moveTo(-H, -H)
+      s.lineTo(H, -H)
+      s.lineTo(H, H)
+      s.lineTo(-H, H)
+      s.closePath()
+      const hole = new THREE.Path()
+      pondWorldXZ(this.site).forEach((q, i) => {
+        if (i === 0) hole.moveTo(q.x, -q.z)
+        else hole.lineTo(q.x, -q.z)
+      })
+      hole.closePath()
+      s.holes.push(hole)
+      this.groundGeo = new THREE.ShapeGeometry(s)
+    } else {
+      this.groundGeo = new THREE.PlaneGeometry(80, 80)
+    }
+    this.groundMesh.geometry = this.groundGeo
+  }
+
+  // bbox hồ (world XZ, mét) để khoét lưới — null khi không có hồ. Free polygon → bbox bao ngoài.
+  private _pondBbox(): { x0: number; x1: number; z0: number; z1: number } | null {
+    const w = this.site.water
+    if (!this.site.show || !w.enabled) return null
+    let x0 = Infinity
+    let x1 = -Infinity
+    let z0 = Infinity
+    let z1 = -Infinity
+    for (const p of pondWorldXZ(this.site)) {
+      x0 = Math.min(x0, p.x)
+      x1 = Math.max(x1, p.x)
+      z0 = Math.min(z0, p.z)
+      z1 = Math.max(z1, p.z)
+    }
+    return { x0, x1, z0, z1 }
+  }
+
+  // Lưới editor = LineSegments tự dựng (GridHelper KHÔNG khoét lỗ được). Mỗi đường //trục bị CẮT đoạn nằm
+  // trong bbox hồ → hết sọc lưới đè lòng hồ (lưới y=0 nằm TRÊN mặt nước −2cm). 80×80, ô 1m như cũ.
+  private _buildGridGeo(
+    hole: { x0: number; x1: number; z0: number; z1: number } | null
+  ): THREE.BufferGeometry {
+    const H = 40
+    const seg: number[] = []
+    const line = (ax: number, az: number, bx: number, bz: number): void => {
+      seg.push(ax, 0, az, bx, 0, bz)
+    }
+    for (let i = -H; i <= H; i++) {
+      if (hole && i > hole.z0 && i < hole.z1) {
+        line(-H, i, hole.x0, i)
+        line(hole.x1, i, H, i)
+      } else line(-H, i, H, i)
+      if (hole && i > hole.x0 && i < hole.x1) {
+        line(i, -H, i, hole.z0)
+        line(i, hole.z1, i, H)
+      } else line(i, -H, i, H)
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(seg, 3))
+    return g
+  }
+
+  // Dựng lại lưới theo bbox hồ hiện tại (gọi sau _renderSite). Giữ material, chỉ thay geometry.
+  private _rebuildGrid(): void {
+    if (!this.gridHelper) return
+    this.gridHelper.geometry.dispose()
+    this.gridHelper.geometry = this._buildGridGeo(this._pondBbox())
+  }
+
+  // Giải phóng lưới (geometry + material). Tách khỏi _disposeSceneResources cho gọn (Rule complexity).
+  private _disposeGrid(): void {
+    this.gridHelper?.geometry.dispose()
+    this.gridMat?.dispose()
+    this.gridHelper = null
+    this.gridMat = null
   }
 
   // 🎛️ Chỉnh uniform LIVE — áp ĐỒNG THỜI bãi ngoài (_siteGrass) + lá preview (_previewGrass). Né recompile.

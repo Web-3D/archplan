@@ -99,7 +99,7 @@ export function setupToolsPanel(ctx: APGuiCtx, container: Element | null): HTMLE
   p.appendChild(mkGridRow('X', 'xPos', 'xVisible', 'x', -30, 30, () => ctx.getXGridGroup(), ctx))
   p.appendChild(mkGridRow('Y', 'cyPos', 'cyVisible', 'y', 0, 60, () => ctx.getCYGridGroup(), ctx))
   p.appendChild(mkGridRow('Z', 'zPos', 'zVisible', 'z', -30, 30, () => ctx.getZGridGroup(), ctx))
-  p.appendChild(mkPickMoveRow(ctx))
+  p.appendChild(mkPickRow(ctx))
   container?.appendChild(p)
   return p
 }
@@ -179,8 +179,9 @@ function mkGridRow(
   return row
 }
 
-// Hàng đáy: Pick XZ (ô tick + 📍, không chữ) bên trái · Move (🤚, không chữ) bên phải. Đều toggle.
-function mkPickMoveRow(ctx: APGuiCtx): HTMLElement {
+// Hàng đáy: Pick XZ (ô tick + 📍, không chữ) toggle. Move 🤚 đã LÔI RA float góc trái-dưới (cạnh
+// thanh sáng sun) — xem ArchPlanLab._buildFloatingMove. Tools panel này nằm trong drawer trái (ẩn).
+function mkPickRow(ctx: APGuiCtx): HTMLElement {
   const row = document.createElement('div')
   row.className = 'ap-pickmove-row'
   const pick = document.createElement('label')
@@ -196,13 +197,7 @@ function mkPickMoveRow(ctx: APGuiCtx): HTMLElement {
   const pin = document.createElement('span')
   pin.textContent = '📍'
   pick.append(pcb, pin)
-  const move = document.createElement('button')
-  move.className = 'ap-move-btn ap-move-sym'
-  move.textContent = '🤚'
-  move.title = 'Move — kéo tường/cột/cầu thang/cửa trong 3D. Chuột phải = thoát.'
-  move.addEventListener('click', () => ctx.setMoveMode(!ctx.getMoveMode()))
-  ctx.registerMoveToggle((on) => move.classList.toggle('ap-move-on', on))
-  row.append(pick, move)
+  row.append(pick)
   return row
 }
 

@@ -92,7 +92,7 @@ Tương tác làm KHÁC khung 4-bộ trên:
 
 ## Phím tắt
 
-- **Alt** (trái/phải) — bật/tắt Move tool 🤚 (toggle, `!e.repeat` chống nhấp nháy; `_onKeyDown`).
+- **Z** — bật/tắt Move tool 🤚 (toggle, `!e.repeat`; né Ctrl/Meta/Alt+Z = undo; guard `_isPlainZ`/`_onKeyDown`). Nút 🤚 = float góc trái-dưới (cạnh thanh sáng sun), ngoài drawer.
 - **`** (backquote) — ẩn/hiện DevHud perf. **Chuột phải** — thoát Move/Paint/Pick.
 
 ---

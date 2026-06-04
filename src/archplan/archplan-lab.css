@@ -1084,6 +1084,20 @@
   background: #ffd54a;
   border-color: #ffd54a;
 }
+/* 🤚 Move LÔI RA: nút float CỐ ĐỊNH góc trái-dưới, ngay BÊN PHẢI thanh sáng sun (.ap-sun-ctrl @ left:8,
+   bottom:8, rộng ~24px). NGOÀI drawer → luôn bấm được. Vuông, to dễ chạm. */
+.ap-move-btn.ap-move-float {
+  position: absolute;
+  left: 36px;
+  bottom: 8px;
+  z-index: 160;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  border-radius: 6px;
+}
 
 /* 3D → GUI: flash viền vàng ~0.8s khi click vật thể trong scene → folder tương ứng được trỏ tới. */
 .ap-focus-flash {
@@ -1648,11 +1662,4 @@
   flex-shrink: 0;
   cursor: pointer;
   accent-color: #2a4d9b;
-}
-/* Move = nút symbol gọn (đè .ap-move-btn full-width). Bật = nền vàng. */
-.ap-move-btn.ap-move-sym {
-  width: auto;
-  padding: 1px 7px;
-  font-size: 14px;
-  line-height: 1.2;
 }
