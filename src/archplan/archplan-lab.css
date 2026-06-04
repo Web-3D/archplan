@@ -1098,7 +1098,6 @@
   line-height: 1;
   border-radius: 6px;
 }
-
 /* 3D → GUI: flash viền vàng ~0.8s khi click vật thể trong scene → folder tương ứng được trỏ tới. */
 .ap-focus-flash {
   animation: ap-focus-pulse 0.8s ease-out;

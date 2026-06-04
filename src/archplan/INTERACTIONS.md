@@ -93,6 +93,8 @@ Hồ (`WaterSurface`) là **site element rời** (ở `siteGroup`, không có `i
 ## Phím tắt
 
 - **Z** — bật/tắt Move tool 🤚 (toggle, `!e.repeat`; né Ctrl/Meta/Alt+Z = undo; guard `_isPlainZ`/`_onKeyDown`). Nút 🤚 = float góc trái-dưới (cạnh thanh sáng sun), ngoài drawer.
+- **X** — thả/thu MENU 🎨 Palette (lưới swatch, `palette.togglePanel()`); KHÔNG phải popover tìm-kiếm-màu. Guard `_isPlainX`, né Ctrl/Meta/Alt+X.
+- **Bật Move (Z) → CẢ NHÀ nhuốm xanh "nghệ"** ngay (LOD tường phẳng + `_setBuildingTint` theo `moveMode`, `_setMoveMode`→`_renderScene`); tắt Move = màu/gạch gốc.
 - **`** (backquote) — ẩn/hiện DevHud perf. **Chuột phải** — thoát Move/Paint/Pick.
 
 ---

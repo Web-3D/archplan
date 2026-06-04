@@ -44,6 +44,9 @@ export interface APGuiCtx {
   tuneWater(cfg: WaterConfig, apply: (w: WaterSurface) => void, persist: boolean): void
   // 💧 Chọn pool active (= tab instance đang mở) → 3D drag/handle nhắm hồ này. Gọi khi đổi tab Pl.
   setActiveWater(cfg: WaterConfig): void
+  // 💧 Hiện VIỀN form định vị (mảng mờ mặt nền) khi KÉO slider Pos/Width/Depth — live preview vị trí+kích
+  // thước KHÔNG rebuild (né leak reflector). Buông slider = applySite(true) commit + tự ẩn viền.
+  previewWater(cfg: WaterConfig): void
   applySun(): void
   getZGridGroup(): THREE.Group | null
   getXGridGroup(): THREE.Group | null

@@ -37,6 +37,8 @@ export class PalettePanel {
   private _palKey: ((e: KeyboardEvent) => void) | null = null
   private _palSearchInput: HTMLInputElement | null = null
   private _swatchGrid: HTMLElement | null = null
+  private _panelBody: HTMLElement | null = null // body panel (cur + lưới swatch) — toggle thả xuống (phím X)
+  private _panelTtl: HTMLButtonElement | null = null // nút tiêu đề ▸/▾ 🎨 Palette
   private _palMix: HTMLElement | null = null // giếng pha ở tâm bảng — hiển thị màu cọ đang cầm
   private _palMoved = false
   private _palDrag: {
@@ -94,15 +96,14 @@ export class PalettePanel {
     cur.className = 'ap-pal-current'
     cur.addEventListener('click', () => this._togglePaletteBrowser())
     this._palCurrentBtn = cur
+    this._panelBody = body
+    this._panelTtl = ttl
     ttl.addEventListener('click', () => {
       if (this._palMoved) {
         this._palMoved = false // vừa kéo xong → bỏ qua toggle thu/mở lần này
         return
       }
-      const open = body.style.display !== 'none'
-      body.style.display = open ? 'none' : ''
-      ttl.textContent = `${open ? '▸' : '▾'} 🎨 Palette`
-      if (open) this.closeBrowser()
+      this.togglePanel()
     })
     ttl.addEventListener('pointerdown', (e) => this._palDragStart(e, p, ttl))
     ttl.addEventListener('pointermove', (e) => this._palDragMove(e))
@@ -154,6 +155,18 @@ export class PalettePanel {
   private _togglePaletteBrowser(): void {
     if (this._palPop) this.closeBrowser()
     else this._openPaletteBrowser()
+  }
+
+  /** Thả/thu MENU panel 🎨 Palette (body = lưới swatch) — gọi từ nút tiêu đề HOẶC phím tắt X (ArchPlanLab).
+   *  KHÁC _togglePaletteBrowser (popover tìm-kiếm-màu) — X mở menu thả xuống, không phải search. */
+  togglePanel(): void {
+    const body = this._panelBody
+    const ttl = this._panelTtl
+    if (!body || !ttl) return
+    const open = body.style.display !== 'none'
+    body.style.display = open ? 'none' : ''
+    ttl.textContent = `${open ? '▸' : '▾'} 🎨 Palette`
+    if (open) this.closeBrowser() // thu menu → đóng luôn popover search nếu đang mở
   }
 
   // Mở popover browser bên phải panel: header + search + danh sách nhóm theo style.
