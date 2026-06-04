@@ -26,9 +26,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js'
-import { fxaa } from 'three/addons/tsl/display/FXAANode.js' // AA hậu kỳ thay MSAA (MSAA✗reflector — KI-007)
-import { pass } from 'three/tsl'
-import { PMREMGenerator, PostProcessing } from 'three/webgpu'
+import { PMREMGenerator } from 'three/webgpu'
 import type { GrassBlades, GrassExcludeRect } from 'threejs-modules/components/GrassBlades'
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
@@ -247,9 +245,6 @@ export class ArchPlanLab extends BaseWorld {
   private gridHelper: THREE.LineSegments | null = null // lưới editor (y=0) — tự dựng để KHOÉT lỗ hồ
   private gridMat: THREE.LineBasicMaterial | null = null
   private css2dRenderer: CSS2DRenderer | null = null
-  // FXAA hậu kỳ: thay renderer.render bằng pipeline pass→fxaa→output (MSAA tắt vì ✗reflector — KI-007).
-  // outputColorTransform=true → tone-map+sRGB như render thẳng (giữ nguyên tông màu), fxaa chạy trên scene pass.
-  private _post: PostProcessing | null = null
   private css2dEl: HTMLElement | null = null
   private readonly gridOpts = {
     zPos: -30.0,
@@ -319,7 +314,14 @@ export class ArchPlanLab extends BaseWorld {
   private pickMode = false
   private picking = false
   private _syncPickCheckbox: ((on: boolean) => void) | null = null
+  // Click vào 3D → BỎ focus khỏi input GUI (ô số slider…). Canvas không focusable nên không tự blur →
+  // input giữ focus → keydown Z/X bị `e.target instanceof HTMLInputElement` (trong _onKeyDown) chặn = mất phím tắt.
+  private _blurActiveInput(): void {
+    const ae = document.activeElement
+    if (ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement) ae.blur()
+  }
   private readonly _onPointerDown = (e: PointerEvent): void => {
+    this._blurActiveInput() // bấm 3D → bỏ focus input GUI → phím tắt Z/X về window
     if (e.button !== 0) return // chỉ chuột trái
     this._downPos = { x: e.clientX, y: e.clientY } // để _onPointerUp phân biệt click vs drag/orbit
     if (this.sunGizmo?.tryStartDrag(e)) return // ☀ nhấn trúng quả sun → kéo (ưu tiên cao nhất, mọi mode)
@@ -711,36 +713,23 @@ export class ArchPlanLab extends BaseWorld {
     this.scene.add(this._waterHandles)
     this.manipulate = new ManipulateTool(this._manipulateHost()) // trước _setupGUI: nhận registerFocus
     this.highlight = new HighlightOverlay(this._highlightHost())
-    this._setupDrawer() // 🗄️ shell bền — tạo 1 lần trước GUI; gui+panels rebuild bên trong
-    this._setupLeftDrawer() // ◀ drawer trái (Tools) — shell bền, ẩn mặc định
-    this._setupGUI()
-    this._buildScene()
+    // Listener ĐĂNG KÝ TRƯỚC _setupGUI/_buildScene: phím tắt (Z move, X palette) + pointer KHÔNG được phụ
+    // thuộc scene-build thành công. Nếu _buildScene throw (shader/scene lỗi runtime) mà listener ở SAU thì
+    // onInit văng → mất sạch phím tắt. Handler dùng optional-chaining (palette?/manipulate?) nên gọi sớm = no-op an toàn.
     window.addEventListener('keydown', this._onKeyDown)
     window.addEventListener('keyup', this._onKeyUp)
     this.canvas.addEventListener('pointerdown', this._onPointerDown)
     this.canvas.addEventListener('pointermove', this._onPointerMove)
     window.addEventListener('pointerup', this._onPointerUp)
     this.canvas.addEventListener('contextmenu', this._onContextMenu)
+    this._setupDrawer() // 🗄️ shell bền — tạo 1 lần trước GUI; gui+panels rebuild bên trong
+    this._setupLeftDrawer() // ◀ drawer trái (Tools) — shell bền, ẩn mặc định
+    this._setupGUI()
+    this._buildScene()
     if (import.meta.env.DEV) {
       this.guard = new RuntimeGuard(this.renderer)
       this.devHud = new DevHud(this.canvas.parentElement ?? document.body) // perf HUD — bấm ` để ẩn
     }
-    this._setupPost() // FXAA hậu kỳ (sau scene+camera sẵn sàng) — thay renderer.render qua renderFrame()
-  }
-
-  // Pipeline FXAA: pass(scene,camera) → fxaa → output. outputColorTransform=true để tone-map+sRGB y như
-  // render thẳng (giữ tông màu), fxaa khử răng cưa bù MSAA đã tắt. pass GIỮ ref scene/camera (bền cả phiên).
-  private _setupPost(): void {
-    const scenePass = pass(this.scene, this.camera)
-    const post = new PostProcessing(this.renderer, fxaa(scenePass))
-    post.outputColorTransform = true
-    this._post = post
-  }
-
-  // Override BaseWorld: vẽ qua FXAA pipeline thay renderer.render thẳng. Fallback nếu post chưa dựng.
-  protected renderFrame(): void {
-    if (this._post) void this._post.render()
-    else this.renderer.render(this.scene, this.camera)
   }
 
   protected onUpdate(time: number, deltaTime: number): void {
@@ -780,8 +769,6 @@ export class ArchPlanLab extends BaseWorld {
   }
 
   protected onDispose(): void {
-    this._post?.dispose() // FXAA pipeline (RT offscreen + pass nodes)
-    this._post = null
     window.removeEventListener('keydown', this._onKeyDown)
     window.removeEventListener('keyup', this._onKeyUp)
     this.canvas.removeEventListener('pointerdown', this._onPointerDown)

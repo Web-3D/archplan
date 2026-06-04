@@ -333,6 +333,16 @@ function buildEdgeTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig, withEdge
   host.appendChild(note)
 }
 
+// Slider % Surface: [label, min%, max%, step, field-key 0–1]. Field = value/100. (rippleScale tách riêng — raw.)
+const SURF_ROWS: [string, number, number, number, SurfKey][] = [
+  ['Mirror %', 0, 100, 5, 'reflectivity'],
+  ['Wave spd %', 0, 300, 10, 'flow'],
+  ['Ripple %', 0, 200, 5, 'distortion'],
+  ['Turbulence %', 0, 150, 5, 'detail'], // độ nhiễu chi tiết (octave-2 FBM)
+  ['Refraction %', 0, 200, 5, 'refract'], // độ méo ảnh đáy nhìn-xuyên-nước (rõ với caro)
+  ['Murk %', 0, 100, 5, 'tint'],
+]
+
 // BẬC 4 "Surface" (mặt hồ): màu nước + gương/sóng/rung/đục — uniform LIVE qua tuneWater(w,…), KHÔNG dựng lại.
 function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void {
   host.appendChild(
@@ -341,14 +351,7 @@ function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void
       ctx.tuneWater(w, (s) => s.setWaterColor(hex), c)
     })
   )
-  const rows: [string, number, number, number, 'reflectivity' | 'flow' | 'distortion' | 'tint'][] =
-    [
-      ['Mirror %', 0, 100, 5, 'reflectivity'],
-      ['Wave spd %', 0, 300, 10, 'flow'],
-      ['Ripple %', 0, 200, 10, 'distortion'],
-      ['Murk %', 0, 100, 5, 'tint'],
-    ]
-  for (const [label, min, max, step, key] of rows) {
+  for (const [label, min, max, step, key] of SURF_ROWS) {
     host.appendChild(
       sliderRow(
         label,
@@ -364,6 +367,8 @@ function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void
               if (key === 'reflectivity') s.setReflectivity(w.reflectivity)
               else if (key === 'flow') s.setFlow(w.flow)
               else if (key === 'distortion') s.setDistortion(w.distortion)
+              else if (key === 'detail') s.setDetail(w.detail)
+              else if (key === 'refract') s.setRefract(w.refract)
               else s.setTint(w.tint)
             },
             c
@@ -373,7 +378,24 @@ function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void
       )
     )
   }
+  // Wave size — RAW (không phải %). ĐẢO rippleScale (13−v) → kéo PHẢI = sóng TO (rippleScale thấp). Slider riêng.
+  host.appendChild(
+    sliderRow(
+      'Wave size',
+      1,
+      12,
+      0.5,
+      13 - w.rippleScale,
+      (v, c) => {
+        const rs = 13 - v // size→rippleScale (cao=to → freq thấp)
+        w.rippleScale = rs
+        ctx.tuneWater(w, (s) => s.setRippleScale(rs), c)
+      },
+      1
+    )
+  )
 }
+type SurfKey = 'reflectivity' | 'flow' | 'distortion' | 'detail' | 'refract' | 'tint'
 
 // BẬC 4 "Bottom" (đáy hồ) → BẬC 5: Floor (đáy = màu đáy) | Walls (tường = độ sâu/chiều cao tường). Trả
 // Tabs (Floor|Walls) cho caller dispose. Lưu ý: basin 1 material → màu đáy (Floor) tô CẢ tường (chưa tách).
