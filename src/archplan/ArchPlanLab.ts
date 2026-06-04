@@ -241,7 +241,7 @@ export class ArchPlanLab extends BaseWorld {
   private hemiLight: THREE.HemisphereLight | null = null // groundColor = màu bounce theo nền
   private groundShader: { dispose(): void } | null = null // shader nền procedural (grass/cement…)
   private groundType: GroundType = 'none'
-  private envTexture: THREE.Texture | null = null // IBL từ PMREM(RoomEnvironment)
+  private envRT: THREE.RenderTarget | null = null // RT của PMREM(RoomEnvironment) IBL — dispose cả wrapper (gồm texture)
   private gridHelper: THREE.LineSegments | null = null // lưới editor (y=0) — tự dựng để KHOÉT lỗ hồ
   private gridMat: THREE.LineBasicMaterial | null = null
   private css2dRenderer: CSS2DRenderer | null = null
@@ -842,16 +842,16 @@ export class ArchPlanLab extends BaseWorld {
   private async _setupEnvironment(): Promise<void> {
     const pmrem = new PMREMGenerator(this.renderer)
     const rt = await pmrem.fromSceneAsync(new RoomEnvironment(), 0.04)
-    this.envTexture = rt.texture
+    this.envRT = rt // giữ RT để dispose CẢ wrapper (rt.dispose() gồm texture + framebuffer)
     this.scene.environment = rt.texture
     this.scene.environmentIntensity = 0.3 // hạ fill IBL → vùng bóng tối/đậm hơn (bóng chỉ ăn fill)
     pmrem.dispose()
   }
 
   private _disposeEnvironment(): void {
-    this.envTexture?.dispose()
+    this.envRT?.dispose() // dispose CẢ RenderTarget wrapper (gồm texture) — không chỉ riêng texture
     this.scene.environment = null
-    this.envTexture = null
+    this.envRT = null
   }
 
   private _disposeGround(): void {
@@ -1597,6 +1597,7 @@ export class ArchPlanLab extends BaseWorld {
     // dựng → ghép lại để drag/tune/handle nhắm đúng instance (gồm cả puddle).
     const wcfgs = [...renderWaters(this.site), ...renderPuddles(this.site)]
     this._siteWaters = h.waters.map((surf, i) => ({ cfg: wcfgs[i], surf }))
+    for (const x of this._siteWaters) x.surf.setCamera(this.camera) // dispose() tự free RTT reflector (né leak)
     // active = pool tab đang chọn nếu còn render; không thì pool đầu (kể cả tắt, để GUI bind) → null nếu 0 pool.
     if (!this._activeWater || !this.site.waters.includes(this._activeWater)) {
       this._activeWater = this.site.waters.find((w) => w.kind === 'pool') ?? null
