@@ -34,11 +34,17 @@ import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
 import { AsphaltGround } from 'threejs-modules/shaders/ground/AsphaltGround'
 import {
-  pondWorldXZ,
   renderSiteState,
   type SiteRenderCtx,
+  waterPolygons,
 } from 'threejs-modules/site/render/fromState'
-import { coverageStats, defaultSiteState, type SiteState } from 'threejs-modules/site/state'
+import {
+  coverageStats,
+  defaultSiteState,
+  renderWaters,
+  type SiteState,
+  type WaterConfig,
+} from 'threejs-modules/site/state'
 import { Tabs } from 'threejs-modules/ui/Tabs' // 🗂️ tab ngang drawer (Building|Ground|Tinh chỉnh)
 import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
 import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
@@ -93,6 +99,23 @@ declare global {
 
 // Footprint XZ (world): tâm + kích thước AABB — dùng đặt pick box found/slab/roof.
 
+// Trừ các khoảng `gaps` khỏi đoạn [min,max] → trả các đoạn CÒN LẠI (sort theo lo, gộp chồng lấn). Dùng
+// khoét lưới: 1 đường grid có thể cắt nhiều hồ → nhiều khoảng cần bỏ trên cùng 1 đường.
+function keepSpans(min: number, max: number, gaps: [number, number][]): [number, number][] {
+  if (gaps.length === 0) return [[min, max]]
+  const sorted = [...gaps].sort((a, b) => a[0] - b[0])
+  const out: [number, number][] = []
+  let cur = min
+  for (const [lo, hi] of sorted) {
+    const a = Math.max(lo, min)
+    const b = Math.min(hi, max)
+    if (a > cur) out.push([cur, a])
+    cur = Math.max(cur, b)
+  }
+  if (cur < max) out.push([cur, max])
+  return out
+}
+
 // ── ArchPlanLab ────────────────────────────────────────────────────────────────
 
 export class ArchPlanLab extends BaseWorld {
@@ -102,7 +125,7 @@ export class ArchPlanLab extends BaseWorld {
   private drawer: HTMLElement | null = null // 🗄️ drawer phải (shell bền qua rebuild): nhà + Sân vườn + Tinh chỉnh
   private drawerBody: HTMLElement | null = null // cột cuộn trong drawer — gui + panels dựng vào đây
   private drawerTabs: Tabs | null = null // tab ngang đầu drawer (Building | Ground | Tinh chỉnh)
-  private siteTabs: Tabs | null = null // tab CON trong panel Ground (Ground | Fence)
+  private _siteDispose: (() => void) | null = null // teardown tab CON panel Ground (outer + Water domain dynamic Pl/Pd/Pe)
   private tweakTabs: Tabs[] = [] // tab CON panel Tinh chỉnh: cấp 1 (Lá đơn|Bụi cỏ) + cấp 2 (Số đo|Độ cong|Bóng đổ)
   private drawerPanels: HTMLElement[] = [] // panel non-gui trong drawer (Ground+Tinh chỉnh) — gỡ khi teardown
   private _drawerTab = 0 // tab drawer đang mở — nhớ qua _rebuildGUI
@@ -151,8 +174,17 @@ export class ArchPlanLab extends BaseWorld {
   private _syncMoveToggle: ((on: boolean) => void) | null = null // sync nút 🤚 trong gui Tools
   // 💧 Phiên kéo hồ trong 3D (Move tool). body = dời cả hồ; vertex = nắn 1 đỉnh polygon (shape='free').
   private _waterDrag:
-    | { kind: 'body'; plane: THREE.Plane; sx: number; sz: number; ox0: number; oz0: number }
-    | { kind: 'vertex'; plane: THREE.Plane; idx: number }
+    | {
+        kind: 'body'
+        cfg: WaterConfig
+        surf: WaterSurface
+        plane: THREE.Plane
+        sx: number
+        sz: number
+        ox0: number
+        oz0: number
+      }
+    | { kind: 'vertex'; cfg: WaterConfig; surf: WaterSurface; plane: THREE.Plane; idx: number }
     | null = null
   // Handle đỉnh polygon hồ (overlay editor) — group ở scene; chỉ hiện khi shape='free' + moveMode.
   private _waterHandles: THREE.Group | null = null
@@ -176,7 +208,10 @@ export class ArchPlanLab extends BaseWorld {
   private siteMats: THREE.Material[] = []
   private siteShaders: { dispose(): void; setTime?(s: number): void }[] = [] // GrassGround… — dispose + gió theo time
   private _siteGrass: GrassBlades | null = null // ref cỏ 3D đang sống → tinh chỉnh uniform live (no rebuild)
-  private _siteWater: WaterSurface | null = null // ref hồ nước đang sống → setSun + tune uniform live
+  // 💧 Hồ ĐANG SỐNG (đa-instance): cfg↔surf zip theo renderWaters(site). _activeWater = pool của tab đang
+  // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
+  private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
+  private _activeWater: WaterConfig | null = null
   private preview: GrassPreview | null = null // 🔎 bảng preview 1 lá (mini WebGPU riêng)
   private _previewGrass: GrassBlades | null = null // lá trong preview → tune cùng lúc với bãi ngoài
   private _refreshSiteReadout: (() => void) | null = null
@@ -383,34 +418,50 @@ export class ArchPlanLab extends BaseWorld {
     )
   }
 
-  // Nhấn Move: ưu tiên ĐỈNH polygon (free) → thân hồ (gần hơn mọi pick-box building) → nhường manipulate.
+  // Entry hồ ACTIVE (pool của tab đang chọn) trong _siteWaters — null nếu hồ đó chưa render (tắt/placeholder).
+  private _activeWaterEntry(): { cfg: WaterConfig; surf: WaterSurface } | null {
+    return this._siteWaters.find((x) => x.cfg === this._activeWater) ?? null
+  }
+
+  // Chọn pool active (GUI đổi tab Pl, hoặc kéo trúng thân 1 hồ) → 3D drag/handle nhắm hồ này.
+  setActiveWaterCfg(cfg: WaterConfig): void {
+    this._activeWater = cfg
+    this._rebuildWaterHandles()
+  }
+
+  // Nhấn Move: ưu tiên ĐỈNH polygon (hồ active, free) → thân hồ GẦN NHẤT trong mọi hồ → nhường manipulate.
   private _tryStartWaterDrag(e: PointerEvent): boolean {
-    const mesh = this._siteWater?.getMesh()
-    if (!mesh) return false
+    if (this._siteWaters.length === 0) return false
     this._ray.setFromCamera(this._ndc(e), this.camera)
-    if (this._tryStartVertexDrag(mesh)) {
-      this.canvas.setPointerCapture(e.pointerId) // đỉnh trước (handle nhỏ, nằm trên mặt hồ)
+    const active = this._activeWaterEntry()
+    if (active && this._tryStartVertexDrag(active)) {
+      this.canvas.setPointerCapture(e.pointerId) // đỉnh trước (handle nhỏ, nằm trên mặt hồ active)
       return true
     }
-    const wHit = this._ray.intersectObject(mesh, false)[0]
+    const meshes = this._siteWaters.map((x) => x.surf.getMesh())
+    const wHit = this._ray.intersectObjects(meshes, false)[0]
     if (!wHit) return false
     const pHit = this._ray.intersectObjects(this.pickGroup.children, false)[0]
     if (pHit && pHit.distance < wHit.distance) return false // building element gần hơn → nhường manipulate
-    const w = this.site.water
+    const entry = this._siteWaters.find((x) => x.surf.getMesh() === wHit.object)
+    if (!entry) return false
+    this.setActiveWaterCfg(entry.cfg) // kéo hồ nào → hồ đó thành active
     this._waterDrag = {
       kind: 'body',
+      cfg: entry.cfg,
+      surf: entry.surf,
       plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -wHit.point.y),
       sx: wHit.point.x,
       sz: wHit.point.z,
-      ox0: w.offsetX,
-      oz0: w.offsetZ,
+      ox0: entry.cfg.offsetX,
+      oz0: entry.cfg.offsetZ,
     }
     this.canvas.setPointerCapture(e.pointerId)
     return true
   }
 
-  // Trúng 1 handle đỉnh → phiên kéo đỉnh (ray đã set ở caller). Mặt chiếu = ngang tại mặt nước.
-  private _tryStartVertexDrag(mesh: THREE.Mesh): boolean {
+  // Trúng 1 handle đỉnh (hồ active) → phiên kéo đỉnh (ray đã set ở caller). Mặt chiếu = ngang tại mặt nước.
+  private _tryStartVertexDrag(entry: { cfg: WaterConfig; surf: WaterSurface }): boolean {
     const handles = this._waterHandles
     if (!handles || handles.children.length === 0) return false
     const hit = this._ray.intersectObjects(handles.children, false)[0]
@@ -418,7 +469,9 @@ export class ArchPlanLab extends BaseWorld {
     if (typeof idx !== 'number') return false
     this._waterDrag = {
       kind: 'vertex',
-      plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -mesh.position.y),
+      cfg: entry.cfg,
+      surf: entry.surf,
+      plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -entry.surf.getMesh().position.y),
       idx,
     }
     return true // pointer capture do caller _tryStartWaterDrag lo
@@ -435,43 +488,43 @@ export class ArchPlanLab extends BaseWorld {
     else this._waterDragVertex(d, cur)
   }
 
-  // Dời cả hồ: ghi offset (mm) + DỜI MESH LIVE (reflector.target con → theo cùng) + handle theo.
+  // Dời cả hồ: ghi offset (mm) vào cfg + DỜI MESH LIVE (reflector.target con → theo cùng) + handle theo.
   private _waterDragBody(
-    d: { sx: number; sz: number; ox0: number; oz0: number },
+    d: { cfg: WaterConfig; surf: WaterSurface; sx: number; sz: number; ox0: number; oz0: number },
     cur: THREE.Vector3
   ): void {
-    const w = this.site.water
-    w.offsetX = Math.round(d.ox0 + (cur.x - d.sx) * 1000)
-    w.offsetZ = Math.round(d.oz0 + (cur.z - d.sz) * 1000)
-    const mesh = this._siteWater?.getMesh()
-    if (!mesh) return
-    mesh.position.set(w.offsetX / 1000, mesh.position.y, w.offsetZ / 1000)
+    d.cfg.offsetX = Math.round(d.ox0 + (cur.x - d.sx) * 1000)
+    d.cfg.offsetZ = Math.round(d.oz0 + (cur.z - d.sz) * 1000)
+    const mesh = d.surf.getMesh()
+    mesh.position.set(d.cfg.offsetX / 1000, mesh.position.y, d.cfg.offsetZ / 1000)
     this._waterHandles?.position.set(mesh.position.x, mesh.position.y + 0.05, mesh.position.z)
   }
 
-  // Nắn 1 đỉnh: world → local (trừ tâm hồ) → ghi points[idx] (mm) + dựng lại geometry live + dời handle.
-  private _waterDragVertex(d: { idx: number }, cur: THREE.Vector3): void {
-    const water = this._siteWater
-    const mesh = water?.getMesh()
-    const p = this.site.water.points[d.idx]
-    if (!water || !mesh || !p) return
+  // Nắn 1 đỉnh hồ active: world → local (trừ tâm hồ) → ghi points[idx] (mm) + dựng lại geometry live + dời handle.
+  private _waterDragVertex(
+    d: { cfg: WaterConfig; surf: WaterSurface; idx: number },
+    cur: THREE.Vector3
+  ): void {
+    const mesh = d.surf.getMesh()
+    const p = d.cfg.points[d.idx]
+    if (!p) return
     p.x = Math.round((cur.x - mesh.position.x) * 1000)
     p.z = Math.round((cur.z - mesh.position.z) * 1000)
-    water.setShape(this.site.water.points.map((q) => ({ x: q.x / 1000, z: q.z / 1000 })))
+    d.surf.setShape(d.cfg.points.map((q) => ({ x: q.x / 1000, z: q.z / 1000 })))
     const handle = this._waterHandles?.children[d.idx]
     if (handle) handle.position.set(p.x / 1000, 0, p.z / 1000)
   }
 
-  // Dựng lại handle đỉnh: group đặt tại tâm hồ (world), mỗi handle = sphere tại đỉnh (local). Chỉ khi
-  // shape='free' + moveMode + hồ enabled (≥3 đỉnh). Geo/mat dùng chung → clear chỉ gỡ mesh, không leak.
+  // Dựng lại handle đỉnh hồ ACTIVE: group tại tâm hồ (world), mỗi handle = sphere tại đỉnh (local). Chỉ khi
+  // hồ active ĐANG render + shape='free' + moveMode (≥3 đỉnh). Geo/mat dùng chung → clear chỉ gỡ mesh.
   private _rebuildWaterHandles(): void {
     const g = this._waterHandles
     if (!g) return
     g.clear()
-    const water = this._siteWater
-    const w = this.site.water
-    if (!water || !w.enabled || w.shape !== 'free' || !this.moveMode || w.points.length < 3) return
-    const mesh = water.getMesh()
+    const entry = this._activeWaterEntry()
+    const w = entry?.cfg
+    if (!entry || !w || w.shape !== 'free' || !this.moveMode || w.points.length < 3) return
+    const mesh = entry.surf.getMesh()
     g.position.set(mesh.position.x, mesh.position.y + 0.05, mesh.position.z)
     const geo = (this._waterHandleGeo ??= new THREE.SphereGeometry(0.12, 12, 8))
     const mat = (this._waterHandleMat ??= new THREE.MeshBasicMaterial({ color: 0xffcc33 }))
@@ -732,7 +785,7 @@ export class ArchPlanLab extends BaseWorld {
     this.hemiLight = hemi
 
     this.gridMat = new THREE.LineBasicMaterial({ color: 0x1a2240 })
-    this.gridHelper = new THREE.LineSegments(this._buildGridGeo(null), this.gridMat) // tự dựng → khoét được
+    this.gridHelper = new THREE.LineSegments(this._buildGridGeo([]), this.gridMat) // tự dựng → khoét được
     this.scene.add(hemi, sun, ground, this.gridHelper)
     this._applySun()
   }
@@ -802,12 +855,11 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
-  // Đốm nắng glint trên hồ theo sun (live). Gọi khi sun đổi + sau mỗi lần dựng lại _siteWater.
+  // Đốm nắng glint trên MỌI hồ theo sun (live). Gọi khi sun đổi + sau mỗi lần dựng lại _siteWaters.
   private _applySunToWater(): void {
-    if (this._siteWater && this.sun) {
-      const sp = this.sun.position
-      this._siteWater.setSun(sp.x, sp.y, sp.z)
-    }
+    if (!this.sun) return
+    const sp = this.sun.position
+    for (const x of this._siteWaters) x.surf.setSun(sp.x, sp.y, sp.z)
   }
 
   // Sun persist riêng (localStorage 'archplan:sun') — độc lập design store. Load TRƯỚC _setupScene.
@@ -905,7 +957,8 @@ export class ArchPlanLab extends BaseWorld {
       siteStats: () => this._siteStats(),
       registerSiteReadout: (fn) => (this._refreshSiteReadout = fn),
       tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
-      tuneWater: (apply, persist) => this._tuneWater(apply, persist),
+      tuneWater: (cfg, apply, persist) => this._tuneWater(cfg, apply, persist),
+      setActiveWater: (cfg) => this.setActiveWaterCfg(cfg),
       applySun: () => this._applySun(),
       getZGridGroup: () => this.heightGridSystem?.getZGridGroup() ?? null,
       getXGridGroup: () => this.heightGridSystem?.getXGridGroup() ?? null,
@@ -958,9 +1011,46 @@ export class ArchPlanLab extends BaseWorld {
     })
     drawer.appendChild(handle)
     drawer.appendChild(body)
+    drawer.appendChild(this._buildDrawerFooter()) // hàng nút DÙNG CHUNG đáy drawer (ngoài body cuộn)
     this.canvas.parentElement?.appendChild(drawer)
     this.drawer = drawer
     this.drawerBody = body
+  }
+
+  // 🗄️ Hàng nút DÙNG CHUNG đáy drawer (mọi tab Building|Ground|Lab đều thấy): undo/redo + Build/Reset/Save/
+  // Load/JSON. Wire THẲNG vào method (KHÔNG qua ctx) → bền qua _rebuildGUI (drawer shell tạo 1 lần).
+  private _buildDrawerFooter(): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'ap-drawer-footer'
+    const undo = document.createElement('div')
+    undo.className = 'ap-undo-row'
+    const mkU = (sym: string, fn: () => void): void => {
+      const b = document.createElement('button')
+      b.className = 'ap-undo-btn'
+      b.textContent = sym
+      b.addEventListener('click', fn)
+      undo.appendChild(b)
+    }
+    mkU('↶', () => this._undo())
+    mkU('↷', () => this._redo())
+    const bar = document.createElement('div')
+    bar.className = 'ap-footer'
+    const mk = (label: string, cls: string, fn: () => void): void => {
+      const b = document.createElement('button')
+      b.className = `ap-footer-btn ${cls}`
+      b.textContent = label
+      b.addEventListener('click', fn)
+      bar.appendChild(b)
+    }
+    mk('▶ Build', 'ap-footer-build', () => this._buildScene())
+    mk('Reset', 'ap-footer-reset', () => {
+      if (window.confirm('Reset toàn bộ về mặc định?')) this._resetState()
+    })
+    mk('💾 Save', 'ap-footer-save', () => void this.store.saveFile(this.state, this.site))
+    mk('📁 Load', 'ap-footer-load', () => void this._loadFile())
+    mk('📄 JSON', 'ap-footer-json', () => this.store.exportJSON(this.state, this.site))
+    wrap.append(undo, bar)
+    return wrap
   }
 
   // ◀ Drawer TRÁI: bảng Tools (Surface + tọa độ) ẩn vào mép trái mặc định; tay kéo »/« nhô ra/ẩn vào.
@@ -986,8 +1076,8 @@ export class ArchPlanLab extends BaseWorld {
   // TRONG drawer: 3 panel (Building=gui nhà · Ground=lô · Tinh chỉnh) là CON TRỰC TIẾP drawerBody →
   // Tabs ngang quản lý (ẩn/hiện). NGOÀI drawer: float góc trái (Scanner/Sun/Ground/Move/Palette).
   private _buildLeftTools(ctx: APGuiCtx, drawerBody: HTMLElement): void {
-    const site = setupSitePanel(ctx, drawerBody) // 🌳 Ground: sub-tab Ground|Fence → { panel, tabs }
-    this.siteTabs = site.tabs
+    const site = setupSitePanel(ctx, drawerBody) // 🌳 Ground: sub-tab Ground|Fence|Tree|Water → { panel, dispose }
+    this._siteDispose = site.dispose
     const tweak = setupTweakPanel(ctx, drawerBody) // 🎛️ Tinh chỉnh — { panel, previewHost, tabs }
     this.tweakTabs = tweak.tabs // tab con: cấp 1 (Lá đơn|Bụi cỏ) + cấp 2 (Số đo|Độ cong|Bóng đổ)
     this.preview = new GrassPreview(tweak.previewHost) // 🔎 preview 1 lá/bụi GỘP trong panel Tinh chỉnh
@@ -1104,8 +1194,8 @@ export class ArchPlanLab extends BaseWorld {
     this.preview?.dispose() // 🔎 mini WebGPU preview: stop loop + dispose renderer/blade
     this.preview = null
     this._previewGrass = null
-    this.siteTabs?.dispose() // gỡ tab CON Ground|Fence trước (nằm trong panel Ground)
-    this.siteTabs = null
+    this._siteDispose?.() // gỡ tab CON panel Ground: outer (Ground|Fence|Tree|Water) + Water domain (Pl/Pd/Pe)
+    this._siteDispose = null
     for (const t of this.tweakTabs) t.dispose() // gỡ cả 2 cấp tab panel Tinh chỉnh
     this.tweakTabs = []
     this.drawerTabs?.dispose() // gỡ tab bar drawer (KHÔNG đụng panel — caller sở hữu)
@@ -1334,10 +1424,16 @@ export class ArchPlanLab extends BaseWorld {
       exclude: this._foundationRects(),
     }) // handle trực tiếp (không instanceof → live ổn)
     this._siteGrass = h.grass
-    this._siteWater = h.water
+    // zip cfg↔surf: h.waters cùng thứ tự renderWaters(site) → ghép lại để drag/tune/handle nhắm đúng instance.
+    const pools = renderWaters(this.site)
+    this._siteWaters = h.waters.map((surf, i) => ({ cfg: pools[i], surf }))
+    // active = pool tab đang chọn nếu còn render; không thì pool đầu (kể cả tắt, để GUI bind) → null nếu 0 pool.
+    if (!this._activeWater || !this.site.waters.includes(this._activeWater)) {
+      this._activeWater = this.site.waters.find((w) => w.kind === 'pool') ?? null
+    }
     this._applySunToGrass() // _siteGrass mới → set hướng vệt theo sun hiện tại
-    this._applySunToWater() // _siteWater mới → set hướng glint theo sun hiện tại
-    this._rebuildWaterHandles() // 💧 handle đỉnh theo hồ mới (free + moveMode)
+    this._applySunToWater() // _siteWaters mới → set hướng glint theo sun hiện tại
+    this._rebuildWaterHandles() // 💧 handle đỉnh theo hồ active mới (free + moveMode)
     this._rebuildEditorGround() // 🕳️ khoét lỗ hồ vào nền backdrop editor → không che đáy basin
     this._rebuildGrid() // 🕳️ khoét lưới y=0 theo bbox hồ → hết sọc lưới đè lên lòng hồ
     const lift = this.site.show ? this.site.groundThick / 1000 : 0
@@ -1351,8 +1447,8 @@ export class ArchPlanLab extends BaseWorld {
   private _rebuildEditorGround(): void {
     if (!this.groundMesh) return
     this.groundGeo?.dispose()
-    const w = this.site.water
-    if (this.site.show && w.enabled) {
+    const polys = this.site.show ? waterPolygons(this.site) : []
+    if (polys.length > 0) {
       const H = 40 // nửa cạnh 80m
       const s = new THREE.Shape()
       s.moveTo(-H, -H)
@@ -1360,13 +1456,12 @@ export class ArchPlanLab extends BaseWorld {
       s.lineTo(H, H)
       s.lineTo(-H, H)
       s.closePath()
-      const hole = new THREE.Path()
-      pondWorldXZ(this.site).forEach((q, i) => {
-        if (i === 0) hole.moveTo(q.x, -q.z)
-        else hole.lineTo(q.x, -q.z)
-      })
-      hole.closePath()
-      s.holes.push(hole)
+      for (const poly of polys) {
+        const hole = new THREE.Path()
+        poly.forEach((q, i) => (i === 0 ? hole.moveTo(q.x, -q.z) : hole.lineTo(q.x, -q.z)))
+        hole.closePath()
+        s.holes.push(hole) // 1 lỗ MỖI pool đang bật → nhìn xuyên thấy mọi đáy basin
+      }
       this.groundGeo = new THREE.ShapeGeometry(s)
     } else {
       this.groundGeo = new THREE.PlaneGeometry(80, 80)
@@ -1374,42 +1469,40 @@ export class ArchPlanLab extends BaseWorld {
     this.groundMesh.geometry = this.groundGeo
   }
 
-  // bbox hồ (world XZ, mét) để khoét lưới — null khi không có hồ. Free polygon → bbox bao ngoài.
-  private _pondBbox(): { x0: number; x1: number; z0: number; z1: number } | null {
-    const w = this.site.water
-    if (!this.site.show || !w.enabled) return null
-    let x0 = Infinity
-    let x1 = -Infinity
-    let z0 = Infinity
-    let z1 = -Infinity
-    for (const p of pondWorldXZ(this.site)) {
-      x0 = Math.min(x0, p.x)
-      x1 = Math.max(x1, p.x)
-      z0 = Math.min(z0, p.z)
-      z1 = Math.max(z1, p.z)
-    }
-    return { x0, x1, z0, z1 }
+  // bbox MỖI pool đang bật (world XZ, mét) để khoét lưới — [] khi không có hồ. Free polygon → bbox bao ngoài.
+  private _poolBboxes(): { x0: number; x1: number; z0: number; z1: number }[] {
+    if (!this.site.show) return []
+    return waterPolygons(this.site).map((poly) => {
+      let x0 = Infinity
+      let x1 = -Infinity
+      let z0 = Infinity
+      let z1 = -Infinity
+      for (const p of poly) {
+        x0 = Math.min(x0, p.x)
+        x1 = Math.max(x1, p.x)
+        z0 = Math.min(z0, p.z)
+        z1 = Math.max(z1, p.z)
+      }
+      return { x0, x1, z0, z1 }
+    })
   }
 
-  // Lưới editor = LineSegments tự dựng (GridHelper KHÔNG khoét lỗ được). Mỗi đường //trục bị CẮT đoạn nằm
-  // trong bbox hồ → hết sọc lưới đè lòng hồ (lưới y=0 nằm TRÊN mặt nước −2cm). 80×80, ô 1m như cũ.
+  // Lưới editor = LineSegments tự dựng (GridHelper KHÔNG khoét lỗ được). Mỗi đường //trục bị CẮT các đoạn
+  // nằm trong bbox BẤT KỲ hồ nào (keepSpans interval-subtract) → hết sọc lưới đè lòng MỌI hồ. 80×80, ô 1m.
   private _buildGridGeo(
-    hole: { x0: number; x1: number; z0: number; z1: number } | null
+    holes: { x0: number; x1: number; z0: number; z1: number }[]
   ): THREE.BufferGeometry {
     const H = 40
     const seg: number[] = []
-    const line = (ax: number, az: number, bx: number, bz: number): void => {
-      seg.push(ax, 0, az, bx, 0, bz)
-    }
     for (let i = -H; i <= H; i++) {
-      if (hole && i > hole.z0 && i < hole.z1) {
-        line(-H, i, hole.x0, i)
-        line(hole.x1, i, H, i)
-      } else line(-H, i, H, i)
-      if (hole && i > hole.x0 && i < hole.x1) {
-        line(i, -H, i, hole.z0)
-        line(i, hole.z1, i, H)
-      } else line(i, -H, i, H)
+      const gx = holes
+        .filter((h) => i > h.z0 && i < h.z1)
+        .map((h) => [h.x0, h.x1] as [number, number])
+      for (const [a, b] of keepSpans(-H, H, gx)) seg.push(a, 0, i, b, 0, i) // đường ngang z=i
+      const gz = holes
+        .filter((h) => i > h.x0 && i < h.x1)
+        .map((h) => [h.z0, h.z1] as [number, number])
+      for (const [a, b] of keepSpans(-H, H, gz)) seg.push(i, 0, a, i, 0, b) // đường dọc x=i
     }
     const g = new THREE.BufferGeometry()
     g.setAttribute('position', new THREE.Float32BufferAttribute(seg, 3))
@@ -1420,7 +1513,7 @@ export class ArchPlanLab extends BaseWorld {
   private _rebuildGrid(): void {
     if (!this.gridHelper) return
     this.gridHelper.geometry.dispose()
-    this.gridHelper.geometry = this._buildGridGeo(this._pondBbox())
+    this.gridHelper.geometry = this._buildGridGeo(this._poolBboxes())
   }
 
   // Giải phóng lưới (geometry + material). Tách khỏi _disposeSceneResources cho gọn (Rule complexity).
@@ -1439,9 +1532,11 @@ export class ArchPlanLab extends BaseWorld {
     if (persist) this.store.autosave(this.state, this.site)
   }
 
-  // 🎛️ Chỉnh uniform LIVE trên hồ đang sống (màu/gương/sóng) — KHÔNG dựng lại. No-op nếu hồ chưa render.
-  private _tuneWater(apply: (w: WaterSurface) => void, persist: boolean): void {
-    if (this._siteWater) apply(this._siteWater)
+  // 🎛️ Chỉnh uniform LIVE trên hồ của ĐÚNG instance cfg (màu/gương/sóng) — KHÔNG dựng lại. No-op nếu hồ
+  // đó chưa render (pool tắt / pond/puddle placeholder).
+  private _tuneWater(cfg: WaterConfig, apply: (w: WaterSurface) => void, persist: boolean): void {
+    const surf = this._siteWaters.find((x) => x.cfg === cfg)?.surf
+    if (surf) apply(surf)
     if (persist) this.store.autosave(this.state, this.site)
   }
 
@@ -1458,7 +1553,7 @@ export class ArchPlanLab extends BaseWorld {
     this.siteMats = []
     this.siteShaders = []
     this._siteGrass = null
-    this._siteWater = null // dispose thật do siteShaders lo (WaterSurface trong đó)
+    this._siteWaters = [] // dispose thật do siteShaders lo (mỗi WaterSurface trong đó); _activeWater giữ (cfg ref)
     this.siteGroup.clear()
   }
 

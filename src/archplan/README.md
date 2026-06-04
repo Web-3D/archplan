@@ -66,14 +66,20 @@ ArchPlanLab (extends BaseWorld)
   │
   ├── 🗄️ Drawer PHẢI (.ap-drawer) ← shell bền; cobalt trong suốt; Tabs ngang (mở tab nào cũng PHỦ KÍN drawer):
   │     ├── 🏠 Building            ← lil-gui (floors → instances → structure/roof/dims/walls)
-  │     ├── 🌳 Ground              ← BẬC TAB con Ground|Fence|Tree|Water folder-style (English, tông NÂU bg-1→bg-2
-  │     │                            dính liền); Ground=SURFACE vật liệu(grass/soil/gravel)+lô · Tree=🌿 cỏ-3D
-  │     │                            ĐỘC LẬP surface (mọc nền bất kỳ)+cây sắp có · Water=💧 hồ reflect+refract NHÌN XUYÊN ĐÁY
-  │     │                            (tier C): Form rect/free(kéo đỉnh)+size/pos+Sâu+màu nước/đáy+gương/sóng/Đục; bảng Lot/House/Coverage/Garden ĐÁY
-  │     └── 🎛️ Lab                 ← TAB cấp1 Lá đơn|Bụi cỏ; Lá đơn có TAB cấp2 Số đo|Độ cong|Bóng đổ (bg sáng dần = lồng cấp):
-  │                                  Số đo=mật độ/cao/thon/thân/gốc/đốt · Độ cong=T→P/dọc+cụp 1 chiều/fold · Bóng đổ=đậm/cao bóng
-  │                                  +màu 2 mặt(ngoài/trong)+Vệt(bật/tắt+Đậm+Rộng, live); Bụi cỏ=Lá/bụi+Xòe+Nghiêng (mặt trong vào tâm+splay);
-  │                                  🔎 preview xoay/pan/zoom + nền gradient + 2 MẶT 2 MÀU
+  │     ├── 🌳 Ground              ← BẬC TAB con Ground|Fence|Tree|Water folder-style (English; Ground/Fence/Tree tông NÂU,
+  │     │                            Water tông XANH NƯỚC curated --wt-* tách riêng); Ground=SURFACE vật liệu(grass/soil/gravel)+lô ·
+  │     │                            Tree=🌿 cỏ-3D ĐỘC LẬP surface (mọc nền bất kỳ)+cây sắp có · Water=💧 LỒNG NHIỀU BẬC (English):
+  │     │                            bậc2 Pool|Pond|Puddle ▸ bậc3 instance Pl/Pd/Pe + ＋ (đa-hồ site.waters[], instance mới enabled=false) ▸
+  │     │                            bậc4 (mỗi Pl/Pd) Pool edge|Surface|Bottom ▸ bậc5 (Bottom) Floor|Walls. Pool edge=Form/W/D/PosX/PosZ+Edge width(coping 500mm)+Edge mat ·
+  │     │                            Surface=Water color/Mirror/Wave/Ripple/Murk · Floor=Floor color+Floor mat · Walls=Wall depth+Wall mat (mat=placeholder 'None').
+  │     │                            Pond=render Y NHƯ Pool (renderWaters; đổi param sau) · Puddle=placeholder. Coping = rect-frame quanh hồ (buildPoolEdge).
+  │     │                            (bg-1→bg-4 lồng cấp, l5 về bg-3 cho chữ/track trắng đọc được). bảng Lot/House/Coverage/Garden ĐÁY tab Ground
+  │     ├── 🎛️ Lab                 ← TAB cấp1 Lá đơn|Bụi cỏ; Lá đơn có TAB cấp2 Số đo|Độ cong|Bóng đổ (bg sáng dần = lồng cấp):
+  │     │                            Số đo=mật độ/cao/thon/thân/gốc/đốt · Độ cong=T→P/dọc+cụp 1 chiều/fold · Bóng đổ=đậm/cao bóng
+  │     │                            +màu 2 mặt(ngoài/trong)+Vệt(bật/tắt+Đậm+Rộng, live); Bụi cỏ=Lá/bụi+Xòe+Nghiêng (mặt trong vào tâm+splay);
+  │     │                            🔎 preview xoay/pan/zoom + nền gradient + 2 MẶT 2 MÀU
+  │     └── ⬇ Footer DÙNG CHUNG    ← `_buildDrawerFooter` (ngoài body cuộn, MỌI tab thấy): undo/redo + Build/Reset/Save/Load/JSON
+  │                                  (trước nằm trong panel Building → đã lôi ra drawer vì là dòng chung; wire thẳng method, bền qua _rebuildGUI)
   │
   ├── 🗄️ Drawer TRÁI (.ap-ldrawer)← ẩn mép trái, kéo nhô; gui Tools:
   │     ├── Surface               ← symbol 🔲/🧱/🛣️ (none/stone/asphalt) — viền sáng khi chọn
@@ -91,16 +97,21 @@ ArchPlanLab (extends BaseWorld)
 
 > **Cỏ né foundation + hồ:** cỏ-3D KHÔNG mọc trong footprint foundation LẪN mặt hồ — `_foundationRects()`
 > gom rect (bbox + overhang `foundOh`) các instance tầng trệt có `showFoundation`; `renderSiteState` tự thêm
-> rect hồ (`water.offset`/`size`) vào `exclude` → `GrassBlades` bỏ lá rơi trong rect. "Nơi có nhà/nước thì không mọc cỏ."
+> rect hồ+coping (`waterRect` = footprint + `edgeWidth`) vào `exclude` → `GrassBlades` bỏ lá rơi trong rect. "Nơi có nhà/nước thì không mọc cỏ."
 
-> **Hồ nước (💧 Water, tier C):** site element RỜI (có vị trí offset cạnh nhà, khác cỏ phủ-cả-lô). `WaterSurface`
-> = `reflector()` gương thật → **+1 render pass/RTT** (đắt; DevHud sẽ thấy draw calls nhảy). Đốm nắng glint theo
-> sun (`_applySunToWater` ← `setSun`, cùng pattern vệt-cỏ); sóng chạy theo `setTime` mỗi frame (qua `siteShaders`).
-> **Kéo-thả 3D:** bật Move 🤚 (nút float góc trái-dưới hoặc **phím Z**) → nhấn-giữ mặt hồ kéo đi (raycast mesh trực tiếp,
-> không pick box; dời live, thả → cỏ né lại + autosave). Chỉnh số/màu/gương/sóng ở GUI sub-tab Water. Mặc định bật, hồ 4×3m ở +5m trước nhà.
+> **Hồ nước (💧 Water, tier C) — ĐA-INSTANCE:** state `site.waters[]` (mỗi hồ có `kind`='pool'|'pond'|'puddle'); render
+> khi `(pool||pond) && enabled` (`renderWaters()`) — **pond render Y NHƯ pool** (cùng WaterSurface, param phân hoá sau),
+> puddle = placeholder. Mỗi hồ bật = 1 `WaterSurface` = `reflector()` gương thật → **+1 render pass/RTT MỖI hồ** (đắt;
+> instance mới mặc định `enabled=false` để né tụt FPS). Glint theo sun (`_applySunToWater` loop mọi hồ); sóng `setTime` mỗi frame.
+> **Coping** = dải mép quanh hồ (`buildPoolEdge`: rect-frame bbox+`edgeWidth` − lỗ polygon, ở mặt nền +3mm; màu đá mặc định,
+> `edgeMaterial` placeholder). `floorMaterial`/`wallMaterial` cũng placeholder ('none') — basin vẫn 1 material (màu Floor tô cả tường) tới khi làm material thật.
+> Khoét lỗ nền/lưới: 1 lỗ MỖI hồ bật (`waterPolygons` → `lotShape.holes[]` lõi + `_rebuildEditorGround`/`_buildGridGeo` vỏ).
+> **Kéo-thả 3D (active):** GUI tab Pl chọn pool nào = pool ACTIVE (`setActiveWater`); bật Move 🤚 (nút float hoặc **phím Z**)
+> → nhấn-giữ mặt hồ kéo (raycast mọi mesh hồ, gần nhất → thành active; dời live, thả → cỏ né lại + autosave). Chỉnh
+> số/màu/gương/sóng ở **Water▸Pool▸Pl_n**. Default: 1 Pl1 bật, hồ 4×3m ở +5m trước nhà (+ Pd1/Pe1 placeholder tắt).
 > **Mặt nước LÕM** dưới vành nền (`baseY = rim − lip`, lip≤depthY) → lộ vành đất = đọc ra "lỗ cắt xuyên", không phẳng lì.
-> **Form tự do:** GUI Water → `Form=Free` (seed 4 góc từ chữ nhật) → bật Move → **kéo chấm vàng ở góc** nắn polygon
-> (`ShapeGeometry` dựng lại live, cỏ né theo bbox). Thêm/bớt đỉnh = bước sau.
+> **Form tự do:** GUI Water▸Pool▸Pl_n → `Form=Free` (seed 4 góc) → bật Move → **kéo chấm vàng ở góc** (handle của hồ active)
+> nắn polygon (`ShapeGeometry` dựng lại live, cỏ né theo bbox). Thêm/bớt đỉnh = bước sau.
 
 ---
 

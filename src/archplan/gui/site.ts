@@ -2,15 +2,24 @@
  * VỊ TRÍ   — archplan/src/archplan/gui/site.ts
  * VAI TRÒ  — Panel "🌳 Ground" (drawer tab): sửa SiteState. CHIA BẬC TAB con: "Ground" (SURFACE vật liệu
  *            nền/lô + bảng coverage) · "Fence" (hàng rào) · "Tree" (THỰC VẬT 3D: cỏ-3D độc lập surface +
- *            cây sắp có) chung 1 hàng tab. Nhãn TOÀN tiếng Anh.
- *            Slider input = live (applySite false), change/select/toggle = commit (true).
+ *            cây sắp có) · "Water" (tông XANH curated --wt-*, tách tông nâu Ground). Nhãn TOÀN tiếng Anh.
+ *            WATER LỒNG NHIỀU BẬC: Pool|Pond|Puddle (bậc2) ▸ Pl/Pd/Pe instance +＋ (bậc3) ▸ Pool edge|Surface|
+ *            Bottom (bậc4) ▸ Bottom: Floor|Walls (bậc5). Slider input=live, change/select/toggle=commit.
  * LIÊN HỆ  — Dựng vào drawerBody bởi ArchPlanLab._buildLeftTools (con của drawer Tabs). Sub-tab = Tabs
- *            (ui/Tabs) → trả { panel, tabs } cho caller dispose. State+render qua APGuiCtx.
+ *            (ui/Tabs) → trả { panel, dispose } cho caller dispose (Water domain quản Tabs động + lồng).
  */
 
-import type { GroundMaterialKey, WaterConfig } from 'threejs-modules/site/state'
-import { GROUND_THICK_MAX, GROUND_THICK_MIN } from 'threejs-modules/site/state'
-import { Tabs } from 'threejs-modules/ui/Tabs'
+import type {
+  GroundMaterialKey,
+  WaterConfig,
+  WaterKind,
+  WaterMaterialKey,
+} from 'threejs-modules/site/state'
+import { GROUND_THICK_MAX, GROUND_THICK_MIN, makeWater } from 'threejs-modules/site/state'
+import { type TabItem, Tabs } from 'threejs-modules/ui/Tabs'
+
+// Chất liệu bề mặt hồ — PLACEHOLDER: chỉ 'None' hiện tại; thêm tile/stone/concrete… khi làm material thật.
+const MATERIAL_OPTS: [string, WaterMaterialKey][] = [['None', 'none']]
 
 import type { APGuiCtx } from './ctx'
 
@@ -249,76 +258,82 @@ function seedWaterRectPoints(w: WaterConfig): void {
   ]
 }
 
-// 💧 Hồ nước (tier C — WaterSurface): SITE ELEMENT rời. Toggle + form (rect/free) + size/pos + dáng nước.
-function buildWaterControls(body: HTMLElement, ctx: APGuiCtx): void {
-  const w = ctx.site.water
-  body.appendChild(
-    toggleRow('💧 Water (pond)', w.enabled, (on) => {
-      w.enabled = on
+// Slider structural hồ (field mm) — áp khi BUÔNG (KHÔNG live: né tạo lại reflector/RTT mỗi frame).
+type ShapeKey = 'width' | 'depth' | 'offsetX' | 'offsetZ' | 'depthY' | 'edgeWidth'
+function waterSlider(
+  host: HTMLElement,
+  ctx: APGuiCtx,
+  w: WaterConfig,
+  label: string,
+  min: number,
+  max: number,
+  key: ShapeKey
+): void {
+  host.appendChild(
+    sliderRow(
+      label,
+      min,
+      max,
+      0.1,
+      w[key] / 1000,
+      (v, c) => {
+        w[key] = Math.round(v * 1000)
+        if (c) ctx.applySite(true)
+      },
+      1000
+    )
+  )
+}
+
+// Hàng chọn chất liệu (placeholder 'None'). Đổi → applySite (rebuild để áp material; hiện 'none' = no-op).
+type MatKey = 'floorMaterial' | 'wallMaterial' | 'edgeMaterial'
+function materialRow(
+  host: HTMLElement,
+  ctx: APGuiCtx,
+  w: WaterConfig,
+  label: string,
+  key: MatKey
+): void {
+  host.appendChild(
+    selectRow(label, MATERIAL_OPTS, w[key], (v) => {
+      w[key] = v
       ctx.applySite(true)
     })
   )
+}
+
+// BẬC 4 "Pool edge" (mép/thành hồ): đường bao (Form) + kích thước + vị trí + DẢI COPING (edgeWidth + chất
+// liệu) quanh hồ = ĐỊNH NGHĨA MÉP hồ. Tách rõ với Walls (tường đứng, ở Bottom).
+function buildEdgeTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void {
   const formOpts: [string, 'rect' | 'free'][] = [
     ['Rect', 'rect'],
-    ['Free (kéo đỉnh)', 'free'],
+    ['Free (drag)', 'free'],
   ]
-  body.appendChild(
+  host.appendChild(
     selectRow('Form', formOpts, w.shape, (v) => {
       w.shape = v
-      if (v === 'free' && w.points.length < 3) seedWaterRectPoints(w) // seed từ rect hiện tại
+      if (v === 'free' && w.points.length < 3) seedWaterRectPoints(w)
       ctx.applySite(true)
     })
   )
-  buildWaterShape(body, ctx)
-  buildWaterLook(body, ctx)
+  waterSlider(host, ctx, w, 'Width m', 1, 15, 'width')
+  waterSlider(host, ctx, w, 'Depth m', 1, 15, 'depth')
+  waterSlider(host, ctx, w, 'Pos X m', -10, 10, 'offsetX')
+  waterSlider(host, ctx, w, 'Pos Z m', -10, 10, 'offsetZ')
+  waterSlider(host, ctx, w, 'Edge width m', 0, 2, 'edgeWidth') // dải coping quanh hồ (0 = tắt)
+  materialRow(host, ctx, w, 'Edge mat', 'edgeMaterial')
   const note = document.createElement('div')
-  note.style.cssText = 'font-size:10px;opacity:.7;margin-top:5px;line-height:1.35'
-  note.textContent =
-    'Gương thật (reflector) — +1 render pass. Free: bật Move (Alt) → kéo chấm vàng ở góc.'
-  body.appendChild(note)
+  note.style.cssText = 'font-size:9px;opacity:.7;margin-top:4px;line-height:1.3'
+  note.textContent = 'Free: bật Move (Z) → kéo chấm vàng ở góc.'
+  host.appendChild(note)
 }
 
-// Kích thước + vị trí hồ (structural → áp khi BUÔNG, KHÔNG live: tránh tạo lại reflector/RTT mỗi frame).
-function buildWaterShape(body: HTMLElement, ctx: APGuiCtx): void {
-  const w = ctx.site.water
-  const rows: [string, number, number, 'width' | 'depth' | 'offsetX' | 'offsetZ' | 'depthY'][] = [
-    ['Width m', 1, 15, 'width'],
-    ['Depth m', 1, 15, 'depth'],
-    ['Pos X m', -10, 10, 'offsetX'],
-    ['Pos Z m', -10, 10, 'offsetZ'],
-    ['Sâu m', 0.1, 3, 'depthY'], // độ sâu lòng hồ (basin) — đáy dưới mặt nền
-  ]
-  for (const [label, min, max, key] of rows) {
-    body.appendChild(
-      sliderRow(
-        label,
-        min,
-        max,
-        0.1,
-        w[key] / 1000,
-        (v, c) => {
-          w[key] = Math.round(v * 1000)
-          if (c) ctx.applySite(true) // chỉ dựng lại khi buông (hồ nặng — né tạo reflector mỗi frame)
-        },
-        1000
-      )
-    )
-  }
-}
-
-// Dáng nước: màu + độ gương + tốc-độ-sóng + độ-rung (uniform LIVE qua tuneWater — KHÔNG dựng lại).
-function buildWaterLook(body: HTMLElement, ctx: APGuiCtx): void {
-  const w = ctx.site.water
-  body.appendChild(
+// BẬC 4 "Surface" (mặt hồ): màu nước + gương/sóng/rung/đục — uniform LIVE qua tuneWater(w,…), KHÔNG dựng lại.
+function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void {
+  host.appendChild(
     colorRow('Water color', w.color, (hex, c) => {
       w.color = hex
-      ctx.tuneWater((s) => s.setWaterColor(hex), c)
-    })
-  )
-  body.appendChild(
-    colorRow('Bottom color', w.bottomColor, (hex, c) => {
-      w.bottomColor = hex
-      if (c) ctx.applySite(true) // đáy = material basin → dựng lại khi buông (không live)
+      ctx.tuneWater(w, (s) => s.setWaterColor(hex), c)
     })
   )
   const rows: [string, number, number, number, 'reflectivity' | 'flow' | 'distortion' | 'tint'][] =
@@ -326,10 +341,10 @@ function buildWaterLook(body: HTMLElement, ctx: APGuiCtx): void {
       ['Mirror %', 0, 100, 5, 'reflectivity'],
       ['Wave spd %', 0, 300, 10, 'flow'],
       ['Ripple %', 0, 200, 10, 'distortion'],
-      ['Đục %', 0, 100, 5, 'tint'],
+      ['Murk %', 0, 100, 5, 'tint'],
     ]
   for (const [label, min, max, step, key] of rows) {
-    body.appendChild(
+    host.appendChild(
       sliderRow(
         label,
         min,
@@ -338,16 +353,98 @@ function buildWaterLook(body: HTMLElement, ctx: APGuiCtx): void {
         w[key] * 100,
         (v, c) => {
           w[key] = v / 100
-          ctx.tuneWater((s) => {
-            if (key === 'reflectivity') s.setReflectivity(w.reflectivity)
-            else if (key === 'flow') s.setFlow(w.flow)
-            else if (key === 'distortion') s.setDistortion(w.distortion)
-            else s.setTint(w.tint)
-          }, c)
+          ctx.tuneWater(
+            w,
+            (s) => {
+              if (key === 'reflectivity') s.setReflectivity(w.reflectivity)
+              else if (key === 'flow') s.setFlow(w.flow)
+              else if (key === 'distortion') s.setDistortion(w.distortion)
+              else s.setTint(w.tint)
+            },
+            c
+          )
         },
         1
       )
     )
+  }
+}
+
+// BẬC 4 "Bottom" (đáy hồ) → BẬC 5: Floor (đáy = màu đáy) | Walls (tường = độ sâu/chiều cao tường). Trả
+// Tabs (Floor|Walls) cho caller dispose. Lưu ý: basin 1 material → màu đáy (Floor) tô CẢ tường (chưa tách).
+function buildBottomTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): Tabs {
+  const floor = document.createElement('div')
+  floor.appendChild(
+    colorRow('Floor color', w.bottomColor, (hex, c) => {
+      w.bottomColor = hex
+      if (c) ctx.applySite(true) // material basin → dựng lại khi buông (không live)
+    })
+  )
+  materialRow(floor, ctx, w, 'Floor mat', 'floorMaterial')
+  const walls = document.createElement('div')
+  waterSlider(walls, ctx, w, 'Wall depth m', 0.1, 3, 'depthY') // depthY = độ sâu lòng hồ = chiều cao tường
+  materialRow(walls, ctx, w, 'Wall mat', 'wallMaterial')
+  host.append(floor, walls)
+  return new Tabs(
+    host,
+    [
+      { label: 'Floor', panel: floor, title: 'Pool floor (color)' },
+      { label: 'Walls', panel: walls, title: 'Pool walls (depth)' },
+    ],
+    {
+      classes: {
+        bar: 'ap-tab-bar ap-water-l5tabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-water-l5sub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+    }
+  )
+}
+
+// 💧 Nội dung 1 instance Pool: toggle Show (master) + BẬC 4 tab Pool edge|Surface|Bottom. Trả dispose gỡ
+// các Tabs lồng (l4 + l5 Floor/Walls). w = config instance (đa-instance trong site.waters).
+function buildPoolInstance(
+  host: HTMLElement,
+  ctx: APGuiCtx,
+  w: WaterConfig
+): { dispose: () => void } {
+  host.appendChild(
+    toggleRow('💧 Show (render)', w.enabled, (on) => {
+      w.enabled = on
+      ctx.applySite(true)
+    })
+  )
+  const edge = document.createElement('div')
+  buildEdgeTab(edge, ctx, w)
+  const surface = document.createElement('div')
+  buildSurfaceTab(surface, ctx, w)
+  const bottom = document.createElement('div')
+  const bottomTabs = buildBottomTab(bottom, ctx, w)
+  host.append(edge, surface, bottom)
+  const tabs = new Tabs(
+    host,
+    [
+      { label: 'Pool edge', panel: edge, title: 'Pool edge — outline / size / position' },
+      { label: 'Surface', panel: surface, title: 'Water surface look' },
+      { label: 'Bottom', panel: bottom, title: 'Floor + walls' },
+    ],
+    {
+      classes: {
+        bar: 'ap-tab-bar ap-water-l4tabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-water-l4sub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+    }
+  )
+  return {
+    dispose: (): void => {
+      tabs.dispose()
+      bottomTabs.dispose()
+    },
   }
 }
 
@@ -386,12 +483,174 @@ function buildFenceControls(body: HTMLElement, ctx: APGuiCtx): void {
   )
 }
 
-// Panel "🌳 Ground" (drawer tab) — chia BẬC TAB con "Ground" | "Fence" (chung 1 hàng tab, folder-style).
-// Trả { panel, tabs }: panel cho drawer Tabs quản; tabs (nested) để caller dispose.
+// Nút ✕ xoá 1 instance hồ (hàng riêng, canh phải).
+function removeRow(label: string, onRemove: () => void): HTMLElement {
+  const row = document.createElement('div')
+  row.style.cssText = 'margin-top:6px;text-align:right'
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'ap-water-remove'
+  btn.textContent = label
+  btn.addEventListener('click', onRemove)
+  row.appendChild(btn)
+  return row
+}
+
+// 1 pane instance: Pool → nội dung hồ (tab Pool edge/Surface/Bottom); Pond/Puddle → placeholder. + nút ✕ xoá.
+// Trả { pane, dispose }: dispose gỡ Tabs lồng bên trong (Pool); pond/puddle = noop.
+function buildInstancePane(
+  ctx: APGuiCtx,
+  kind: WaterKind,
+  cfg: WaterConfig,
+  label: string,
+  onRemove: () => void
+): { pane: HTMLElement; dispose: () => void } {
+  const pane = document.createElement('div')
+  let dispose = (): void => {}
+  if (kind === 'pool' || kind === 'pond') {
+    dispose = buildPoolInstance(pane, ctx, cfg).dispose // pond "y như" pool (cùng bộ tab)
+  } else {
+    const note = document.createElement('div') // puddle vẫn placeholder
+    note.className = 'ap-site-empty'
+    note.textContent = `${label} — coming soon`
+    pane.appendChild(note)
+  }
+  pane.appendChild(removeRow('✕ Remove', onRemove))
+  return { pane, dispose }
+}
+
+// 1 item instance trong hàng tab (tách khỏi rebuild cho gọn rule-50). Trả {item, dispose} — dispose gỡ
+// Tabs lồng của pane đó. remove → splice + rebuild + applySite.
+function buildInstanceItem(
+  host: HTMLElement,
+  ctx: APGuiCtx,
+  kind: WaterKind,
+  prefix: string,
+  cfg: WaterConfig,
+  i: number,
+  rebuild: (focus?: number) => void
+): { item: TabItem; dispose: () => void } {
+  const label = `${prefix}${i + 1}`
+  const remove = (): void => {
+    ctx.site.waters.splice(ctx.site.waters.indexOf(cfg), 1)
+    rebuild(Math.max(0, i - 1))
+    ctx.applySite(true)
+  }
+  const built = buildInstancePane(ctx, kind, cfg, label, remove)
+  host.appendChild(built.pane)
+  return { item: { label, panel: built.pane, title: label }, dispose: built.dispose }
+}
+
+// Nút ＋ thêm instance hồ (cuối hàng tab instance).
+function addInstanceButton(prefix: string, onAdd: () => void): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.textContent = '＋'
+  btn.className = 'ap-tab-btn ap-tab-add'
+  btn.title = `Thêm ${prefix}`
+  btn.addEventListener('click', onAdd)
+  return btn
+}
+
+// BẬC 3 — hàng tab INSTANCE 1 loại nước (Pl/Pd/Pe + nút ＋) trong host (= type panel). Mỗi instance = 1
+// config site.waters lọc theo kind. ＋ thêm (enabled=false, stagger), ✕ xoá; Tabs động → rebuild (dispose
+// + tạo lại) mỗi lần thêm/xoá + applySite. Đổi tab Pool → setActiveWater(cfg) cho 3D drag/handle nhắm đúng.
+function instanceTabs(
+  host: HTMLElement,
+  ctx: APGuiCtx,
+  kind: WaterKind,
+  prefix: string
+): { dispose: () => void } {
+  let tabs: Tabs | null = null
+  let paneDisposers: (() => void)[] = []
+  const teardown = (): void => {
+    tabs?.dispose() // hàng tab instance
+    for (const d of paneDisposers) d() // Tabs lồng (Pool edge/Surface/Bottom + Floor/Walls) mỗi pane
+    paneDisposers = []
+  }
+  const rebuild = (focus = 0): void => {
+    teardown()
+    host.replaceChildren()
+    const cfgs = ctx.site.waters.filter((w) => w.kind === kind)
+    const items: TabItem[] = []
+    cfgs.forEach((cfg, i) => {
+      const b = buildInstanceItem(host, ctx, kind, prefix, cfg, i, rebuild)
+      items.push(b.item)
+      paneDisposers.push(b.dispose)
+    })
+    const addBtn = addInstanceButton(prefix, () => {
+      const w = makeWater(kind) // enabled=false (perf): bật thủ công ở tab mới
+      w.offsetX = cfgs.length * 2000 // stagger né chồng hồ cũ khi bật
+      ctx.site.waters.push(w)
+      rebuild(cfgs.length)
+      ctx.applySite(true)
+    })
+    tabs = new Tabs(host, items, {
+      classes: {
+        bar: 'ap-tab-bar ap-water-itabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-water-isub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+      addEl: addBtn,
+      initial: focus,
+      onChange: (idx) => {
+        if ((kind === 'pool' || kind === 'pond') && cfgs[idx]) ctx.setActiveWater(cfgs[idx])
+      },
+    })
+  }
+  rebuild()
+  return { dispose: teardown }
+}
+
+// Sub-tab "Water" → BẬC 2 folder-style Pool|Pond|Puddle (tông xanh curated --wt-*, tách tông nâu Ground);
+// MỖI loại có BẬC 3 hàng tab instance (Pl/Pd/Pe + ＋). Trả { panel, dispose } — dispose gỡ type-Tabs + 3 controller.
+function buildWaterDomain(ctx: APGuiCtx): { panel: HTMLElement; dispose: () => void } {
+  const waterSub = document.createElement('div')
+  waterSub.classList.add('ap-water-domain')
+  const poolSub = document.createElement('div')
+  const pondSub = document.createElement('div')
+  const puddleSub = document.createElement('div')
+  waterSub.append(poolSub, pondSub, puddleSub)
+
+  const typeTabs = new Tabs(
+    waterSub,
+    [
+      { label: 'Pool', panel: poolSub, title: 'Reflective pools (tier C)' },
+      { label: 'Pond', panel: pondSub, title: 'Ponds — coming soon' },
+      { label: 'Puddle', panel: puddleSub, title: 'Puddles — coming soon' },
+    ],
+    {
+      classes: {
+        bar: 'ap-tab-bar ap-water-tabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-water-sub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+    }
+  )
+  const ctls = [
+    instanceTabs(poolSub, ctx, 'pool', 'Pl'),
+    instanceTabs(pondSub, ctx, 'pond', 'Pd'),
+    instanceTabs(puddleSub, ctx, 'puddle', 'Pe'),
+  ]
+  return {
+    panel: waterSub,
+    dispose: (): void => {
+      typeTabs.dispose()
+      for (const c of ctls) c.dispose()
+    },
+  }
+}
+
+// Panel "🌳 Ground" (drawer tab) — chia BẬC TAB con "Ground" | "Fence" | "Tree" | "Water" (folder-style).
+// Trả { panel, dispose }: panel cho drawer Tabs quản; dispose gỡ outer Tabs + Water domain (tabs động Pl/Pd/Pe).
 export function setupSitePanel(
   ctx: APGuiCtx,
   container: Element | null
-): { panel: HTMLElement; tabs: Tabs } {
+): { panel: HTMLElement; dispose: () => void } {
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-site-panel'
 
@@ -414,9 +673,9 @@ export function setupSitePanel(
   treeNote.textContent = '🌲 Trees — coming soon'
   treeSub.appendChild(treeNote)
 
-  // Sub-tab "Water": hồ nước phản chiếu (site element rời) — toggle + kích thước/vị trí + dáng nước.
-  const waterSub = document.createElement('div')
-  buildWaterControls(waterSub, ctx)
+  // Sub-tab "Water": BẬC 2 (Pool|Pond|Puddle) — tông xanh nước curated, tách khỏi tông nâu Ground.
+  const water = buildWaterDomain(ctx)
+  const waterSub = water.panel
 
   p.append(groundSub, fenceSub, treeSub, waterSub)
   container?.appendChild(p)
@@ -427,7 +686,7 @@ export function setupSitePanel(
       { label: 'Ground', panel: groundSub, title: 'Surface material / lot' },
       { label: 'Fence', panel: fenceSub, title: 'Fence' },
       { label: 'Tree', panel: treeSub, title: '3D grass (any surface) + trees' },
-      { label: 'Water', panel: waterSub, title: 'Pond (reflection, tier C)' },
+      { label: 'Water', panel: waterSub, title: 'Water: Pool / Pond / Puddle' },
     ],
     {
       classes: {
@@ -439,5 +698,11 @@ export function setupSitePanel(
       injectCss: false,
     }
   )
-  return { panel: p, tabs }
+  return {
+    panel: p,
+    dispose: (): void => {
+      tabs.dispose()
+      water.dispose()
+    },
+  }
 }

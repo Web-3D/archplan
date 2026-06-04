@@ -76,17 +76,17 @@ Chỉ phải đảm bảo:
 
 ## 5. Ngoại lệ — SITE element (hồ nước 💧) KHÔNG theo lớp pick chung
 
-Hồ (`WaterSurface`) là **site element rời** (ở `siteGroup`, không có `instId`/pick box, không merge).
-Tương tác làm KHÁC khung 4-bộ trên:
+Hồ (`WaterSurface`) là **site element rời** (ở `siteGroup`, không có `instId`/pick box, không merge). **ĐA-INSTANCE:**
+`_siteWaters[]` = cfg↔surf của mọi pool bật; `_activeWater` = pool tab Pl đang chọn (GUI `setActiveWater`). Tương tác KHÁC khung 4-bộ trên:
 
 | Tương tác | Hồ nước làm sao |
 |---|---|
-| **🤚 Move (thân)** | Raycast **THẲNG mesh hồ** (không qua `pickGroup`) trong `_tryStartWaterDrag`; so distance với pick-box, gần hơn thì nhường building. Kéo `_horizPlane` → ghi `offsetX/offsetZ` + **dời mesh live** (reflector.target con → theo cùng). Thả → `_applySite(true)` (cỏ né lại + autosave). Anchor: `_tryStartWaterDrag`, `_waterDragBody`, `_moveModeMove`. |
-| **🤚 Move (đỉnh, form=free)** | `WaterConfig.shape='free'` → polygon `points[]`. `_rebuildWaterHandles` dựng chấm vàng (sphere) tại mỗi đỉnh trong group `_waterHandles` (scene, chỉ khi free+moveMode). `_tryStartVertexDrag` raycast handle TRƯỚC thân → kéo `points[idx]` (world−tâm) + `water.setShape(...)` **dựng lại geometry live** (giữ reflector, KHÔNG tốn RTT). Thả → `_applySite(true)`. Geo/mat handle dùng chung (`_disposeWaterHandles`). Đổi Rect→Free: GUI `seedWaterRectPoints` seed 4 góc. |
-| **👆 Focus / 🎨 Paint / P Pick** | KHÔNG có — chỉnh qua **GUI sub-tab Water** (toggle/size/pos/màu/gương/sóng) thay vì click 3D. |
+| **🤚 Move (thân)** | Raycast **MỌI mesh hồ** (`_siteWaters`, không qua `pickGroup`) trong `_tryStartWaterDrag` → hồ GẦN NHẤT; so distance pick-box, gần hơn thì nhường building. Hồ trúng → **thành active** (`setActiveWaterCfg`). Kéo mặt ngang → ghi `cfg.offsetX/Z` + **dời mesh live** (reflector.target con theo). Thả → `_applySite(true)` (cỏ né lại + autosave). Anchor: `_tryStartWaterDrag`, `_waterDragBody` (mang `cfg`+`surf`), `_moveModeMove`. |
+| **🤚 Move (đỉnh, form=free)** | Đỉnh của hồ **ACTIVE** (`_activeWaterEntry`). `_rebuildWaterHandles` dựng chấm vàng tại mỗi đỉnh hồ active trong `_waterHandles` (chỉ khi active đang render + free + moveMode). `_tryStartVertexDrag(entry)` raycast handle TRƯỚC thân → kéo `cfg.points[idx]` + `surf.setShape(...)` **dựng lại geometry live** (giữ reflector, KHÔNG tốn RTT). Geo/mat handle dùng chung. |
+| **👆 Focus / 🎨 Paint / P Pick** | KHÔNG có — chỉnh qua **GUI Water▸Pool▸Pl_n** (lồng bậc4/5: Pool edge=Form/size/pos · Surface=màu/gương/sóng · Bottom▸Floor=màu đáy / Walls=Wall depth + ✕); đổi tab Pl = đổi pool active. |
 
-> ⚠ Slider Pos X/Z trong tab Water KHÔNG tự cập nhật số sau khi kéo hồ trong 3D (state đúng + đã lưu,
-> chỉ phần hiển thị slider chờ panel dựng lại). Nâng cấp: registerWaterReadout nếu cần đồng bộ tức thì.
+> ⚠ Slider Pos X/Z trong tab Pl▸Pool edge KHÔNG tự cập nhật số sau khi kéo hồ trong 3D (state đúng + đã lưu, chỉ phần hiển
+> thị slider chờ panel dựng lại). Nâng cấp: registerWaterReadout nếu cần đồng bộ tức thì.
 
 ---
 

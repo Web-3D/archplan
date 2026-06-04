@@ -42,7 +42,7 @@ export function setupGUI(ctx: APGuiCtx, container?: HTMLElement | null): GUI {
   addFloorBtn.className = 'ap-tab-btn ap-tab-add'
   addFloorBtn.addEventListener('click', () => ctx.addFloor())
   buildTabBar(rootCh, floorPanels, addFloorBtn)
-  buildActionsFooter(gui, ctx)
+  // Hàng Build/Reset/Save/Load/JSON + undo/redo ĐÃ CHUYỂN ra footer drawer dùng chung (ArchPlanLab._buildDrawerFooter).
   if (!container) makeDraggable(gui) // chỉ kéo khi đứng riêng; trong drawer → title click = thu/mở
   return gui
 }
@@ -229,23 +229,6 @@ function mkShapeSelect(floorId: string, ctx: APGuiCtx): HTMLSelectElement {
   return sel
 }
 
-// ── Undo / Redo row ────────────────────────────────────────────────────────────
-
-function mkUndoRedoRow(ctx: APGuiCtx): HTMLElement {
-  const row = document.createElement('div')
-  row.className = 'ap-undo-row'
-  const mkBtn = (symbol: string, action: () => void): HTMLButtonElement => {
-    const btn = document.createElement('button')
-    btn.textContent = symbol
-    btn.className = 'ap-undo-btn'
-    btn.addEventListener('click', action)
-    return btn
-  }
-  row.appendChild(mkBtn('↶', () => ctx.undo()))
-  row.appendChild(mkBtn('↷', () => ctx.redo()))
-  return row
-}
-
 // ── Floor folder ───────────────────────────────────────────────────────────────
 
 export function floorLabel(fi: number): string {
@@ -330,8 +313,7 @@ export function buildInstanceFolder(
   )
     .name('✕ Remove Shape')
     .domElement.classList.add('ap-btn-remove')
-  // Undo/Redo nhỏ ở đáy mỗi shape panel
-  ch.appendChild(mkUndoRedoRow(ctx))
+  // Undo/Redo ĐÃ CHUYỂN ra footer drawer dùng chung (không còn nhỏ ở đáy mỗi shape panel).
   return f
 }
 
@@ -412,26 +394,5 @@ export function buildTabBar(
   })
 }
 
-// ── Actions folder ─────────────────────────────────────────────────────────────
-
-// Thanh nút cố định ở đáy panel (thay folder Actions) — Build / Reset / JSON.
-// Append vào gui.domElement (ngoài .lil-children cuộn) → luôn dính đáy. Reset có confirm.
-function buildActionsFooter(gui: GUI, ctx: APGuiCtx): void {
-  const bar = document.createElement('div')
-  bar.className = 'ap-footer'
-  const mk = (label: string, cls: string, action: () => void): void => {
-    const b = document.createElement('button')
-    b.textContent = label
-    b.className = `ap-footer-btn ${cls}`
-    b.addEventListener('click', action)
-    bar.appendChild(b)
-  }
-  mk('▶ Build', 'ap-footer-build', () => ctx.build())
-  mk('Reset', 'ap-footer-reset', () => {
-    if (window.confirm('Reset toàn bộ về mặc định?')) ctx.resetState()
-  })
-  mk('💾 Save', 'ap-footer-save', () => ctx.saveFile())
-  mk('📁 Load', 'ap-footer-load', () => ctx.loadFile())
-  mk('📄 JSON', 'ap-footer-json', () => ctx.exportJSON())
-  gui.domElement.appendChild(bar)
-}
+// Hàng action Build/Reset/Save/Load/JSON + undo/redo ĐÃ CHUYỂN ra footer drawer dùng chung
+// (ArchPlanLab._buildDrawerFooter) — không còn dựng trong gui Building. CSS .ap-footer/.ap-undo-row giữ nguyên.

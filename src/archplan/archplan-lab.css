@@ -1166,13 +1166,16 @@
   z-index: 200;
   transform: translateX(0);
   transition: transform 0.24s ease;
+  display: flex; /* cột: body cuộn (flex:1) + footer DÙNG CHUNG dính đáy (flex:0) */
+  flex-direction: column;
 }
 .ap-drawer.ap-drawer-closed {
   transform: translateX(100%); /* trượt khỏi mép phải → chỉ chừa tay kéo */
 }
 .ap-drawer-body {
   width: 100%;
-  height: 100%;
+  flex: 1 1 auto; /* fill phần trên drawer, chừa chỗ footer; min-height:0 cho overflow cuộn được */
+  min-height: 0;
   box-sizing: border-box;
   overflow-y: auto;
   overflow-x: hidden;
@@ -1183,6 +1186,20 @@
   background: rgba(22, 38, 92, 0.2); /* cobalt #16265C — gần như trong suốt */
   backdrop-filter: blur(5px);
   border-left: 1px solid rgba(42, 77, 155, 0.6); /* viền cobalt */
+}
+/* 🗄️ Footer DÙNG CHUNG đáy drawer (undo/redo + Build/Reset/Save/Load/JSON) — ngoài body cuộn, luôn thấy
+   ở mọi tab Building|Ground|Lab. Nền cobalt như drawer-tabs; .ap-footer bên trong bỏ nền xanh-lá gốc. */
+.ap-drawer-footer {
+  flex: 0 0 auto;
+  background: rgba(22, 38, 92, 0.62);
+  backdrop-filter: blur(5px);
+  border-left: 1px solid rgba(42, 77, 155, 0.6);
+  border-top: 1px solid rgba(42, 77, 155, 0.5);
+}
+.ap-drawer-footer .ap-footer {
+  background: transparent;
+  border-top: none;
+  border-radius: 0;
 }
 /* Tay kéo — tab thò ra mép trái drawer, luôn thấy cả khi đóng (neo vào drawer đã transform). */
 .ap-drawer-handle {
@@ -1536,6 +1553,187 @@
 }
 .ap-scan-panel.ap-site-panel .ap-site-readout b {
   color: var(--gr-bg-5);
+}
+
+/* ── 💧 Water tab — bộ màu CURATED XANH NƯỚC (bg-1 nền · bg-2..4 surface · bg-5 highlight · accent teal ·
+   text). "water = bậc 1" → nền panel = bg-1. waterSub (.ap-water-domain) ĐÈ tông nâu .ap-site-sub; bên
+   trong BẬC 2 Pool|Pond|Puddle (.ap-water-tabs/.ap-water-sub) = bg-2 (sáng hơn 1 bậc → thấy lồng cấp). ── */
+.ap-water-domain {
+  --wt-bg-1: #08243a; /* background — nền tối nhất */
+  --wt-bg-2: #0e3a5c; /* surface — sub-panel Pool/Pond/Puddle + tab con active */
+  --wt-bg-3: #155a82; /* surface — track slider */
+  --wt-bg-4: #2c84a8; /* surface — viền */
+  --wt-bg-5: #5bb8ce; /* highlight — thumb + chữ nhấn */
+  --wt-accent: #2fd4c4; /* accent teal — checkbox */
+  --wt-text: #e2f2f4; /* text */
+  background: var(--wt-bg-1); /* đè nền nâu .ap-site-sub khi tab Water active */
+  color: var(--wt-text);
+}
+/* BẬC 2 Pool|Pond|Puddle — folder-style: tab active CÙNG bg-2 với sub-panel → dính liền khối. */
+.ap-water-tabs {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 0; /* KHÔNG hở → tab active dính sub-panel */
+  padding-left: 2px;
+  flex-wrap: wrap;
+}
+.ap-water-tabs > .ap-tab-btn {
+  flex: 1 1 0; /* 3 tab chia đều bề ngang */
+  max-width: none;
+  height: 20px;
+  font-size: 9px;
+  background: rgba(8, 36, 58, 0.55); /* bg-1 mờ — inactive chìm vào water panel */
+  border-color: rgba(44, 132, 168, 0.4); /* bg-4 mờ */
+  color: #8fc3d6; /* xanh nhạt */
+}
+.ap-water-tabs > .ap-tab-btn.ap-tab-active {
+  background: var(--wt-bg-2); /* = sub-panel → dính liền */
+  border-color: rgba(44, 132, 168, 0.6);
+  border-bottom-color: transparent; /* nuốt seam */
+  color: var(--wt-text);
+}
+.ap-water-sub {
+  background: var(--wt-bg-2); /* surface — sáng hơn nền bg-1 → thấy lồng cấp */
+  padding: 6px;
+}
+/* BẬC 3 — hàng tab instance Pl/Pd/Pe (+ ＋) trong type panel (bg-2): tab active + isub = bg-3 (sáng thêm
+   1 bậc → lồng cấp rõ). Tab nhỏ hơn bậc 2 (18 vs 20). */
+.ap-water-itabs {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 0; /* dính isub */
+  padding-left: 2px;
+  flex-wrap: wrap;
+}
+.ap-water-itabs > .ap-tab-btn {
+  flex: 0 0 auto; /* CỐ ĐỊNH nhỏ theo nội dung (như tab GF/S-□): 1 mình KHÔNG giãn full, nhiều → wrap */
+  min-width: 30px;
+  padding: 0 9px;
+  height: 18px;
+  font-size: 8px;
+  background: rgba(14, 58, 92, 0.5); /* bg-2 mờ — inactive chìm vào type panel */
+  border-color: rgba(44, 132, 168, 0.35);
+  color: #a9d2e0; /* xanh sáng hơn bậc 2 */
+}
+.ap-water-itabs > .ap-tab-btn.ap-tab-active {
+  background: var(--wt-bg-3); /* = isub → dính liền */
+  border-color: rgba(44, 132, 168, 0.6);
+  border-bottom-color: transparent;
+  color: var(--wt-text);
+}
+.ap-water-itabs > .ap-tab-add {
+  flex: 0 0 auto; /* nút ＋ co theo nội dung, không giãn như tab */
+  min-width: 22px;
+}
+.ap-water-isub {
+  background: var(--wt-bg-3); /* instance pane — sáng hơn type bg-2 */
+  padding: 6px;
+}
+/* BẬC 4 — Pool edge|Surface|Bottom trong Pl (panel bg-3): tab active + panel = bg-4 (sáng hơn → lồng cấp). */
+.ap-water-l4tabs,
+.ap-water-l5tabs {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 0; /* dính sub-panel */
+  padding-left: 2px;
+  flex-wrap: wrap;
+}
+.ap-water-l4tabs > .ap-tab-btn {
+  flex: 1 1 0; /* 3 tab cố định (Pool edge/Surface/Bottom) → chia đều */
+  max-width: none;
+  height: 17px;
+  font-size: 8px;
+  background: rgba(21, 90, 130, 0.5); /* bg-3 mờ — inactive chìm vào Pl pane bg-3 */
+  border-color: rgba(91, 184, 206, 0.3);
+  color: #cfe8f0;
+}
+.ap-water-l4tabs > .ap-tab-btn.ap-tab-active {
+  background: var(--wt-bg-4); /* = l4 panel → dính liền */
+  border-color: rgba(91, 184, 206, 0.55);
+  border-bottom-color: transparent;
+  color: var(--wt-text);
+}
+.ap-water-l4sub {
+  background: var(--wt-bg-4);
+  padding: 6px;
+}
+/* BẬC 5 — Floor|Walls trong Bottom (panel bg-4): active + panel = bg-3 (TỐI lại → tương phản chữ trắng +
+   thấy lồng cấp; bg-5 quá sáng cho chữ/track trắng nên không leo tiếp). */
+.ap-water-l5tabs > .ap-tab-btn {
+  flex: 1 1 0; /* 2 tab cố định (Floor/Walls) → chia đôi */
+  max-width: none;
+  height: 16px;
+  font-size: 8px;
+  background: rgba(44, 132, 168, 0.45); /* bg-4 mờ — inactive chìm vào Bottom panel bg-4 */
+  border-color: rgba(91, 184, 206, 0.3);
+  color: #dff0f5;
+}
+.ap-water-l5tabs > .ap-tab-btn.ap-tab-active {
+  background: var(--wt-bg-3); /* = l5 panel → dính liền */
+  border-color: rgba(91, 184, 206, 0.5);
+  border-bottom-color: transparent;
+  color: var(--wt-text);
+}
+.ap-water-l5sub {
+  background: var(--wt-bg-3);
+  padding: 6px;
+}
+/* nút ✕ xoá 1 instance hồ (tông đỏ-gạch nhẹ). */
+.ap-water-remove {
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #f0d0d0;
+  background: rgba(192, 96, 96, 0.25);
+  border: 1px solid rgba(192, 96, 96, 0.5);
+}
+.ap-water-remove:hover {
+  background: rgba(192, 96, 96, 0.45);
+}
+/* placeholder Pond/Puddle — chữ xanh nhạt thay tông nâu mặc định .ap-site-empty. */
+.ap-water-domain .ap-site-empty {
+  color: var(--wt-bg-5);
+}
+/* input trong water domain → tông xanh (đè bộ nâu .ap-scan-panel.ap-site-panel input...). */
+.ap-site-panel .ap-water-domain input[type='range'] {
+  background: #eef5f7; /* track TRẮNG-xanh nhạt → nổi rõ trên nền bg-3 (trước = bg-3 trùng nền → tàng hình) */
+  border-radius: 3px;
+}
+.ap-site-panel .ap-water-domain input[type='range']::-webkit-slider-thumb {
+  background: var(--wt-accent); /* thumb teal nổi trên track trắng */
+}
+.ap-site-panel .ap-water-domain input[type='checkbox'] {
+  accent-color: var(--wt-accent);
+}
+.ap-water-domain .ap-ground-sel {
+  background: var(--wt-bg-2);
+  border-color: var(--wt-bg-4);
+  color: var(--wt-text);
+}
+.ap-water-domain .ap-ground-sel:hover {
+  border-color: var(--wt-bg-5);
+}
+.ap-water-domain .ap-mm-input {
+  color: var(--wt-text);
+  background: rgba(8, 36, 58, 0.6); /* bg-1 */
+  border-color: rgba(44, 132, 168, 0.5); /* bg-4 */
+}
+/* 💧 Nút tab Water (con thứ 4: Ground·Fence·Tree·Water) → tông xanh curated. var --wt-* KHÔNG tới đây
+   (tab nằm NGOÀI .ap-water-domain) → dùng hex literal. Active = bg-1 = nền water panel → dính liền. */
+.ap-site-tabs > .ap-tab-btn:nth-child(4) {
+  background: rgba(8, 36, 58, 0.4); /* bg-1 mờ */
+  border-color: rgba(44, 132, 168, 0.5); /* bg-4 */
+  color: #7fc0d4; /* bg-5 xanh nhạt */
+}
+.ap-site-tabs > .ap-tab-btn:nth-child(4):hover {
+  border-color: #5bb8ce; /* bg-5 */
+}
+.ap-site-tabs > .ap-tab-btn:nth-child(4).ap-tab-active {
+  background: #08243a; /* bg-1 = nền water panel → dính liền */
+  border-color: rgba(44, 132, 168, 0.7);
+  border-bottom-color: transparent; /* nuốt seam với water panel bg-1 */
+  color: #e2f2f4; /* text */
 }
 
 /* ☀ Sun gizmo — panel CSS2D bám theo quả sun trong scene: [toggle][slider sáng][ô màu]. */
