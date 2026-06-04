@@ -11,5 +11,7 @@ import { ArchPlanLab } from './archplan/ArchPlanLab'
 const canvas = document.querySelector<HTMLCanvasElement>('#app')
 if (!canvas) throw new Error('ArchPlan: không tìm thấy canvas #app')
 
-const lab = new ArchPlanLab(canvas)
+// antialias:false — cảnh có reflector (hồ nước): MSAA phần cứng xung khắc reflector RTT → mất phản chiếu
+// + flood WebGPU validation (KI-007). Khử răng cưa bù bằng FXAA post (bước kế). Default lõi vẫn true.
+const lab = new ArchPlanLab(canvas, { antialias: false })
 void lab.init()

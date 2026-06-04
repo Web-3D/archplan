@@ -39,6 +39,7 @@ type DragSession =
       start: THREE.Vector3
       x0: number
       z0: number
+      fast: boolean // 1 instance duy nhất → kéo = DỜI group (0 rebuild); nhiều instance = false → LOD-rebuild
     }
   | {
       kind: 'colz'
@@ -78,8 +79,10 @@ export interface ManipulateHost {
   raycaster: THREE.Raycaster
   pickGroup: THREE.Group
   locateInst(id: string): ShapeInstance | null
+  instanceCount(): number // tổng instance mọi tầng — quyết định fast-path kéo-cả-nhà (chỉ khi ==1)
   buildScene(): void
   buildSceneLive(): void
+  translateBuildingLive(dx: number, dz: number): void // kéo-cả-nhà (1 inst): dời group theo Δ mét, KHÔNG rebuild
   refreshGuiNumbers(): void
 }
 
@@ -228,7 +231,8 @@ export class ManipulateTool {
       return col ? this._localDrag(col, p, inst.rotY) : null
     }
     if (key === 'stairs') return this._localDrag(inst.structure.stairs, p, inst.rotY)
-    // tường/mái/móng/sàn → kéo cả nhà
+    // tường/mái/móng/sàn → kéo cả nhà. fast = chỉ 1 instance (dời group an toàn; nhiều instance dùng
+    // chung buildingGroup nên dời group sẽ dời TẤT CẢ → phải rebuild theo posX/posZ riêng từng cái).
     return {
       kind: 'inst',
       inst,
@@ -236,6 +240,7 @@ export class ManipulateTool {
       start: p,
       x0: inst.posX,
       z0: inst.posZ,
+      fast: this.host.instanceCount() === 1,
     }
   }
 
@@ -306,6 +311,10 @@ export class ManipulateTool {
     if (d.kind === 'inst') {
       d.inst.posX = d.x0 + dx * 1000
       d.inst.posZ = d.z0 + dz * 1000
+      if (d.fast) {
+        this.host.translateBuildingLive(dx, dz) // 1 inst → DỜI group (0 rebuild, mượt dù nhà phức tạp cỡ nào)
+        return // bỏ qua _buildSceneLive: commit (rebuild + reset offset) để dragEnd lo
+      }
     } else if (d.kind === 'colz') {
       const c = Math.cos(d.rotR)
       const s = Math.sin(d.rotR)

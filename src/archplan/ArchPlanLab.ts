@@ -26,7 +26,9 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js'
-import { PMREMGenerator } from 'three/webgpu'
+import { fxaa } from 'three/addons/tsl/display/FXAANode.js' // AA hậu kỳ thay MSAA (MSAA✗reflector — KI-007)
+import { pass } from 'three/tsl'
+import { PMREMGenerator, PostProcessing } from 'three/webgpu'
 import type { GrassBlades, GrassExcludeRect } from 'threejs-modules/components/GrassBlades'
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
@@ -245,6 +247,9 @@ export class ArchPlanLab extends BaseWorld {
   private gridHelper: THREE.LineSegments | null = null // lưới editor (y=0) — tự dựng để KHOÉT lỗ hồ
   private gridMat: THREE.LineBasicMaterial | null = null
   private css2dRenderer: CSS2DRenderer | null = null
+  // FXAA hậu kỳ: thay renderer.render bằng pipeline pass→fxaa→output (MSAA tắt vì ✗reflector — KI-007).
+  // outputColorTransform=true → tone-map+sRGB như render thẳng (giữ nguyên tông màu), fxaa chạy trên scene pass.
+  private _post: PostProcessing | null = null
   private css2dEl: HTMLElement | null = null
   private readonly gridOpts = {
     zPos: -30.0,
@@ -720,6 +725,22 @@ export class ArchPlanLab extends BaseWorld {
       this.guard = new RuntimeGuard(this.renderer)
       this.devHud = new DevHud(this.canvas.parentElement ?? document.body) // perf HUD — bấm ` để ẩn
     }
+    this._setupPost() // FXAA hậu kỳ (sau scene+camera sẵn sàng) — thay renderer.render qua renderFrame()
+  }
+
+  // Pipeline FXAA: pass(scene,camera) → fxaa → output. outputColorTransform=true để tone-map+sRGB y như
+  // render thẳng (giữ tông màu), fxaa khử răng cưa bù MSAA đã tắt. pass GIỮ ref scene/camera (bền cả phiên).
+  private _setupPost(): void {
+    const scenePass = pass(this.scene, this.camera)
+    const post = new PostProcessing(this.renderer, fxaa(scenePass))
+    post.outputColorTransform = true
+    this._post = post
+  }
+
+  // Override BaseWorld: vẽ qua FXAA pipeline thay renderer.render thẳng. Fallback nếu post chưa dựng.
+  protected renderFrame(): void {
+    if (this._post) void this._post.render()
+    else this.renderer.render(this.scene, this.camera)
   }
 
   protected onUpdate(time: number, deltaTime: number): void {
@@ -759,6 +780,8 @@ export class ArchPlanLab extends BaseWorld {
   }
 
   protected onDispose(): void {
+    this._post?.dispose() // FXAA pipeline (RT offscreen + pass nodes)
+    this._post = null
     window.removeEventListener('keydown', this._onKeyDown)
     window.removeEventListener('keyup', this._onKeyUp)
     this.canvas.removeEventListener('pointerdown', this._onPointerDown)
@@ -1295,10 +1318,24 @@ export class ArchPlanLab extends BaseWorld {
       raycaster: this._ray,
       pickGroup: this.pickGroup,
       locateInst: (id) => this._locateInst(id)?.inst ?? null,
+      instanceCount: () => this.state.floors.reduce((n, f) => n + f.instances.length, 0),
       buildScene: () => this._buildScene(),
       buildSceneLive: () => this._buildSceneLive(),
+      translateBuildingLive: (dx, dz) => this._translateBuildingLive(dx, dz),
       refreshGuiNumbers: () => this.gui?.controllersRecursive().forEach((c) => c.updateDisplay()),
     }
+  }
+
+  // Kéo-cả-nhà (1 instance) LIVE: DỜI buildingGroup + pickGroup theo Δ mét — KHÔNG rebuild geometry.
+  // Toạ độ posX/posZ bake-vào-vertex nên lúc dựng group ở (0,lift,0); kéo = đặt offset (dx,lift,dz) →
+  // nhà trượt trên nền, pick-box theo cùng → pick vẫn khớp. dragEnd → _buildScene bake pos mới + _renderSite
+  // reset offset về 0 (toạ độ tuyệt đối). Chi phí = set 3 số/lần → mượt bất kể nhà phức tạp. Tint giữ nguyên
+  // (đã nhuốm lúc bật Move); cỏ/lưới/bóng hoãn tới commit (giống live-drag thường). [[KI-005]]
+  private _translateBuildingLive(dx: number, dz: number): void {
+    const lift = this.site.show ? this.site.groundThick / 1000 : 0
+    this.buildingGroup.position.set(dx, lift, dz)
+    this.pickGroup.position.set(dx, lift, dz)
+    if (this.sun) this.sun.shadow.needsUpdate = true // bóng theo nhà lúc kéo (shadow pass depth-only, rẻ)
   }
 
   // Host cho HighlightOverlay: scene + 3 locator (dùng chung build/paint, nên ở lại Lab).
@@ -1578,8 +1615,10 @@ export class ArchPlanLab extends BaseWorld {
     this._syncGrass(exclude) // dựng/giữ cỏ theo chữ ký structural (defer lúc kéo) → set this._siteGrass
     this._applySunToGrass() // _siteGrass (mới hoặc cũ) → set hướng vệt theo sun hiện tại
     const lift = this.site.show ? this.site.groundThick / 1000 : 0
-    this.buildingGroup.position.y = lift
-    this.pickGroup.position.y = lift // giữ pick-box khớp building đã đôn
+    // .set(0,lift,0): vừa đôn theo nền VỪA xoá offset .x/.z transient của fast-drag (kéo-cả-nhà dời group).
+    // Toạ độ nhà bake-tuyệt-đối → sau rebuild offset PHẢI về 0 kẻo commit cộng dồn dx/dz (nhà nhảy gấp đôi).
+    this.buildingGroup.position.set(0, lift, 0)
+    this.pickGroup.position.set(0, lift, 0) // giữ pick-box khớp building đã đôn + reset offset fast-drag
   }
 
   // Dựng lại NỀN/NƯỚC/RÀO + handle/lưới/nền-editor (phần NẶNG: gồm reflector RTT + recompile NodeMaterial).
