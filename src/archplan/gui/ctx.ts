@@ -7,6 +7,7 @@
 import type GUI from 'lil-gui'
 import type * as THREE from 'three'
 import type { GrassBlades } from 'threejs-modules/components/GrassBlades'
+import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import type { CoverageStats, SiteState } from 'threejs-modules/site/state'
 
 import type { GridOpts, GroundType, SunOpts } from '../scene/scene'
@@ -38,6 +39,8 @@ export interface APGuiCtx {
   // 🎛️ Tinh chỉnh decor: chỉnh uniform LIVE trên GrassBlades đang sống (KHÔNG dựng lại → né recompile).
   // persist=true → autosave (buông slider). No-op nếu cỏ 3D chưa render.
   tuneGrass(apply: (g: GrassBlades) => void, persist: boolean): void
+  // 💧 Tinh chỉnh hồ nước LIVE (màu/gương/sóng) trên WaterSurface đang sống. No-op nếu hồ chưa render.
+  tuneWater(apply: (w: WaterSurface) => void, persist: boolean): void
   applySun(): void
   getZGridGroup(): THREE.Group | null
   getXGridGroup(): THREE.Group | null

@@ -66,16 +66,19 @@ ArchPlanLab (extends BaseWorld)
   │
   ├── 🗄️ Drawer PHẢI (.ap-drawer) ← shell bền; cobalt trong suốt; Tabs ngang (mở tab nào cũng PHỦ KÍN drawer):
   │     ├── 🏠 Building            ← lil-gui (floors → instances → structure/roof/dims/walls)
-  │     ├── 🌳 Ground              ← BẬC TAB con Ground|Fence|Tree folder-style (English, tông NÂU bg-1→bg-2
-  │     │                            dính liền); bảng Lot/House/Coverage/Garden luôn ở ĐÁY panel
-  │     └── 🎛️ Tinh chỉnh          ← BẬC TAB con Lá đơn|Bụi cỏ (xanh rêu): Lá đơn = dáng lá (Cao/Rộng gốc-thân/Thon/Cong
-  │                                  T→P/Cong dọc+Cụp 1 chiều/2 MẶT 2 MÀU trong-ngoài/Số đốt/fold) + màu; Bụi cỏ = Lá/bụi
-  │                                  +Xòe+Nghiêng (mặt trong vào tâm + splay chống đâm xuyên); 🔎 preview xoay/pan/zoom + nền gradient
+  │     ├── 🌳 Ground              ← BẬC TAB con Ground|Fence|Tree|Water folder-style (English, tông NÂU bg-1→bg-2
+  │     │                            dính liền); Ground=SURFACE vật liệu(grass/soil/gravel)+lô · Tree=🌿 cỏ-3D
+  │     │                            ĐỘC LẬP surface (mọc nền bất kỳ)+cây sắp có · Water=💧 hồ reflect+refract NHÌN XUYÊN ĐÁY
+  │     │                            (tier C): Form rect/free(kéo đỉnh)+size/pos+Sâu+màu nước/đáy+gương/sóng/Đục; bảng Lot/House/Coverage/Garden ĐÁY
+  │     └── 🎛️ Lab                 ← TAB cấp1 Lá đơn|Bụi cỏ; Lá đơn có TAB cấp2 Số đo|Độ cong|Bóng đổ (bg sáng dần = lồng cấp):
+  │                                  Số đo=mật độ/cao/thon/thân/gốc/đốt · Độ cong=T→P/dọc+cụp 1 chiều/fold · Bóng đổ=đậm/cao bóng
+  │                                  +màu 2 mặt(ngoài/trong)+Vệt(bật/tắt+Đậm+Rộng, live); Bụi cỏ=Lá/bụi+Xòe+Nghiêng (mặt trong vào tâm+splay);
+  │                                  🔎 preview xoay/pan/zoom + nền gradient + 2 MẶT 2 MÀU
   │
   ├── 🗄️ Drawer TRÁI (.ap-ldrawer)← ẩn mép trái, kéo nhô; gui Tools:
   │     ├── Surface               ← symbol 🔲/🧱/🛣️ (none/stone/asphalt) — viền sáng khi chọn
   │     ├── Grid X/Y/Z            ← laser grid tọa độ
-  │     └── Pick + 🤚 Move        ← cùng hàng (ô stick + symbol)
+  │     └── Pick + 🤚 Move        ← cùng hàng (ô stick + symbol); 🤚 Move bật/tắt bằng phím Alt
   │
   ├── ☀ Sun GIZMO (3D)            ← quả cầu kéo trên vòm → đổi hướng nắng; trục Y dây-dọi + bóng chân
   │     └── dock panel cố định    ← toggle ☀/🌙 + slider sáng DỌC + ô màu (KHÔNG bám sun)
@@ -85,9 +88,17 @@ ArchPlanLab (extends BaseWorld)
   └── Undo/Redo stacks            ← JSON snapshot trước mỗi build, max 50
 ```
 
-> **Cỏ né foundation:** nền cỏ (Ground=grass) KHÔNG mọc trong footprint foundation — `_foundationRects()`
-> gom rect (bbox + overhang `foundOh`) các instance tầng trệt có `showFoundation`, truyền qua
-> `renderSiteState(…, { exclude })` → `GrassBlades` bỏ lá rơi trong rect. "Nơi có foundation thì không đặt nền cỏ."
+> **Cỏ né foundation + hồ:** cỏ-3D KHÔNG mọc trong footprint foundation LẪN mặt hồ — `_foundationRects()`
+> gom rect (bbox + overhang `foundOh`) các instance tầng trệt có `showFoundation`; `renderSiteState` tự thêm
+> rect hồ (`water.offset`/`size`) vào `exclude` → `GrassBlades` bỏ lá rơi trong rect. "Nơi có nhà/nước thì không mọc cỏ."
+
+> **Hồ nước (💧 Water, tier C):** site element RỜI (có vị trí offset cạnh nhà, khác cỏ phủ-cả-lô). `WaterSurface`
+> = `reflector()` gương thật → **+1 render pass/RTT** (đắt; DevHud sẽ thấy draw calls nhảy). Đốm nắng glint theo
+> sun (`_applySunToWater` ← `setSun`, cùng pattern vệt-cỏ); sóng chạy theo `setTime` mỗi frame (qua `siteShaders`).
+> **Kéo-thả 3D:** bật Move 🤚 (hoặc Alt) → nhấn-giữ mặt hồ kéo đi (raycast mesh trực tiếp, không pick box;
+> dời live, thả → cỏ né lại + autosave). Chỉnh số/màu/gương/sóng ở GUI sub-tab Water. Mặc định bật, hồ 4×3m ở +5m trước nhà.
+> **Form tự do:** GUI Water → `Form=Free` (seed 4 góc từ chữ nhật) → bật Move → **kéo chấm vàng ở góc** nắn polygon
+> (`ShapeGeometry` dựng lại live, cỏ né theo bbox). Thêm/bớt đỉnh = bước sau.
 
 ---
 

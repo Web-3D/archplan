@@ -1365,7 +1365,34 @@
   color: #e8f2da; /* text kem-xanh */
 }
 .ap-tweak-sub {
-  background: #1d2c1a; /* rêu tối = nền sub-panel (= tab active → dính liền) */
+  background: #1d2c1a; /* rêu tối = nền sub-panel cấp 1 (= tab active → dính liền) */
+  padding: 6px;
+}
+/* CẤP 2 (Số đo|Độ cong|Bóng đổ trong Lá đơn) — bg SÁNG hơn cấp 1 (#1d2c1a → #26381f) + tab nhỏ hơn → lồng cấp rõ. */
+.ap-tweak-tabs2 {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 0;
+  padding-left: 2px;
+  flex-wrap: wrap;
+}
+.ap-tweak-tabs2 > .ap-tab-btn {
+  flex: 1 1 0; /* 3 tab chia đều */
+  max-width: none;
+  height: 18px; /* nhỏ hơn cấp 1 (20) → phụ thuộc cấp */
+  font-size: 8px;
+  background: rgba(38, 56, 31, 0.5); /* sáng hơn cấp 1, mờ — inactive chìm vào bladeSub */
+  border-color: rgba(120, 165, 95, 0.3);
+  color: #9fc090; /* xanh sáng hơn cấp 1 */
+}
+.ap-tweak-tabs2 > .ap-tab-btn.ap-tab-active {
+  background: #26381f; /* = sub2 → dính liền */
+  border-color: rgba(140, 185, 110, 0.55);
+  border-bottom-color: transparent;
+  color: #eef7e2;
+}
+.ap-tweak-sub2 {
+  background: #26381f; /* cấp 2: moss SÁNG hơn cấp 1 → thấy lồng cấp */
   padding: 6px;
 }
 /* ô số sau slider — layout chung; Ground (.ap-mm-input, NÂU) · Tinh chỉnh (.ap-num-input, COBALT). */

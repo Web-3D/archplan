@@ -113,21 +113,11 @@ function colorRow(
   return row
 }
 
+type StructRow = [string, number, number, number, number, (v: number) => void]
+
 // Structural (đổi geometry) — LIVE khi kéo: input → applySiteLive (throttle rAF), buông → applySite(true) commit.
-function buildGrassStructural(body: HTMLElement, ctx: APGuiCtx): void {
-  const g = ctx.site.grass3d
-  const structural: [string, number, number, number, number, (v: number) => void][] = [
-    ['Mật độ /m²', 20, 300, 10, g.density, (v) => (g.density = Math.round(v))],
-    ['Cao lá cm', 5, 55, 1, g.height * 100, (v) => (g.height = v / 100)],
-    ['Rộng gốc mm', 1, 30, 0.5, g.bladeWidth * 1000, (v) => (g.bladeWidth = v / 1000)],
-    ['Rộng thân mm', 1, 30, 0.5, g.midWidth * 1000, (v) => (g.midWidth = v / 1000)],
-    ['Thon ngọn %', 0, 100, 5, g.taper * 100, (v) => (g.taper = v / 100)],
-    ['Cong T→P %', -100, 100, 5, g.curveLR * 100, (v) => (g.curveLR = v / 100)],
-    ['Cong dọc %', 0, 100, 5, g.bend * 100, (v) => (g.bend = v / 100)],
-    ['Cụp mép %', 0, 100, 5, g.cup * 100, (v) => (g.cup = v / 100)],
-    ['Số đốt', 1, 12, 1, g.segments, (v) => (g.segments = Math.round(v))],
-  ]
-  for (const [label, min, max, step, init, set] of structural) {
+function appendStructRows(body: HTMLElement, ctx: APGuiCtx, rows: StructRow[]): void {
+  for (const [label, min, max, step, init, set] of rows) {
     body.appendChild(
       sliderRow(label, min, max, step, init, (v, c) => {
         set(v)
@@ -136,6 +126,30 @@ function buildGrassStructural(body: HTMLElement, ctx: APGuiCtx): void {
       })
     )
   }
+}
+
+// Tab con "Số đo" — kích thước lá (mật độ, cao, rộng gốc/thân, số đốt) + thon ngọn (dời từ Độ cong).
+function buildGrassMeasure(body: HTMLElement, ctx: APGuiCtx): void {
+  const g = ctx.site.grass3d
+  appendStructRows(body, ctx, [
+    ['Mật độ /m²', 20, 300, 10, g.density, (v) => (g.density = Math.round(v))],
+    ['Cao lá cm', 5, 55, 1, g.height * 100, (v) => (g.height = v / 100)],
+    ['Thon ngọn %', 0, 100, 5, g.taper * 100, (v) => (g.taper = v / 100)],
+    ['Rộng thân mm', 1, 30, 0.5, g.midWidth * 1000, (v) => (g.midWidth = v / 1000)],
+    ['Rộng gốc mm', 1, 30, 0.5, g.bladeWidth * 1000, (v) => (g.bladeWidth = v / 1000)],
+    ['Số đốt', 1, 12, 1, g.segments, (v) => (g.segments = Math.round(v))],
+  ])
+}
+
+// Tab con "Độ cong" — các % cong dáng lá (T→P, dọc, cụp) + fold hình học. (Thon ngọn đã dời sang Số đo.)
+function buildGrassCurve(body: HTMLElement, ctx: APGuiCtx): void {
+  const g = ctx.site.grass3d
+  appendStructRows(body, ctx, [
+    ['Cong T→P %', -100, 100, 5, g.curveLR * 100, (v) => (g.curveLR = v / 100)],
+    ['Cong dọc %', 0, 100, 5, g.bend * 100, (v) => (g.bend = v / 100)],
+    ['Cụp mép %', 0, 100, 5, g.cup * 100, (v) => (g.cup = v / 100)],
+    ['Normal cụp', 0, 10, 0.5, g.cupNormalGain, (v) => (g.cupNormalGain = v)],
+  ])
   appendFoldToggle(body, ctx)
 }
 
@@ -157,13 +171,66 @@ function appendFoldToggle(body: HTMLElement, ctx: APGuiCtx): void {
   body.appendChild(row)
 }
 
-// B0 — Màu lá (LIVE, 1 màu phẳng). Gradient gốc/ngọn/mép = bước sau.
+// Màu lá 2 MẶT (LIVE qua tuneGrass): mặt ngoài (+Z) + mặt trong (-Z) — two-tone như lá thật.
 function buildGrassColor(body: HTMLElement, ctx: APGuiCtx): void {
   const g = ctx.site.grass3d
   body.appendChild(
-    colorRow('Màu lá', g.color, (hex, c) => {
+    colorRow('Màu ngoài', g.color, (hex, c) => {
       g.color = hex
       ctx.tuneGrass((b) => b.setColor(hex), c)
+    })
+  )
+  body.appendChild(
+    colorRow('Màu trong', g.innerColor, (hex, c) => {
+      g.innerColor = hex
+      ctx.tuneGrass((b) => b.setInnerColor(hex), c)
+    })
+  )
+}
+
+// Tab con "Bóng đổ" — bóng GỐC mặt trong (uniform LIVE qua tuneGrass, KHÔNG dựng lại): đậm + cao (uv.y).
+// "Đậm bóng %" = (1 − shadowDark)·100 (cao = đen hơn); "Cao bóng %" = shadowSpan·100 (vươn tới đâu).
+function buildGrassShadow(body: HTMLElement, ctx: APGuiCtx): void {
+  const g = ctx.site.grass3d
+  body.appendChild(
+    sliderRow('Đậm bóng %', 0, 100, 5, (1 - g.shadowDark) * 100, (v, c) => {
+      g.shadowDark = 1 - v / 100
+      ctx.tuneGrass((b) => b.setShadowDark(g.shadowDark), c)
+    })
+  )
+  body.appendChild(
+    sliderRow('Cao bóng %', 0, 50, 1, g.shadowSpan * 100, (v, c) => {
+      g.shadowSpan = v / 100
+      ctx.tuneGrass((b) => b.setShadowSpan(g.shadowSpan), c)
+    })
+  )
+}
+
+// Vệt TIẾP ĐẤT dưới gốc cụm (đĩa tối tỏa mềm) — "cắm" cỏ xuống đất. Bật/tắt (uniform 0 khi tắt) + Đậm + Rộng.
+function buildGrassContact(body: HTMLElement, ctx: APGuiCtx): void {
+  const g = ctx.site.grass3d
+  const row = document.createElement('label')
+  row.style.cssText =
+    'display:flex;align-items:center;gap:6px;margin:5px 0 2px;font-size:11px;cursor:pointer'
+  const cb = document.createElement('input')
+  cb.type = 'checkbox'
+  cb.checked = g.contactOn
+  cb.addEventListener('change', () => {
+    g.contactOn = cb.checked
+    ctx.tuneGrass((b) => b.setContactDark(g.contactOn ? g.contactDark : 0), true) // 0 khi tắt
+  })
+  row.append(cb, document.createTextNode('Vệt tiếp đất'))
+  body.appendChild(row)
+  body.appendChild(
+    sliderRow('Đậm', 0, 100, 5, g.contactDark * 100, (v, c) => {
+      g.contactDark = v / 100
+      ctx.tuneGrass((b) => b.setContactDark(g.contactOn ? g.contactDark : 0), c)
+    })
+  )
+  body.appendChild(
+    sliderRow('Rộng', 1, 20, 0.5, g.contactRadius * 100, (v, c) => {
+      g.contactRadius = v / 100
+      ctx.tuneGrass((b) => b.setContactRadius(g.contactRadius), c)
     })
   )
 }
@@ -199,12 +266,25 @@ function buildClumpControls(body: HTMLElement, ctx: APGuiCtx): void {
   body.appendChild(note)
 }
 
-// Panel "🎛️ Tinh chỉnh" — chia BẬC TAB con: "Lá đơn" (hình dáng 1 lá + màu + fold) | "Bụi cỏ" (gộp cụm).
-// Trả { panel, previewHost, tabs }: panel cho drawer Tabs; previewHost gắn GrassPreview; tabs để caller dispose.
+const L1_CLASSES = {
+  bar: 'ap-tab-bar ap-tweak-tabs',
+  tab: 'ap-tab-btn',
+  panel: 'ap-tweak-sub',
+  active: 'ap-tab-active',
+}
+const L2_CLASSES = {
+  bar: 'ap-tab-bar ap-tweak-tabs2',
+  tab: 'ap-tab-btn',
+  panel: 'ap-tweak-sub2',
+  active: 'ap-tab-active',
+}
+
+// Panel "🎛️ Tinh chỉnh" — TAB cấp 1: "Lá đơn" | "Bụi cỏ". Trong "Lá đơn" có TAB cấp 2 (bg sáng hơn =
+// lồng cấp): "Số đo" | "Độ cong" | "Bóng đổ". Trả { panel, previewHost, tabs[] }: cả 2 cấp để caller dispose.
 export function setupTweakPanel(
   ctx: APGuiCtx,
   container: Element | null
-): { panel: HTMLElement; previewHost: HTMLElement; tabs: Tabs } {
+): { panel: HTMLElement; previewHost: HTMLElement; tabs: Tabs[] } {
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-tweak-panel'
   const ttl = document.createElement('div')
@@ -213,9 +293,18 @@ export function setupTweakPanel(
   const body = document.createElement('div')
   body.className = 'ap-tweak-body' // flex column → đẩy preview xuống đáy panel (margin-top:auto)
 
-  const bladeSub = document.createElement('div') // tab "Lá đơn"
-  buildGrassStructural(bladeSub, ctx)
-  buildGrassColor(bladeSub, ctx)
+  // "Lá đơn" = 3 tab cấp 2 (Số đo | Độ cong | Bóng đổ).
+  const bladeSub = document.createElement('div')
+  const measureSub = document.createElement('div')
+  buildGrassMeasure(measureSub, ctx)
+  const curveSub = document.createElement('div')
+  buildGrassCurve(curveSub, ctx)
+  const shadowSub = document.createElement('div')
+  buildGrassShadow(shadowSub, ctx) // Đậm bóng, Cao bóng
+  buildGrassColor(shadowSub, ctx) // Màu ngoài, Màu trong
+  buildGrassContact(shadowSub, ctx) // Vệt: bật/tắt + Đậm + Rộng
+  bladeSub.append(measureSub, curveSub, shadowSub)
+
   const clumpSub = document.createElement('div') // tab "Bụi cỏ"
   buildClumpControls(clumpSub, ctx)
 
@@ -225,21 +314,22 @@ export function setupTweakPanel(
   p.append(ttl, body)
   container?.appendChild(p)
 
-  const tabs = new Tabs(
+  const innerTabs = new Tabs(
+    bladeSub,
+    [
+      { label: 'Số đo', panel: measureSub, title: 'Kích thước lá' },
+      { label: 'Độ cong', panel: curveSub, title: 'Các % cong dáng lá' },
+      { label: 'Bóng đổ', panel: shadowSub, title: 'Màu + bóng gốc mặt trong' },
+    ],
+    { classes: L2_CLASSES, injectCss: false }
+  )
+  const outerTabs = new Tabs(
     body,
     [
       { label: 'Lá đơn', panel: bladeSub, title: 'Hình dáng 1 lá' },
       { label: 'Bụi cỏ', panel: clumpSub, title: 'Gộp lá thành cụm' },
     ],
-    {
-      classes: {
-        bar: 'ap-tab-bar ap-tweak-tabs',
-        tab: 'ap-tab-btn',
-        panel: 'ap-tweak-sub',
-        active: 'ap-tab-active',
-      },
-      injectCss: false,
-    }
+    { classes: L1_CLASSES, injectCss: false }
   )
-  return { panel: p, previewHost, tabs }
+  return { panel: p, previewHost, tabs: [innerTabs, outerTabs] }
 }

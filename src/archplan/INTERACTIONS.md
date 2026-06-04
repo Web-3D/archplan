@@ -74,6 +74,29 @@ Chỉ phải đảm bảo:
 
 ---
 
+## 5. Ngoại lệ — SITE element (hồ nước 💧) KHÔNG theo lớp pick chung
+
+Hồ (`WaterSurface`) là **site element rời** (ở `siteGroup`, không có `instId`/pick box, không merge).
+Tương tác làm KHÁC khung 4-bộ trên:
+
+| Tương tác | Hồ nước làm sao |
+|---|---|
+| **🤚 Move (thân)** | Raycast **THẲNG mesh hồ** (không qua `pickGroup`) trong `_tryStartWaterDrag`; so distance với pick-box, gần hơn thì nhường building. Kéo `_horizPlane` → ghi `offsetX/offsetZ` + **dời mesh live** (reflector.target con → theo cùng). Thả → `_applySite(true)` (cỏ né lại + autosave). Anchor: `_tryStartWaterDrag`, `_waterDragBody`, `_moveModeMove`. |
+| **🤚 Move (đỉnh, form=free)** | `WaterConfig.shape='free'` → polygon `points[]`. `_rebuildWaterHandles` dựng chấm vàng (sphere) tại mỗi đỉnh trong group `_waterHandles` (scene, chỉ khi free+moveMode). `_tryStartVertexDrag` raycast handle TRƯỚC thân → kéo `points[idx]` (world−tâm) + `water.setShape(...)` **dựng lại geometry live** (giữ reflector, KHÔNG tốn RTT). Thả → `_applySite(true)`. Geo/mat handle dùng chung (`_disposeWaterHandles`). Đổi Rect→Free: GUI `seedWaterRectPoints` seed 4 góc. |
+| **👆 Focus / 🎨 Paint / P Pick** | KHÔNG có — chỉnh qua **GUI sub-tab Water** (toggle/size/pos/màu/gương/sóng) thay vì click 3D. |
+
+> ⚠ Slider Pos X/Z trong tab Water KHÔNG tự cập nhật số sau khi kéo hồ trong 3D (state đúng + đã lưu,
+> chỉ phần hiển thị slider chờ panel dựng lại). Nâng cấp: registerWaterReadout nếu cần đồng bộ tức thì.
+
+---
+
+## Phím tắt
+
+- **Alt** (trái/phải) — bật/tắt Move tool 🤚 (toggle, `!e.repeat` chống nhấp nháy; `_onKeyDown`).
+- **`** (backquote) — ẩn/hiện DevHud perf. **Chuột phải** — thoát Move/Paint/Pick.
+
+---
+
 ## Tham chiếu nhanh (anchor code)
 
 | Cần | Hàm/định danh |

@@ -1,14 +1,14 @@
 /**
  * VỊ TRÍ   — archplan/src/archplan/gui/site.ts
- * VAI TRÒ  — Panel "🌳 Ground" (drawer tab): sửa SiteState. CHIA BẬC TAB con: "Ground" (nền/lô/cỏ
- *            + bảng coverage) · "Fence" (hàng rào) · "Tree" (cây — placeholder) chung 1 hàng tab.
- *            Nhãn TOÀN tiếng Anh.
+ * VAI TRÒ  — Panel "🌳 Ground" (drawer tab): sửa SiteState. CHIA BẬC TAB con: "Ground" (SURFACE vật liệu
+ *            nền/lô + bảng coverage) · "Fence" (hàng rào) · "Tree" (THỰC VẬT 3D: cỏ-3D độc lập surface +
+ *            cây sắp có) chung 1 hàng tab. Nhãn TOÀN tiếng Anh.
  *            Slider input = live (applySite false), change/select/toggle = commit (true).
  * LIÊN HỆ  — Dựng vào drawerBody bởi ArchPlanLab._buildLeftTools (con của drawer Tabs). Sub-tab = Tabs
  *            (ui/Tabs) → trả { panel, tabs } cho caller dispose. State+render qua APGuiCtx.
  */
 
-import type { GroundMaterialKey } from 'threejs-modules/site/state'
+import type { GroundMaterialKey, WaterConfig } from 'threejs-modules/site/state'
 import { GROUND_THICK_MAX, GROUND_THICK_MIN } from 'threejs-modules/site/state'
 import { Tabs } from 'threejs-modules/ui/Tabs'
 
@@ -118,6 +118,31 @@ function selectRow<T extends string>(
   return row
 }
 
+const hexStr = (n: number): string => '#' + (n & 0xffffff).toString(16).padStart(6, '0')
+
+// Hàng chọn màu (<input type=color>): input = live (commit=false), change = commit (true).
+function colorRow(
+  label: string,
+  initial: number,
+  onChange: (hex: number, commit: boolean) => void
+): HTMLElement {
+  const row = document.createElement('div')
+  row.style.cssText = 'display:flex;align-items:center;gap:4px;margin-bottom:3px'
+  const lbl = document.createElement('span')
+  lbl.textContent = label
+  lbl.style.cssText = 'width:60px;flex-shrink:0'
+  const inp = document.createElement('input')
+  inp.type = 'color'
+  inp.value = hexStr(initial)
+  inp.style.cssText =
+    'flex:1;min-width:0;height:16px;padding:0;border:none;background:none;cursor:pointer'
+  const read = (): number => parseInt(inp.value.slice(1), 16)
+  inp.addEventListener('input', () => onChange(read(), false))
+  inp.addEventListener('change', () => onChange(read(), true))
+  row.append(lbl, inp)
+  return row
+}
+
 // Bảng số liệu đối chiếu — refresh đọc ctx.siteStats() (cập nhật cả khi build nhà đổi footprint).
 function readout(ctx: APGuiCtx): { el: HTMLElement; refresh: () => void } {
   const el = document.createElement('div')
@@ -200,15 +225,130 @@ function buildLotSliders(body: HTMLElement, ctx: APGuiCtx, refresh: () => void):
   }
 }
 
-// Cỏ 3D nhú lên (tier B — GrassBlades): chỉ on/off ở đây; thông số chi tiết → panel 🎛️ Tinh chỉnh.
+// Cỏ 3D nhú lên (tier B — GrassBlades): LỚP THỰC VẬT độc lập surface — mọc trên nền BẤT KỲ (grass/soil/
+// gravel). Chỉ on/off ở đây; thông số chi tiết → panel 🎛️ Tinh chỉnh. Nằm ở tab "Tree" (không phải Ground).
 function buildGrass3dControls(body: HTMLElement, ctx: APGuiCtx): void {
   const g = ctx.site.grass3d
   body.appendChild(
-    toggleRow('🌿 3D grass (Grass surface)', g.enabled, (on) => {
+    toggleRow('🌿 3D grass (any surface)', g.enabled, (on) => {
       g.enabled = on
       ctx.applySite(true)
     })
   )
+}
+
+// Seed 4 góc polygon từ chữ nhật width×depth (mm, local) khi chuyển Rect → Free (để kéo đỉnh tiếp).
+function seedWaterRectPoints(w: WaterConfig): void {
+  const hw = w.width / 2
+  const hd = w.depth / 2
+  w.points = [
+    { x: -hw, z: -hd },
+    { x: hw, z: -hd },
+    { x: hw, z: hd },
+    { x: -hw, z: hd },
+  ]
+}
+
+// 💧 Hồ nước (tier C — WaterSurface): SITE ELEMENT rời. Toggle + form (rect/free) + size/pos + dáng nước.
+function buildWaterControls(body: HTMLElement, ctx: APGuiCtx): void {
+  const w = ctx.site.water
+  body.appendChild(
+    toggleRow('💧 Water (pond)', w.enabled, (on) => {
+      w.enabled = on
+      ctx.applySite(true)
+    })
+  )
+  const formOpts: [string, 'rect' | 'free'][] = [
+    ['Rect', 'rect'],
+    ['Free (kéo đỉnh)', 'free'],
+  ]
+  body.appendChild(
+    selectRow('Form', formOpts, w.shape, (v) => {
+      w.shape = v
+      if (v === 'free' && w.points.length < 3) seedWaterRectPoints(w) // seed từ rect hiện tại
+      ctx.applySite(true)
+    })
+  )
+  buildWaterShape(body, ctx)
+  buildWaterLook(body, ctx)
+  const note = document.createElement('div')
+  note.style.cssText = 'font-size:10px;opacity:.7;margin-top:5px;line-height:1.35'
+  note.textContent =
+    'Gương thật (reflector) — +1 render pass. Free: bật Move (Alt) → kéo chấm vàng ở góc.'
+  body.appendChild(note)
+}
+
+// Kích thước + vị trí hồ (structural → áp khi BUÔNG, KHÔNG live: tránh tạo lại reflector/RTT mỗi frame).
+function buildWaterShape(body: HTMLElement, ctx: APGuiCtx): void {
+  const w = ctx.site.water
+  const rows: [string, number, number, 'width' | 'depth' | 'offsetX' | 'offsetZ' | 'depthY'][] = [
+    ['Width m', 1, 15, 'width'],
+    ['Depth m', 1, 15, 'depth'],
+    ['Pos X m', -10, 10, 'offsetX'],
+    ['Pos Z m', -10, 10, 'offsetZ'],
+    ['Sâu m', 0.1, 3, 'depthY'], // độ sâu lòng hồ (basin) — đáy dưới mặt nền
+  ]
+  for (const [label, min, max, key] of rows) {
+    body.appendChild(
+      sliderRow(
+        label,
+        min,
+        max,
+        0.1,
+        w[key] / 1000,
+        (v, c) => {
+          w[key] = Math.round(v * 1000)
+          if (c) ctx.applySite(true) // chỉ dựng lại khi buông (hồ nặng — né tạo reflector mỗi frame)
+        },
+        1000
+      )
+    )
+  }
+}
+
+// Dáng nước: màu + độ gương + tốc-độ-sóng + độ-rung (uniform LIVE qua tuneWater — KHÔNG dựng lại).
+function buildWaterLook(body: HTMLElement, ctx: APGuiCtx): void {
+  const w = ctx.site.water
+  body.appendChild(
+    colorRow('Water color', w.color, (hex, c) => {
+      w.color = hex
+      ctx.tuneWater((s) => s.setWaterColor(hex), c)
+    })
+  )
+  body.appendChild(
+    colorRow('Bottom color', w.bottomColor, (hex, c) => {
+      w.bottomColor = hex
+      if (c) ctx.applySite(true) // đáy = material basin → dựng lại khi buông (không live)
+    })
+  )
+  const rows: [string, number, number, number, 'reflectivity' | 'flow' | 'distortion' | 'tint'][] =
+    [
+      ['Mirror %', 0, 100, 5, 'reflectivity'],
+      ['Wave spd %', 0, 300, 10, 'flow'],
+      ['Ripple %', 0, 200, 10, 'distortion'],
+      ['Đục %', 0, 100, 5, 'tint'],
+    ]
+  for (const [label, min, max, step, key] of rows) {
+    body.appendChild(
+      sliderRow(
+        label,
+        min,
+        max,
+        step,
+        w[key] * 100,
+        (v, c) => {
+          w[key] = v / 100
+          ctx.tuneWater((s) => {
+            if (key === 'reflectivity') s.setReflectivity(w.reflectivity)
+            else if (key === 'flow') s.setFlow(w.flow)
+            else if (key === 'distortion') s.setDistortion(w.distortion)
+            else s.setTint(w.tint)
+          }, c)
+        },
+        1
+      )
+    )
+  }
 }
 
 // Hàng rào (bật, kiểu gỗ/tường, chiều cao).
@@ -255,34 +395,39 @@ export function setupSitePanel(
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-site-panel'
 
-  // Sub-tab "Ground": nền/lô/cỏ + bảng coverage.
+  // Sub-tab "Ground": SURFACE (vật liệu nền) + lô + bảng coverage. KHÔNG còn cỏ-3D (đã tách sang Tree).
   const groundSub = document.createElement('div')
   const { el: roEl, refresh } = readout(ctx)
   ctx.registerSiteReadout(refresh)
   buildGroundControls(groundSub, ctx, refresh)
-  buildGrass3dControls(groundSub, ctx)
   groundSub.appendChild(roEl)
 
   // Sub-tab "Fence": hàng rào.
   const fenceSub = document.createElement('div')
   buildFenceControls(fenceSub, ctx)
 
-  // Sub-tab "Tree": cây (chưa có tính năng — placeholder, chờ wire controls sau).
+  // Sub-tab "Tree": LỚP THỰC VẬT 3D độc lập surface — cỏ-3D (mọc nền bất kỳ) + cây (sắp có).
   const treeSub = document.createElement('div')
+  buildGrass3dControls(treeSub, ctx)
   const treeNote = document.createElement('div')
   treeNote.className = 'ap-site-empty'
   treeNote.textContent = '🌲 Trees — coming soon'
   treeSub.appendChild(treeNote)
 
-  p.append(groundSub, fenceSub, treeSub)
+  // Sub-tab "Water": hồ nước phản chiếu (site element rời) — toggle + kích thước/vị trí + dáng nước.
+  const waterSub = document.createElement('div')
+  buildWaterControls(waterSub, ctx)
+
+  p.append(groundSub, fenceSub, treeSub, waterSub)
   container?.appendChild(p)
 
   const tabs = new Tabs(
     p,
     [
-      { label: 'Ground', panel: groundSub, title: 'Surface / lot / grass' },
+      { label: 'Ground', panel: groundSub, title: 'Surface material / lot' },
       { label: 'Fence', panel: fenceSub, title: 'Fence' },
-      { label: 'Tree', panel: treeSub, title: 'Trees (coming soon)' },
+      { label: 'Tree', panel: treeSub, title: '3D grass (any surface) + trees' },
+      { label: 'Water', panel: waterSub, title: 'Pond (reflection, tier C)' },
     ],
     {
       classes: {

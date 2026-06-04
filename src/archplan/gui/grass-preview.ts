@@ -24,9 +24,12 @@ export class GrassPreview {
   private readonly scene = new THREE.Scene()
   private readonly camera: THREE.PerspectiveCamera
   private grass: GrassBlades | null = null
+  private readonly sunDir = new THREE.Vector3(0.5, 1, 0.6) // hướng đèn preview = hướng vệt tiếp đất cỏ
   private readonly canvas: HTMLCanvasElement
   private readonly panel: HTMLElement
   private controls: OrbitControls | null = null // kéo-xoay + cuộn-zoom quanh lá
+  private ground: THREE.Mesh | null = null // nền nhỏ nhận bóng lá (để THẤY bóng đổ)
+  private groundMat: THREE.MeshStandardMaterial | null = null
   private ro: ResizeObserver | null = null // theo bề ngang host → render VUÔNG full-width
   private lastW = 0
   private isDisposed = false
@@ -52,9 +55,30 @@ export class GrassPreview {
     this.camera.position.set(0.06, 0.17, 0.52)
     this.camera.lookAt(0, 0.13, 0)
     this.scene.add(new THREE.HemisphereLight(0xbfd8ff, 0x35502a, 2.2))
+    // Sun preview — bật castShadow để soi BÓNG ĐỔ của lá/cụm xuống nền. Scene tí hon ⇒ shadow cam siết
+    // sát (±0.35m / 1024 ≈ 0.7mm/texel) → lá 6mm ~9 texel: bóng SẮC, sạch, KHÔNG dính sub-texel như bãi
+    // (19mm/texel). Rẻ (1 caster). Bãi thật thì receive-only (xem fromState) né hẳn vấn đề lá-dưới-texel.
     const dir = new THREE.DirectionalLight(0xffffff, 2.2)
-    dir.position.set(0.5, 1, 0.6)
+    dir.position.copy(this.sunDir)
+    dir.castShadow = true
+    dir.shadow.mapSize.set(1024, 1024)
+    dir.shadow.camera.near = 0.01
+    dir.shadow.camera.far = 3
+    dir.shadow.camera.left = -0.35
+    dir.shadow.camera.right = 0.35
+    dir.shadow.camera.top = 0.35
+    dir.shadow.camera.bottom = -0.35
+    dir.shadow.bias = -0.0006
+    dir.shadow.normalBias = 0.002 // lá mỏng 6mm → bias nhỏ kẻo bóng tách khỏi gốc (peter-pan)
     this.scene.add(dir)
+
+    // Nền nhỏ nhận bóng (đĩa ngang y=0, tông khớp đáy gradient cho liền nền) — để THẤY bóng lá đổ xuống.
+    this.groundMat = new THREE.MeshStandardMaterial({ color: 0xdfe5ea, roughness: 1 })
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), this.groundMat)
+    ground.rotation.x = -Math.PI / 2
+    ground.receiveShadow = true
+    this.ground = ground
+    this.scene.add(ground)
 
     // Kéo trái = xoay; chuột phải kéo = pan (dời lá lên/xuống/qua lại); cuộn = zoom.
     // Damping mượt → loop gọi controls.update(). screenSpacePanning mặc định true → pan theo mặt phẳng màn hình.
@@ -87,6 +111,8 @@ export class GrassPreview {
   async init(): Promise<void> {
     const r = new WebGPURenderer({ canvas: this.canvas, antialias: true })
     r.setPixelRatio(Math.min(2, window.devicePixelRatio))
+    r.shadowMap.enabled = true
+    r.shadowMap.type = THREE.PCFSoftShadowMap
     r.setSize(INIT, INIT, false)
     await r.init()
     if (this.isDisposed) {
@@ -124,12 +150,22 @@ export class GrassPreview {
       bend: cfg.bend,
       cup: cfg.cup,
       cupGeo: cfg.cupGeo,
+      cupNormalGain: cfg.cupNormalGain,
       bladesPerClump: cfg.bladesPerClump,
       clumpRadius: cfg.clumpRadius,
       clumpSplay: cfg.clumpSplay,
       color: cfg.color,
+      shadowDark: cfg.shadowDark,
+      shadowSpan: cfg.shadowSpan,
+      contactDark: cfg.contactDark,
+      contactRadius: cfg.contactRadius,
     })
-    this.scene.add(this.grass.getMesh())
+    // Preview: lá vừa ĐỔ (xuống nền + lẫn nhau trong cụm) vừa NHẬN bóng — soi rõ hình khối khi tinh chỉnh.
+    const mesh = this.grass.getMesh()
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    this.scene.add(mesh)
+    this.grass.setSun(this.sunDir.x, this.sunDir.y, this.sunDir.z) // vệt tiếp đất khớp hướng đèn preview
     return this.grass
   }
 
@@ -146,8 +182,12 @@ export class GrassPreview {
     this.controls = null
     this.renderer?.setAnimationLoop(null)
     this.grass?.dispose()
+    this.ground?.geometry.dispose()
+    this.groundMat?.dispose()
     this.renderer?.dispose()
     this.grass = null
+    this.ground = null
+    this.groundMat = null
     this.renderer = null
     this.panel.remove()
   }
