@@ -339,8 +339,15 @@ function buildFoundationSubfolder(parent: GUI, s: StructureState, ctx: APGuiCtx)
   s.foundType ??= 'concrete' // backfill design cũ (né gui.add undefined)
   f.add(s, 'foundType', { Concrete: 'concrete', 'Wood deck (JP)': 'wood-deck' })
     .name('Type')
-    .onChange(ctx.build)
+    .onChange(() => {
+      ctx.rebuild() // đổi type → dựng lại GUI để hiện/ẩn slider Post spacing (wood-deck)
+      ctx.build()
+    })
   live(f.add(s, 'foundH', 100, 2000, 50).name('Height'), ctx)
+  if (s.foundType === 'wood-deck') {
+    s.deckPostSpacing ??= 1500
+    live(f.add(s, 'deckPostSpacing', 600, 4000, 100).name('Post spacing mm'), ctx) // #10 mật độ lưới cột
+  }
   live(f.add(s.foundOh, 'n', 0, 2, 0.05).name('Expand N m'), ctx)
   live(f.add(s.foundOh, 'e', 0, 2, 0.05).name('Expand E m'), ctx)
   live(f.add(s.foundOh, 's', 0, 2, 0.05).name('Expand S m'), ctx)
