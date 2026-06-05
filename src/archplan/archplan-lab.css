@@ -1093,11 +1093,11 @@
   background: #ffd54a;
   border-color: #ffd54a;
 }
-/* 🤚 Move LÔI RA: nút float CỐ ĐỊNH góc trái-dưới, ngay BÊN PHẢI thanh sáng sun (.ap-sun-ctrl @ left:8,
-   bottom:8, rộng ~24px). NGOÀI drawer → luôn bấm được. Vuông, to dễ chạm. */
+/* 🤚 Move LÔI RA: nút float CỐ ĐỊNH góc trái-dưới, cách thanh sáng sun (.ap-sun-ctrl @ left:8, rộng ~24px →
+   kết thúc ~x32) đúng 2px → left:34. NGOÀI drawer → luôn bấm được. Vuông, to dễ chạm. */
 .ap-move-btn.ap-move-float {
   position: absolute;
-  left: 36px;
+  left: 34px;
   bottom: 8px;
   z-index: 160;
   width: 30px;
@@ -1523,10 +1523,13 @@
    mới, độc lập scene). Toggle 🧪 bật/tắt; kéo theo title. Nền TRẮNG như trang giấy lab; preview WebGPU giữa. */
 .ap-lab-float {
   position: absolute;
-  top: 48px;
+  top: 8px;
   right: 64px;
   z-index: 210;
-  width: 248px;
+  width: 66vw; /* ~2/3 màn hình — khung làm việc rộng (trước: 248px) */
+  max-width: calc(100vw - 80px); /* chừa mép phải (right:64px) — không tràn viewport */
+  min-width: 560px; /* màn nhỏ vẫn đủ chỗ controls + preview */
+  height: calc(100vh - 16px); /* chiều cao HẾT màn hình (top 8 + chừa 8 mép đáy) */
   transition:
     opacity 0.18s ease,
     transform 0.18s ease;
@@ -1537,13 +1540,66 @@
   pointer-events: none; /* ẩn = không bắt chuột */
 }
 .ap-lab-float .ap-lab-panel {
-  background: #f5f7f5; /* gần trắng */
+  width: 100%; /* lấp đầy wrapper rộng (trước đây panel chỉ 132px, lệch trái) */
+  height: 100%; /* lấp đầy chiều dài wrapper (full xuống đáy) */
+  box-sizing: border-box;
+  background: rgba(
+    245,
+    247,
+    245,
+    0.5
+  ); /* trắng nửa trong (alpha 0.5) — xuyên thấy scene; blur(4px) base lo phần mờ */
   border-color: #c7cdc9;
   color: #2a322c; /* chữ tối trên nền sáng */
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4); /* nổi khỏi scene */
+  /* 2 cột BẰNG NHAU: nửa trái = .ap-lab-left (title+note+2 khung) · nửa phải = preview. 1 hàng full cao. */
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: minmax(0, 1fr);
+  column-gap: 14px;
+  align-items: stretch;
 }
 .ap-lab-float .ap-lab-panel .ap-scan-title {
   color: #3a4a3e; /* tiêu đề tối */
+}
+/* ── Cột TRÁI: title + note + 2 KHUNG cao bằng nhau (trên: 🎛️ thông số/slider · dưới: 📁 thư mục/tài liệu) ── */
+.ap-lab-float .ap-lab-left {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+}
+.ap-lab-float .ap-lab-frame {
+  flex: 1; /* 2 khung chia đôi chiều cao còn lại → BẰNG NHAU */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #c7cdc9;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.35);
+  overflow: hidden;
+}
+.ap-lab-float .ap-lab-frame-head {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  font-size: 9px;
+  font-weight: bold;
+  color: #3a4a3e;
+  background: rgba(255, 255, 255, 0.45);
+  border-bottom: 1px solid #d4dad6;
+}
+.ap-lab-float .ap-lab-frame-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto; /* nội dung dài → cuộn trong khung */
+  padding: 6px 7px;
+}
+.ap-lab-float .ap-lab-placeholder {
+  font-size: 9px;
+  font-style: italic;
+  color: #7d877f; /* gợi ý tạm — thay bằng nội dung thật sau */
 }
 .ap-lab-note {
   font-size: 9px;
@@ -1554,13 +1610,30 @@
   border-bottom: 1px dashed #cdd4cf;
 }
 .ap-lab-float .ap-lab-panel .ap-preview-host {
-  margin-top: 0; /* preview ngay dưới note (không dồn đáy) */
+  grid-column: 2;
+  align-self: stretch; /* full chiều dài cột phải */
+  margin-top: 0;
+  min-height: 0; /* cho con bên trong co/giãn đúng trong grid */
 }
-/* 🧪 nút toggle Lab — góc trên-phải (cạnh tay kéo drawer). on = viền vàng. */
+/* Preview trong float = ô NỬA RỘNG × FULL CAO. Panel flex-column: title trên, canvas lấp phần còn lại.
+   GrassPreview render khớp kích thước canvas (rộng×cao) → KHÔNG còn vuông, KHÔNG méo. Ghi đè base 130×150. */
+.ap-lab-float .ap-preview-panel {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.ap-lab-float .ap-preview-canvas {
+  flex: 1; /* lấp hết chiều cao còn lại dưới title → preview = nửa rộng × full cao khung */
+  width: 100%;
+  min-height: 0; /* cho phép co trong flex column */
+}
+/* 🧪 nút toggle Lab — góc TRÁI-DƯỚI, kế PHẢI nút 🤚 Move (left:34 + w:30 + 2px gap → left:66, không dính chùm). on = viền vàng. */
 .ap-lab-toggle {
   position: absolute;
-  top: 8px;
-  right: 26px;
+  left: 66px;
+  bottom: 8px;
   z-index: 211;
   width: 30px;
   height: 30px;

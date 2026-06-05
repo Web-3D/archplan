@@ -53,7 +53,8 @@ function makeNumBox(
 }
 
 // liveDrag=false → chỉ bắn khi BUÔNG (change), bỏ qua input (dùng cho param phải dựng lại).
-function sliderRow(
+// Export: roof-lab.ts tái dùng cho slider thông số mái.
+export function sliderRow(
   label: string,
   min: number,
   max: number,
@@ -321,15 +322,22 @@ export function buildGrassTweak(ctx: APGuiCtx, host: HTMLElement): Tabs[] {
   return [innerTabs, outerTabs]
 }
 
-// Panel "🎛️ Lab" — BÀN THÍ NGHIỆM: giữ 🔎 preview WebGPU render ĐÚNG 1 vật thể đang dựng (giờ: cỏ). Quy
-// trình: thêm slider + soi preview để tạo vật thể; xong → CHUYỂN control sang panel dùng (vd Garden ▸ Grass),
-// preview Ở LẠI Lab cho vật thể kế. Trả { panel, previewHost } cho ArchPlanLab gắn GrassPreview.
+// Panel "🎛️ Lab" — BÀN THÍ NGHIỆM. Bố cục: cột TRÁI = 2 khung BẰNG NHAU (trên `paramHost`: slider chỉnh thông
+// số · dưới `docHost`: thư mục/tài liệu để chọn cho dễ); cột PHẢI = 🔎 preview WebGPU render ĐÚNG 1 vật thể
+// đang dựng (giờ: cỏ). Quy trình: thêm slider + soi preview → xong CHUYỂN control sang panel dùng (vd Garden ▸
+// Grass), preview Ở LẠI Lab cho vật thể kế. Trả handle 2 khung + previewHost cho ArchPlanLab gắn nội dung.
 export function setupLabBench(container: Element | null): {
   panel: HTMLElement
   previewHost: HTMLElement
+  paramHost: HTMLElement // khung TRÊN — nơi gắn slider thông số
+  docHost: HTMLElement // khung DƯỚI — nơi gắn list thư mục/tài liệu
 } {
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-tweak-panel ap-lab-panel'
+
+  // ── Cột trái: title + note + 2 khung (params / docs) ──
+  const left = document.createElement('div')
+  left.className = 'ap-lab-left'
   const ttl = document.createElement('div')
   ttl.className = 'ap-scan-title'
   ttl.textContent = '🧪 Lab — bàn thí nghiệm'
@@ -337,9 +345,38 @@ export function setupLabBench(container: Element | null): {
   note.className = 'ap-lab-note'
   note.textContent =
     'Sandbox ĐỘC LẬP scene (Factory). Thử nghiệm vật thể mới ở đây; xong → chuyển code sang GUI chung.'
+
+  // 1 khung = header (nhãn) + body (chỗ gắn nội dung). 2 khung flex:1 → CAO BẰNG NHAU.
+  const mkFrame = (
+    cls: string,
+    label: string,
+    hint: string
+  ): { frame: HTMLElement; body: HTMLElement } => {
+    const frame = document.createElement('div')
+    frame.className = `ap-lab-frame ${cls}`
+    const head = document.createElement('div')
+    head.className = 'ap-lab-frame-head'
+    head.textContent = label
+    const body = document.createElement('div')
+    body.className = 'ap-lab-frame-body'
+    const ph = document.createElement('div')
+    ph.className = 'ap-lab-placeholder' // gợi ý tạm — thay bằng nội dung thật ở bước sau
+    ph.textContent = hint
+    body.appendChild(ph)
+    frame.append(head, body)
+    return { frame, body }
+  }
+  const params = mkFrame('ap-lab-frame-params', '🎛️ Thông số', 'Slider thông số sẽ thêm ở đây.')
+  const docs = mkFrame(
+    'ap-lab-frame-docs',
+    '📁 Thư mục · tài liệu',
+    'Danh sách thư mục / tài liệu để chọn.'
+  )
+  left.append(ttl, note, params.frame, docs.frame)
+
   const previewHost = document.createElement('div')
   previewHost.className = 'ap-preview-host' // 🔎 preview WebGPU — luôn hiện trong Lab
-  p.append(ttl, note, previewHost)
+  p.append(left, previewHost)
   container?.appendChild(p)
-  return { panel: p, previewHost }
+  return { panel: p, previewHost, paramHost: params.body, docHost: docs.body }
 }

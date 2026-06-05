@@ -77,9 +77,10 @@ ArchPlanLab (extends BaseWorld)
   │     │                            Surface=Water color/Mirror/Wave/Ripple/Murk · Floor=Floor color+Floor mat · Walls=Wall depth+Wall mat (mat=placeholder 'None').
   │     │                            Pond=render Y NHƯ Pool (renderWaters; đổi param sau) · Puddle=placeholder. Coping = rect-frame quanh hồ (buildPoolEdge).
   │     │                            (bg-1→bg-4 lồng cấp, l5 về bg-3 cho chữ/track trắng đọc được). bảng Lot/House/Coverage/Garden ĐÁY tab Ground.
-  │     ├── 🎛️ Lab                 ← BÀN THÍ NGHIỆM (nền TRẮNG): giữ 🔎 preview WebGPU 1 vật thể đang dựng (xoay/pan/zoom, 2 MẶT 2 MÀU).
-  │     │                            Quy trình: thêm slider + soi preview tạo vật thể → xong CHUYỂN control sang panel dùng (cỏ→Garden ▸ Grass),
-  │     │                            preview Ở LẠI cho vật thể kế. (setupLabBench; slider cỏ split sang buildGrassTweak. 2026-06-05)
+  │     ├── 🧪 Lab (FLOAT)          ← BÀN THÍ NGHIỆM riêng (float 2/3 màn × full cao, nền trắng α0.5; nút 🧪 góc trái-dưới + phím R).
+  │     │                            Cột trái 2 khung BẰNG NHAU (🎛️ thông số/slider · 📁 thư mục/tài liệu); cột phải 🔎 preview (xoay/pan/zoom).
+  │     │                            Đang dựng: MÁI hip cắt nóc (roof-lab.ts + roof-preview.ts WebGL · 4 slider Ngang/Sâu/Cao/Nóc). Cỏ đã tốt nghiệp→Garden▸Grass.
+  │     │                            Quy trình: slider + soi preview → xong chuyển code sang building-kit. (setupLabBench 2 khung; sliderRow export. 2026-06-05)
   │     └── ⬇ Footer DÙNG CHUNG    ← `_buildDrawerFooter` (ngoài body cuộn, MỌI tab thấy): undo/redo + Build/Reset/Save/Load/JSON
   │                                  (trước nằm trong panel Building → đã lôi ra drawer vì là dòng chung; wire thẳng method, bền qua _rebuildGUI)
   │
@@ -90,7 +91,7 @@ ArchPlanLab (extends BaseWorld)
   │
   ├── ☀ Sun GIZMO (3D)            ← quả cầu kéo trên vòm → đổi hướng nắng; trục Y dây-dọi + bóng chân
   │     ├── dock panel cố định    ← toggle ☀/🌙 + slider sáng DỌC + ô màu (KHÔNG bám sun)
-  │     └── 🤚 Move FLOAT         ← nút vuông ngay PHẢI slider sáng (góc trái-dưới); toggle Move, phím tắt Z
+  │     └── 🤚 Move FLOAT         ← nút vuông cách slider sáng 2px (góc trái-dưới); toggle Move = phím F (Z/C = xoay camera trái/phải)
   │
   ├── 🎨 Palette                  ← tool TỰ DO float (khay swatch atelier + cọ sơn 3D)
   │
@@ -108,7 +109,7 @@ ArchPlanLab (extends BaseWorld)
 > **Coping** = dải mép quanh hồ (`buildPoolEdge`: rect-frame bbox+`edgeWidth` − lỗ polygon, ở mặt nền +3mm; màu đá mặc định,
 > `edgeMaterial` placeholder). `floorMaterial`/`wallMaterial` cũng placeholder ('none') — basin vẫn 1 material (màu Floor tô cả tường) tới khi làm material thật.
 > Khoét lỗ nền/lưới: 1 lỗ MỖI hồ bật (`waterPolygons` → `lotShape.holes[]` lõi + `_rebuildEditorGround`/`_buildGridGeo` vỏ).
-> **Kéo-thả 3D (active):** GUI tab Pl chọn pool nào = pool ACTIVE (`setActiveWater`); bật Move 🤚 (nút float hoặc **phím Z**)
+> **Kéo-thả 3D (active):** GUI tab Pl chọn pool nào = pool ACTIVE (`setActiveWater`); bật Move 🤚 (nút float hoặc **phím F**)
 > → nhấn-giữ mặt hồ kéo (raycast mọi mesh hồ, gần nhất → thành active; dời live, thả → cỏ né lại + autosave). Chỉnh
 > số/màu/gương/sóng ở **Water▸Pool▸Pl_n**. Default: 1 Pl1 bật, hồ 4×3m ở +5m trước nhà (+ Pd1/Pe1 placeholder tắt).
 > **Mặt nước LÕM** dưới vành nền (`baseY = rim − lip`, lip≤depthY) → lộ vành đất = đọc ra "lỗ cắt xuyên", không phẳng lì.

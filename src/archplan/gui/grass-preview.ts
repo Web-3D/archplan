@@ -30,8 +30,9 @@ export class GrassPreview {
   private controls: OrbitControls | null = null // kéo-xoay + cuộn-zoom quanh lá
   private ground: THREE.Mesh | null = null // nền nhỏ nhận bóng lá (để THẤY bóng đổ)
   private groundMat: THREE.MeshStandardMaterial | null = null
-  private ro: ResizeObserver | null = null // theo bề ngang host → render VUÔNG full-width
+  private ro: ResizeObserver | null = null // theo kích thước canvas → render khớp (rộng×cao)
   private lastW = 0
+  private lastH = 0
   private isDisposed = false
 
   constructor(container: Element | null) {
@@ -94,17 +95,23 @@ export class GrassPreview {
     this.controls = controls
 
     this.ro = new ResizeObserver(() => this._syncSize())
-    this.ro.observe(this.panel)
+    this.ro.observe(this.canvas)
   }
 
-  // Khớp buffer render với bề ngang host (VUÔNG w×w). Bỏ qua khi panel ẩn (tab khác → clientWidth 0).
+  // Khớp buffer render với KÍCH THƯỚC HIỂN THỊ canvas (rộng×cao theo CSS) + aspect camera. Bỏ qua khi ẩn (client = 0).
+  // Drawer: canvas height:auto trên buffer vuông → vẫn vuông. Lab float: canvas flex:1 → chữ nhật nửa-rộng×full-cao.
   private _syncSize(): void {
-    const cw = this.panel.clientWidth
-    if (cw < 1) return
+    const cw = this.canvas.clientWidth
+    const ch = this.canvas.clientHeight
+    if (cw < 1 || ch < 1) return
     const w = Math.max(40, Math.round(cw))
-    if (w === this.lastW) return
+    const h = Math.max(40, Math.round(ch))
+    if (w === this.lastW && h === this.lastH) return
     this.lastW = w
-    this.renderer?.setSize(w, w, false) // updateStyle=false → CSS (width:100%) lo hiển thị
+    this.lastH = h
+    this.camera.aspect = w / h
+    this.camera.updateProjectionMatrix()
+    this.renderer?.setSize(w, h, false) // updateStyle=false → CSS lo hiển thị
   }
 
   // Khởi tạo renderer WebGPU (async). Gọi 1 lần; sau đó chạy loop render (gió tự đong đưa qua time).
@@ -121,7 +128,8 @@ export class GrassPreview {
     }
     this.renderer = r
     this.lastW = 0
-    this._syncSize() // đo bề ngang host thật ngay khi renderer sẵn sàng
+    this.lastH = 0
+    this._syncSize() // đo kích thước canvas thật ngay khi renderer sẵn sàng
     r.setAnimationLoop(() => {
       this.controls?.update() // damping + áp thao tác kéo/zoom vào camera
       this.renderer?.render(this.scene, this.camera)
