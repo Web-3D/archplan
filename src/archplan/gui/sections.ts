@@ -344,6 +344,10 @@ function buildStairsSubfolder(parent: GUI, stair: StairState, ctx: APGuiCtx): GU
   f.close()
   f.domElement.classList.add('ap-stairs') // fontsize 7px cho bộ phận bên trong
   f.add(stair, 'show').name('Show stairs').onChange(ctx.build)
+  stair.style ??= 'solid' // backfill design cũ (né gui.add undefined)
+  f.add(stair, 'style', { Solid: 'solid', 'Wood plank': 'wood-plank', 'Wood float': 'wood-float' })
+    .name('Style')
+    .onChange(ctx.build)
   live(f.add(stair, 'rotDeg', 0, 360, 5).name('Rotate °'), ctx)
   live(f.add(stair, 'x', -15000, 15000, 50).name('X local'), ctx)
   live(f.add(stair, 'z', -15000, 15000, 50).name('Z local'), ctx)
