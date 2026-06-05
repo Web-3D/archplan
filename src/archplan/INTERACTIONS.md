@@ -110,5 +110,6 @@ Hồ (`WaterSurface`) là **site element rời** (ở `siteGroup`, không có `i
 | Move | `PickUD`, `DragSession`, `_makeDragSession`, `_dragMove`, `_horizPlane`, `_wallPlane`, `_localDrag` |
 | Snap (Ctrl) | `snap.ts` (`instAABB`/`snapDelta`), `_applySnap`, host `siblingInstances` |
 | Floor ẩn | `_hiddenFloors`, `_setFloorHidden`, `_floorCtx`, ctx `isFloorHidden`/`setFloorHidden`, lõi `renderBuildingState` arg `hiddenFloors` |
+| Shape lồng (auto đục lỗ) | lõi render `nestedOpenings` (khối nhỏ GỌN trong lớn → khoét nền/slab lớn), `instWorldAABB`, `makeSlabWithHoles(ocx,ocz)` |
 | Focus | `ctx.registerFocus` (ctx), `_focusAnchors`, `_focusKey`, `_focusGuiFor` |
 | Mode | `_setMoveMode`/`_setPaintMode`/`_setPickMode` (loại trừ nhau) |

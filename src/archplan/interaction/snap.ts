@@ -8,9 +8,7 @@
  *   const { dx, dz } = snapDelta(instAABB(drag), sibs.map(instAABB), FLUSH, ALIGN) // Δ mét → cộng vào posX/posZ
  */
 
-import { computeLocalBbox } from 'building-kit/build'
-
-import type { ShapeInstance } from '../state/state'
+import { instWorldAABB } from 'building-kit/build'
 
 // AABB MẶT NGOÀI 1 khối trong world (mét). rotY ∈ {0,90,180,270} → luôn axis-aligned.
 export interface AABB {
@@ -20,18 +18,8 @@ export interface AABB {
   maxZ: number
 }
 
-// World AABB MẶT NGOÀI: bbox tim-tường (computeLocalBbox) nới wallDepth/2 mỗi phía → 2 khối hít nhau = MẶT
-// ngoài chạm (không z-fight, không chồng tường). 90/270 hoán w↔d. Tâm = posX/posZ.
-export function instAABB(inst: ShapeInstance): AABB {
-  const { w, d } = computeLocalBbox(inst)
-  const t = inst.wallDepth / 1000
-  const swap = inst.rotY === 90 || inst.rotY === 270
-  const hw = (swap ? d : w) / 2 + t / 2
-  const hd = (swap ? w : d) / 2 + t / 2
-  const cx = inst.posX / 1000
-  const cz = inst.posZ / 1000
-  return { minX: cx - hw, maxX: cx + hw, minZ: cz - hd, maxZ: cz + hd }
-}
+// instAABB = instWorldAABB ở LÕI (build.ts) — NGUỒN DUY NHẤT (né drift KI-001). Cùng dùng cho đục-lỗ-shape-lồng.
+export const instAABB = instWorldAABB
 
 const overlap = (aLo: number, aHi: number, bLo: number, bHi: number): boolean =>
   aLo < bHi && aHi > bLo
