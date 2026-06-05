@@ -14,7 +14,8 @@
     "paths": {
       "@/*": ["./src/*"],
       "threejs-modules/*": ["../threejs-modules/*"],
-      "building-kit/*": ["../threejs-modules/building/*"]
+      "building-kit/*": ["../threejs-modules/building/*"],
+      "assets/*": ["../../assets/*"]
     },
 
     "noEmit": true,

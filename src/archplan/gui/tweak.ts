@@ -1,8 +1,9 @@
 /**
  * VỊ TRÍ   — archplan/src/archplan/gui/tweak.ts
- * VAI TRÒ  — Panel "🎛️ Tinh chỉnh": nơi chỉnh THÔNG SỐ CHI TIẾT của decor/effect (cỏ 3D giờ; đá/effect sau).
- *            Mỗi element = 1 section. Tách riêng panel 🌳 Sân vườn (chỉ giữ on/off + nền/rào/lô).
- * LIÊN HỆ  — Dựng vào leftTools bởi ArchPlanLab._buildLeftTools. Đọc/ghi ctx.site.grass3d.
+ * VAI TRÒ  — 2 export: buildGrassTweak (bộ slider chi tiết cỏ — Lá đơn|Bụi cỏ, KHÔNG preview) dựng vào panel
+ *            PRODUCTION Garden ▸ Grass; setupLabBench (panel 🎛️ Lab = BÀN THÍ NGHIỆM, giữ 🔎 preview WebGPU).
+ *            Quy trình: dựng vật thể mới bằng slider + soi preview ở Lab → xong thì control "tốt nghiệp" sang panel dùng.
+ * LIÊN HỆ  — buildGrassTweak gọi từ gui/site.ts (Garden ▸ Grass); setupLabBench + GrassPreview từ ArchPlanLab. Đọc/ghi ctx.site.grass3d.
  *
  * 2 đường cập nhật (né recompile NodeMaterial):
  *   • Structural (mật độ/cao/rộng lá) → dựng lại KHI BUÔNG: ctx.applySite(true). liveDrag=false.
@@ -279,20 +280,10 @@ const L2_CLASSES = {
   active: 'ap-tab-active',
 }
 
-// Panel "🎛️ Tinh chỉnh" — TAB cấp 1: "Lá đơn" | "Bụi cỏ". Trong "Lá đơn" có TAB cấp 2 (bg sáng hơn =
-// lồng cấp): "Số đo" | "Độ cong" | "Bóng đổ". Trả { panel, previewHost, tabs[] }: cả 2 cấp để caller dispose.
-export function setupTweakPanel(
-  ctx: APGuiCtx,
-  container: Element | null
-): { panel: HTMLElement; previewHost: HTMLElement; tabs: Tabs[] } {
-  const p = document.createElement('div')
-  p.className = 'ap-scan-panel ap-tweak-panel'
-  const ttl = document.createElement('div')
-  ttl.className = 'ap-scan-title'
-  ttl.textContent = '🌿 Cỏ 3D'
-  const body = document.createElement('div')
-  body.className = 'ap-tweak-body' // flex column → đẩy preview xuống đáy panel (margin-top:auto)
-
+// Dựng bộ slider chi tiết cỏ vào `host`: TAB cấp1 "Lá đơn" | "Bụi cỏ"; "Lá đơn" có TAB cấp2 (bg sáng hơn =
+// lồng cấp) "Số đo" | "Độ cong" | "Bóng đổ". KHÔNG kèm preview (preview ở tab Lab). Trả Tabs[] (cả 2 cấp)
+// cho caller dispose. Dùng ở panel PRODUCTION Garden ▸ Grass — sau khi cỏ đã "tốt nghiệp" khỏi bàn Lab.
+export function buildGrassTweak(ctx: APGuiCtx, host: HTMLElement): Tabs[] {
   // "Lá đơn" = 3 tab cấp 2 (Số đo | Độ cong | Bóng đổ).
   const bladeSub = document.createElement('div')
   const measureSub = document.createElement('div')
@@ -308,11 +299,7 @@ export function setupTweakPanel(
   const clumpSub = document.createElement('div') // tab "Bụi cỏ"
   buildClumpControls(clumpSub, ctx)
 
-  const previewHost = document.createElement('div')
-  previewHost.className = 'ap-preview-host' // 🔎 preview — đáy body, NGOÀI tab (luôn hiện)
-  body.append(bladeSub, clumpSub, previewHost)
-  p.append(ttl, body)
-  container?.appendChild(p)
+  host.append(bladeSub, clumpSub)
 
   const innerTabs = new Tabs(
     bladeSub,
@@ -324,12 +311,35 @@ export function setupTweakPanel(
     { classes: L2_CLASSES, injectCss: false }
   )
   const outerTabs = new Tabs(
-    body,
+    host,
     [
       { label: 'Lá đơn', panel: bladeSub, title: 'Hình dáng 1 lá' },
       { label: 'Bụi cỏ', panel: clumpSub, title: 'Gộp lá thành cụm' },
     ],
     { classes: L1_CLASSES, injectCss: false }
   )
-  return { panel: p, previewHost, tabs: [innerTabs, outerTabs] }
+  return [innerTabs, outerTabs]
+}
+
+// Panel "🎛️ Lab" — BÀN THÍ NGHIỆM: giữ 🔎 preview WebGPU render ĐÚNG 1 vật thể đang dựng (giờ: cỏ). Quy
+// trình: thêm slider + soi preview để tạo vật thể; xong → CHUYỂN control sang panel dùng (vd Garden ▸ Grass),
+// preview Ở LẠI Lab cho vật thể kế. Trả { panel, previewHost } cho ArchPlanLab gắn GrassPreview.
+export function setupLabBench(container: Element | null): {
+  panel: HTMLElement
+  previewHost: HTMLElement
+} {
+  const p = document.createElement('div')
+  p.className = 'ap-scan-panel ap-tweak-panel ap-lab-panel'
+  const ttl = document.createElement('div')
+  ttl.className = 'ap-scan-title'
+  ttl.textContent = '🧪 Lab — bàn thí nghiệm'
+  const note = document.createElement('div')
+  note.className = 'ap-lab-note'
+  note.textContent =
+    'Preview vật thể đang dựng. Tinh chỉnh xong → chuyển control sang panel dùng (vd Garden ▸ Grass).'
+  const previewHost = document.createElement('div')
+  previewHost.className = 'ap-preview-host' // 🔎 preview WebGPU — luôn hiện trong Lab
+  p.append(ttl, note, previewHost)
+  container?.appendChild(p)
+  return { panel: p, previewHost }
 }

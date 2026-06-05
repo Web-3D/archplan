@@ -761,7 +761,10 @@
 .ap-scan-panel.ap-tweak-panel,
 .ap-scan-panel.ap-preview-panel {
   width: 132px;
-  font: 9px/1.6 'Segoe UI', system-ui, sans-serif;
+  font:
+    9px/1.6 'Segoe UI',
+    system-ui,
+    sans-serif;
 }
 .ap-scan-panel.ap-ground-panel .ap-scan-title,
 .ap-scan-panel.ap-site-panel .ap-scan-title,
@@ -785,7 +788,10 @@
 .ap-ground-sel {
   width: 100%;
   box-sizing: border-box;
-  font: 9px/1.4 'Segoe UI', system-ui, sans-serif;
+  font:
+    9px/1.4 'Segoe UI',
+    system-ui,
+    sans-serif;
   color: #dce6f2;
   background: #1c2f6b;
   border: 1px solid #2a4d9b;
@@ -805,7 +811,10 @@
   border: 1px solid #2a4d9b;
   border-radius: 3px;
   background: #11214d;
-  font: 9px/1.5 'Segoe UI', system-ui, sans-serif;
+  font:
+    9px/1.5 'Segoe UI',
+    system-ui,
+    sans-serif;
   color: #aab8d4;
 }
 .ap-site-readout div {
@@ -1372,6 +1381,131 @@
   color: #c9a877; /* nâu nhạt */
   opacity: 0.75;
 }
+/* ── 🌿 Garden domain: bộ màu CURATED (OKLCH green ramp, NgQuan 2026-06-05) thay tông nâu site. LỒNG CẤP
+   bg-1→bg-4 (mỗi BẬC sáng dần → thấy lồng): domain bg-1 ▸ L2 Grass|Tree bg-2 ▸ L3 Lá đơn|Bụi cỏ bg-3 ▸
+   L4 Số đo|Độ cong|Bóng đổ bg-4. accent vàng-chanh = thumb/checkbox; text kem-xanh. (mirror .ap-water-domain) */
+.ap-garden-domain {
+  --gd-bg-1: #0f2417; /* background — nền tối nhất (domain) */
+  --gd-bg-2: #1b3d26; /* surface — L2 Grass|Tree panel + tab active */
+  --gd-bg-3: #2c5c36; /* surface — L3 Lá đơn|Bụi cỏ panel + tab active */
+  --gd-bg-4: #4a8049; /* surface — L4 Số đo|Độ cong|Bóng đổ + viền + track */
+  --gd-bg-5: #84b85c; /* highlight — chữ tab inactive + hover */
+  --gd-accent: #c7d94a; /* accent vàng-chanh — thumb slider + checkbox */
+  --gd-text: #e8f2dc; /* text kem-xanh */
+  background: var(--gd-bg-1); /* đè nền nâu .ap-site-sub khi tab Garden active */
+  color: var(--gd-text);
+}
+/* L2 — Grass | Tree (folder-style: tab active = bg-2 = panel → dính liền khối). */
+.ap-garden-tabs {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 0;
+  padding-left: 2px;
+}
+.ap-garden-tabs > .ap-tab-btn {
+  flex: 1 1 0; /* 2 tab chia đều bề ngang */
+  max-width: none;
+  height: 20px;
+  font-size: 9px;
+  background: var(--gd-bg-1); /* inactive = nền domain → chìm */
+  border-color: var(--gd-bg-4);
+  color: var(--gd-bg-5); /* xanh sáng */
+}
+.ap-garden-tabs > .ap-tab-btn.ap-tab-active {
+  background: var(--gd-bg-2); /* = garden-sub → dính liền khối */
+  border-color: var(--gd-bg-4);
+  border-bottom-color: transparent; /* nuốt seam */
+  color: var(--gd-text);
+}
+.ap-garden-sub {
+  background: var(--gd-bg-2, #1b3d26); /* L2 panel (Grass/Tree content) */
+  padding: 6px;
+}
+/* L3 — Lá đơn | Bụi cỏ (.ap-tweak-tabs lồng trong Grass) → bg-3. Scope .ap-garden-domain đè bộ rêu global. */
+.ap-garden-domain .ap-tweak-tabs > .ap-tab-btn {
+  background: var(--gd-bg-2);
+  border-color: var(--gd-bg-4);
+  color: var(--gd-bg-5);
+}
+.ap-garden-domain .ap-tweak-tabs > .ap-tab-btn.ap-tab-active {
+  background: var(--gd-bg-3);
+  border-color: var(--gd-bg-4);
+  border-bottom-color: transparent;
+  color: var(--gd-text);
+}
+.ap-garden-domain .ap-tweak-sub {
+  background: var(--gd-bg-3);
+}
+/* L4 — Số đo | Độ cong | Bóng đổ (.ap-tweak-tabs2) → bg-4 (sáng nhất → lồng cấp rõ). */
+.ap-garden-domain .ap-tweak-tabs2 > .ap-tab-btn {
+  background: var(--gd-bg-3);
+  border-color: var(--gd-bg-4);
+  color: var(--gd-bg-5);
+}
+.ap-garden-domain .ap-tweak-tabs2 > .ap-tab-btn.ap-tab-active {
+  background: var(--gd-bg-4);
+  border-color: var(--gd-bg-5);
+  border-bottom-color: transparent;
+  color: var(--gd-text);
+}
+.ap-garden-domain .ap-tweak-sub2 {
+  background: var(--gd-bg-4);
+}
+/* input cỏ trong garden → tông xanh (đè bộ nâu .ap-scan-panel.ap-site-panel input...; mirror water domain). */
+.ap-site-panel .ap-garden-domain input[type='range'] {
+  background: var(--gd-bg-5); /* track xanh sáng → nổi trên panel bg-3/4 */
+  border-radius: 3px;
+}
+.ap-site-panel .ap-garden-domain input[type='range']::-webkit-slider-thumb {
+  background: var(--gd-accent); /* thumb vàng-chanh nổi trên track */
+}
+.ap-site-panel .ap-garden-domain input[type='checkbox'] {
+  accent-color: var(--gd-accent);
+}
+.ap-garden-domain .ap-num-input {
+  color: var(--gd-text);
+  background: var(--gd-bg-1);
+  border-color: var(--gd-bg-4);
+}
+.ap-garden-domain .ap-site-empty {
+  color: var(--gd-bg-5); /* placeholder Tree → xanh nhạt thay nâu */
+}
+/* 🌿 Nút tab Garden (con thứ 3: Ground·Fence·Garden·Water) → tông xanh curated. var --gd-* KHÔNG tới đây
+   (tab NGOÀI .ap-garden-domain) → hex literal. Active = bg-1 = nền garden domain → dính liền. */
+.ap-site-tabs > .ap-tab-btn:nth-child(3) {
+  background: rgba(15, 36, 23, 0.4); /* bg-1 mờ */
+  border-color: rgba(74, 128, 73, 0.5); /* bg-4 */
+  color: #84b85c; /* bg-5 xanh nhạt */
+}
+.ap-site-tabs > .ap-tab-btn:nth-child(3):hover {
+  border-color: #84b85c; /* bg-5 */
+}
+.ap-site-tabs > .ap-tab-btn:nth-child(3).ap-tab-active {
+  background: #0f2417; /* bg-1 = nền garden domain → dính liền */
+  border-color: rgba(74, 128, 73, 0.7);
+  border-bottom-color: transparent;
+  color: #e8f2dc; /* text */
+}
+/* ── 🎛️ Lab = bàn thí nghiệm: nền TRẮNG (theo yêu cầu) — như trang giấy lab; preview WebGPU nổi giữa. ── */
+.ap-drawer .ap-lab-panel {
+  background: #f5f7f5; /* gần trắng (giảm chói trên drawer tối) */
+  border-color: #c7cdc9;
+  color: #2a322c; /* chữ tối trên nền sáng */
+}
+.ap-drawer .ap-lab-panel .ap-scan-title {
+  color: #3a4a3e; /* tiêu đề tối */
+}
+.ap-lab-note {
+  font-size: 9px;
+  line-height: 1.4;
+  color: #5a665c; /* xám-xanh nhạt */
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px dashed #cdd4cf;
+}
+.ap-drawer .ap-lab-panel .ap-preview-host {
+  margin-top: 0; /* preview ngay dưới note (không dồn đáy) */
+}
 /* ── 🎛️ Tinh chỉnh: BẬC TAB con (Lá đơn | Bụi cỏ) — folder-style như Ground, tông XANH RÊU hợp cỏ. ── */
 .ap-tweak-tabs {
   display: flex;
@@ -1433,7 +1567,10 @@
   box-sizing: border-box;
   text-align: right;
   padding: 1px 3px;
-  font: 9px/1.3 'Segoe UI', system-ui, sans-serif;
+  font:
+    9px/1.3 'Segoe UI',
+    system-ui,
+    sans-serif;
   border-radius: 3px;
 }
 .ap-mm-input::-webkit-inner-spin-button,
@@ -1805,7 +1942,10 @@
 }
 .ap-scan-panel.ap-tools-panel {
   width: 138px;
-  font: 9px/1.5 'Segoe UI', system-ui, sans-serif;
+  font:
+    9px/1.5 'Segoe UI',
+    system-ui,
+    sans-serif;
 }
 /* Surface (trên cùng): hàng ô tick + symbol, chia đều. */
 .ap-surface-row {

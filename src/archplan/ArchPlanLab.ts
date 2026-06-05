@@ -18,6 +18,13 @@
 
 import './archplan-lab.css'
 
+// 🌱 Texture ground 'grass-tex' = Uncut Grass (assets/textures/uncut-grass). Manifest cho tileSizeMeters;
+// ?url cho từng map (Vite serve qua alias 'assets' + fs.allow). Loader chọn KTX2/Texture theo đuôi file.
+import grassManifest from 'assets/textures/uncut-grass/meta.json'
+import grassAoUrl from 'assets/textures/uncut-grass/production/ao.jpg?url'
+import grassBaseColorUrl from 'assets/textures/uncut-grass/production/basecolor.jpg?url'
+import grassNormalUrl from 'assets/textures/uncut-grass/production/normal.jpg?url'
+import grassRoughnessUrl from 'assets/textures/uncut-grass/production/roughness.jpg?url'
 import { computeLocalBbox } from 'building-kit/build' // footprint nhà (m²) cho bảng số liệu lô
 import { renderBuildingState } from 'building-kit/render/fromState' // renderer chung lõi (Phase 1b)
 import { makeSurfaceMaterial, WallMaterialCache } from 'building-kit/wallMaterials' // material engine
@@ -33,6 +40,7 @@ import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
 import { AsphaltGround } from 'threejs-modules/shaders/ground/AsphaltGround'
+import type { PhotoGroundMaps } from 'threejs-modules/shaders/ground/PhotoGround' // 🌱 bộ map ground texture
 import {
   buildSiteGrass,
   grassBuildSig,
@@ -40,6 +48,7 @@ import {
   renderSiteState,
   siteGrassExclude,
   type SiteRenderCtx,
+  type SiteRenderOpts,
   waterPolygons,
 } from 'threejs-modules/site/render/fromState'
 import {
@@ -50,15 +59,15 @@ import {
   type SiteState,
   type WaterConfig,
 } from 'threejs-modules/site/state'
-import { Tabs } from 'threejs-modules/ui/Tabs' // 🗂️ tab ngang drawer (Building|Ground|Tinh chỉnh)
+import { Tabs } from 'threejs-modules/ui/Tabs' // 🗂️ tab ngang drawer (🏠 Building | 🌳 Ground | 🎛️ Lab)
 import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
 import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
 
 import { DevHud } from './gui/devhud' // perf HUD dev (fps/budget/leak) — tách monolith
-import { GrassPreview } from './gui/grass-preview' // 🔎 preview 1 lá cỏ cạnh Tinh chỉnh
+import { GrassPreview } from './gui/grass-preview' // 🔎 preview 1 lá cỏ — host trong tab 🎛️ Lab
 import { type APGuiCtx, setupGUI, setupToolsPanel } from './gui/gui'
-import { setupSitePanel } from './gui/site' // 🌳 panel sân vườn (site/lô)
-import { setupTweakPanel } from './gui/tweak' // 🎛️ tinh chỉnh decor (cỏ 3D, sau: đá/effect)
+import { setupSitePanel } from './gui/site' // 🌳 panel sân vườn (site/lô + Garden ▸ Grass = slider cỏ 3D)
+import { setupLabBench } from './gui/tweak' // 🎛️ Lab = bàn thí nghiệm: giữ 🔎 preview WebGPU 1 vật thể
 import { type HighlightHost, HighlightOverlay } from './interaction/highlight' // flash viền phần đang chỉnh — tách monolith
 import { type ManipulateHost, ManipulateTool } from './interaction/manipulate' // 🤚 Move + 🎯 Focus — tách monolith
 import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 khay swatch atelier — tách monolith
@@ -70,6 +79,11 @@ import {
   HumanFigure,
   type SunOpts,
 } from './scene/scene'
+import {
+  disposeSurfaceTextureSet,
+  loadSurfaceTextureSet,
+  type SurfaceTextureSpec,
+} from './scene/texture-set' // 🌱 loader texture set ground theo PROTOCOL (KTX2/JPG theo đuôi file)
 import { DesignStore } from './state/persistence' // I/O save/load/autosave/export — tách monolith
 import {
   type BuildingState,
@@ -127,13 +141,12 @@ export class ArchPlanLab extends BaseWorld {
   private state: BuildingState = defaultBuildingState()
   private gui: GUI | null = null
   private leftTools: HTMLElement | null = null // wrapper xếp scanner + sun panel thành cột
-  private drawer: HTMLElement | null = null // 🗄️ drawer phải (shell bền qua rebuild): nhà + Sân vườn + Tinh chỉnh
+  private drawer: HTMLElement | null = null // 🗄️ drawer phải (shell bền qua rebuild): nhà + Sân vườn + Lab (bench/preview)
   private drawerBody: HTMLElement | null = null // cột cuộn trong drawer — gui + panels dựng vào đây
-  private drawerTabs: Tabs | null = null // tab ngang đầu drawer (Building | Ground | Tinh chỉnh)
-  private _siteDispose: (() => void) | null = null // teardown tab CON panel Ground (outer + Water domain dynamic Pl/Pd/Pe)
+  private drawerTabs: Tabs | null = null // tab ngang đầu drawer (🏠 Building | 🌳 Ground | 🎛️ Lab)
+  private _siteDispose: (() => void) | null = null // teardown tab CON panel Ground (outer + Garden domain + Water domain)
   private _siteNavigate: ((cfg: WaterConfig) => boolean) | null = null // click hồ 3D → nhảy GUI tới tab hồ đó
-  private tweakTabs: Tabs[] = [] // tab CON panel Tinh chỉnh: cấp 1 (Lá đơn|Bụi cỏ) + cấp 2 (Số đo|Độ cong|Bóng đổ)
-  private drawerPanels: HTMLElement[] = [] // panel non-gui trong drawer (Ground+Tinh chỉnh) — gỡ khi teardown
+  private drawerPanels: HTMLElement[] = [] // panel non-gui trong drawer (Ground + Lab) — gỡ khi teardown
   private _drawerTab = 0 // tab drawer đang mở — nhớ qua _rebuildGUI
   private lDrawer: HTMLElement | null = null // drawer TRÁI: bảng Tools (Surface+tọa độ) — ẩn mặc định
   private lDrawerBody: HTMLElement | null = null
@@ -228,6 +241,10 @@ export class ArchPlanLab extends BaseWorld {
   // Chữ ký SITE (nền/nước/rào, BỎ grass3d — cỏ quản riêng). Kéo NHÀ đổi `state` chứ KHÔNG đổi `site` →
   // sig giữ nguyên → KHÔNG dựng lại reflector RTT mỗi frame (trị leak/tụt-fps lúc kéo nhà). '' = chưa dựng.
   private _siteSig = ''
+  // 🌱 Ground texture (PhotoGround) — load ASYNC 1 lần, cache lab-lifetime (rebuild tái dùng, không re-load).
+  // Texture do LAB sở hữu (PhotoGround.dispose không đụng) → disposeSurfaceTextureSet ở onDispose.
+  private _groundTex: PhotoGroundMaps | null = null
+  private _groundTexLoading = false
   // 💧 Hồ ĐANG SỐNG (đa-instance): cfg↔surf zip theo renderWaters(site). _activeWater = pool của tab đang
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
@@ -809,6 +826,8 @@ export class ArchPlanLab extends BaseWorld {
   private _disposeSceneResources(): void {
     this._siteGrass?.dispose() // 🌿 cỏ ở group bền (ngoài _clearSite) → dispose tường minh lúc teardown
     this._siteGrass = null
+    disposeSurfaceTextureSet(this._groundTex) // 🌱 ground texture (lab sở hữu — PhotoGround.dispose không đụng)
+    this._groundTex = null
     this.wallMats.dispose() // dispose + clear toàn bộ material cache + brick textures
     this._disposeEnvironment()
     this._disposeGround()
@@ -1204,31 +1223,31 @@ export class ArchPlanLab extends BaseWorld {
     this.lDrawerBody = body
   }
 
-  // TRONG drawer: 3 panel (Building=gui nhà · Ground=lô · Tinh chỉnh) là CON TRỰC TIẾP drawerBody →
-  // Tabs ngang quản lý (ẩn/hiện). NGOÀI drawer: float góc trái (Scanner/Sun/Ground/Move/Palette).
+  // TRONG drawer: 3 panel (Building=gui nhà · Ground=lô+cỏ-cây+nước · Lab=bàn thí nghiệm/preview) là CON
+  // TRỰC TIẾP drawerBody → Tabs ngang quản lý (ẩn/hiện). Slider cỏ ở Ground ▸ Garden ▸ Grass; 🔎 preview
+  // Ở LẠI tab Lab. NGOÀI drawer: float góc trái (Scanner/Sun/Ground/Move/Palette).
   private _buildLeftTools(ctx: APGuiCtx, drawerBody: HTMLElement): void {
-    const site = setupSitePanel(ctx, drawerBody) // 🌳 Ground: sub-tab Ground|Fence|Tree|Water → { panel, dispose, navigateToWater }
+    const site = setupSitePanel(ctx, drawerBody) // 🌳 Ground: sub-tab Ground|Fence|Garden|Water → { panel, dispose, navigateToWater }
     this._siteDispose = site.dispose
     this._siteNavigate = site.navigateToWater // refresh mỗi _rebuildGUI (panel dựng lại) → luôn trỏ panel hiện tại
-    const tweak = setupTweakPanel(ctx, drawerBody) // 🎛️ Tinh chỉnh — { panel, previewHost, tabs }
-    this.tweakTabs = tweak.tabs // tab con: cấp 1 (Lá đơn|Bụi cỏ) + cấp 2 (Số đo|Độ cong|Bóng đổ)
-    this.preview = new GrassPreview(tweak.previewHost) // 🔎 preview 1 lá/bụi GỘP trong panel Tinh chỉnh
+    const lab = setupLabBench(drawerBody) // 🎛️ Lab = bàn thí nghiệm — { panel, previewHost }
+    this.preview = new GrassPreview(lab.previewHost) // 🔎 preview 1 lá/bụi — host Ở LẠI tab Lab
     void this.preview.init().then(() => this._previewRebuild())
-    this.drawerPanels = [site.panel, tweak.panel] // gỡ khi teardown (gui.domElement do gui.destroy lo)
-    this._buildDrawerTabs(drawerBody, site.panel, tweak.panel)
+    this.drawerPanels = [site.panel, lab.panel] // gỡ khi teardown (gui.domElement do gui.destroy lo)
+    this._buildDrawerTabs(drawerBody, site.panel, lab.panel)
     this._buildFloatingTools(ctx)
   }
 
-  // Tab ngang đầu drawer: Building | Ground | Tinh chỉnh — tái dùng Tabs + ap-tab CSS, nhớ tab active.
-  private _buildDrawerTabs(host: HTMLElement, ground: HTMLElement, tweak: HTMLElement): void {
+  // Tab ngang đầu drawer: 🏠 Building | 🌳 Ground | 🎛️ Lab — tái dùng Tabs + ap-tab CSS, nhớ tab active.
+  private _buildDrawerTabs(host: HTMLElement, ground: HTMLElement, lab: HTMLElement): void {
     const guiEl = this.gui?.domElement
     if (!guiEl) return
     this.drawerTabs = new Tabs(
       host,
       [
         { label: '🏠 Building', panel: guiEl, title: 'Điều khiển nhà' },
-        { label: '🌳 Ground', panel: ground, title: 'Nền / rào / lô (sân vườn)' },
-        { label: '🎛️ Lab', panel: tweak, title: 'Cỏ 3D…' },
+        { label: '🌳 Ground', panel: ground, title: 'Nền / rào / lô / cỏ-cây / nước' },
+        { label: '🎛️ Lab', panel: lab, title: 'Bàn thí nghiệm — preview vật thể (cỏ…)' },
       ],
       {
         initial: this._drawerTab,
@@ -1344,11 +1363,10 @@ export class ArchPlanLab extends BaseWorld {
     this._siteDispose?.() // gỡ tab CON panel Ground: outer (Ground|Fence|Tree|Water) + Water domain (Pl/Pd/Pe)
     this._siteDispose = null
     this._siteNavigate = null // panel cũ gỡ → bỏ ref navigate (gắn lại ở _buildLeftTools kế tiếp)
-    for (const t of this.tweakTabs) t.dispose() // gỡ cả 2 cấp tab panel Tinh chỉnh
-    this.tweakTabs = []
+    // tab con cỏ (Lá đơn|Bụi cỏ + Số đo|Độ cong|Bóng đổ) + Garden Tabs do site.dispose() lo; Lab panel = preview-only (no Tabs)
     this.drawerTabs?.dispose() // gỡ tab bar drawer (KHÔNG đụng panel — caller sở hữu)
     this.drawerTabs = null
-    for (const p of this.drawerPanels) p.remove() // Ground + Tinh chỉnh (con trực tiếp drawerBody)
+    for (const p of this.drawerPanels) p.remove() // Ground + Lab (con trực tiếp drawerBody)
     this.drawerPanels = []
     this.gui?.destroy()
     this.gui = null
@@ -1649,7 +1667,18 @@ export class ArchPlanLab extends BaseWorld {
       mats: this.siteMats,
       shaders: this.siteShaders,
     }
-    const h = renderSiteState(this.site, ctx, { skipGrass: true }) // cỏ do _syncGrass quản riêng (group bền)
+    // ground 'grass-tex' (PhotoGround): bơm texture đã-load. Chưa load → kick-off ASYNC (_ensureGroundTex) +
+    // tạm rơi xuống màu phẳng preset; load xong tự re-render. cỏ do _syncGrass quản riêng (skipGrass).
+    const opts: SiteRenderOpts = { skipGrass: true }
+    if (this.site.ground === 'grass-tex') {
+      if (this._groundTex) {
+        opts.groundTextures = this._groundTex
+        opts.groundTileMeters = grassManifest.tileSizeMeters
+      } else {
+        this._ensureGroundTex()
+      }
+    }
+    const h = renderSiteState(this.site, ctx, opts)
     // zip cfg↔surf: h.waters = [hồ LÕM (renderWaters) ... rồi VŨNG phẳng (renderPuddles)] — ĐÚNG thứ tự lõi
     // dựng → ghép lại để drag/tune/handle nhắm đúng instance (gồm cả puddle).
     const wcfgs = [...renderWaters(this.site), ...renderPuddles(this.site)]
@@ -1662,6 +1691,31 @@ export class ArchPlanLab extends BaseWorld {
     this._rebuildWaterHandles() // 💧 handle đỉnh theo hồ active mới (free + moveMode)
     this._rebuildEditorGround() // 🕳️ khoét lỗ hồ vào nền backdrop editor → không che đáy basin
     this._rebuildGrid() // 🕳️ khoét lưới y=0 theo bbox hồ → hết sọc lưới đè lên lòng hồ
+  }
+
+  // 🌱 Load texture set ground 'grass-tex' (Uncut Grass) 1 lần, ASYNC. colorSpace theo PROTOCOL
+  // (baseColor=srgb, normal/rough/ao=linear). Xong → cache + invalidate siteSig + re-render (nền hiện
+  // texture thay màu phẳng tạm). Guard _groundTexLoading né load chồng. Lỗi → giữ fallback màu phẳng.
+  private _ensureGroundTex(): void {
+    if (this._groundTex || this._groundTexLoading) return
+    this._groundTexLoading = true
+    const spec: SurfaceTextureSpec = {
+      baseColor: { url: grassBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: grassNormalUrl, colorSpace: 'linear' },
+      roughness: { url: grassRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: grassAoUrl, colorSpace: 'linear' },
+    }
+    loadSurfaceTextureSet(spec, this.renderer)
+      .then((maps) => {
+        this._groundTex = maps
+        this._groundTexLoading = false
+        this._siteSig = '' // ép _rebuildSite chạy lại với texture đã có
+        this._renderSite()
+      })
+      .catch((e: unknown) => {
+        this._groundTexLoading = false
+        console.warn('[ArchPlanLab] load ground texture lỗi — giữ màu phẳng:', e)
+      })
   }
 
   // 🌿 Dựng/GIỮ bãi cỏ theo chữ ký structural (grassBuildSig). Sig GIỐNG lần trước → giữ nguyên mesh,

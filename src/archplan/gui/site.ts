@@ -1,8 +1,9 @@
 /**
  * VỊ TRÍ   — archplan/src/archplan/gui/site.ts
  * VAI TRÒ  — Panel "🌳 Ground" (drawer tab): sửa SiteState. CHIA BẬC TAB con: "Ground" (SURFACE vật liệu
- *            nền/lô + bảng coverage) · "Fence" (hàng rào) · "Tree" (THỰC VẬT 3D: cỏ-3D độc lập surface +
- *            cây sắp có) · "Water" (tông XANH curated --wt-*, tách tông nâu Ground). Nhãn TOÀN tiếng Anh.
+ *            nền/lô + bảng coverage) · "Fence" (hàng rào) · "Garden" (THỰC VẬT 3D — lồng BẬC 2 Grass|Tree:
+ *            Grass = on/off + chi tiết cỏ + preview gom từ tab Lab cũ; Tree sắp có) · "Water" (tông XANH
+ *            curated --wt-*, tách tông nâu Ground). Nhãn TOÀN tiếng Anh.
  *            WATER LỒNG NHIỀU BẬC: Pool|Pond|Puddle (bậc2) ▸ Pl/Pd/Pe instance +＋ (bậc3) ▸ Pool edge|Surface|
  *            Bottom (bậc4) ▸ Bottom: Floor|Walls (bậc5). Slider input=live, change/select/toggle=commit.
  * LIÊN HỆ  — Dựng vào drawerBody bởi ArchPlanLab._buildLeftTools (con của drawer Tabs). Sub-tab = Tabs
@@ -27,6 +28,7 @@ const MATERIAL_OPTS: [string, WaterMaterialKey][] = [
 const EDGE_MAT_OPTS: [string, WaterMaterialKey][] = [['None', 'none']]
 
 import type { APGuiCtx } from './ctx'
+import { buildGrassTweak } from './tweak' // 🌿 slider chi tiết cỏ — DỜI vào Garden ▸ Grass (preview ở lại tab Lab)
 
 // onChange(value, commit): commit=false khi kéo (live), true khi buông/đổi select/tick.
 type RowChange = (value: number, commit: boolean) => void
@@ -187,7 +189,8 @@ function buildGroundControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => vo
     })
   )
   const groundOpts: [string, GroundMaterialKey][] = [
-    ['Grass', 'grass'],
+    ['Grass (procedural)', 'grass'],
+    ['Photo grass (Uncut)', 'grass-tex'],
     ['Soil', 'soil'],
     ['Gravel', 'gravel'],
   ]
@@ -240,7 +243,7 @@ function buildLotSliders(body: HTMLElement, ctx: APGuiCtx, refresh: () => void):
 }
 
 // Cỏ 3D nhú lên (tier B — GrassBlades): LỚP THỰC VẬT độc lập surface — mọc trên nền BẤT KỲ (grass/soil/
-// gravel). Chỉ on/off ở đây; thông số chi tiết → panel 🎛️ Tinh chỉnh. Nằm ở tab "Tree" (không phải Ground).
+// gravel). Ô stick on/off; thông số chi tiết ngay dưới (setupTweakPanel). Nằm ở tab Garden ▸ Grass.
 function buildGrass3dControls(body: HTMLElement, ctx: APGuiCtx): void {
   const g = ctx.site.grass3d
   body.appendChild(
@@ -249,6 +252,54 @@ function buildGrass3dControls(body: HTMLElement, ctx: APGuiCtx): void {
       ctx.applySite(true)
     })
   )
+}
+
+// Sub-tab "Garden" → BẬC 2 nested tab "Grass" | "Tree" (folder-style). Grass = ô stick bật/tắt 3D grass +
+// bộ slider chi tiết cỏ (Lá đơn|Bụi cỏ — CHUYỂN từ Lab; preview Ở LẠI Lab). Tree = placeholder cây. Trả
+// { panel, dispose }: dispose gỡ nested Tabs + grass Tabs.
+function buildGardenDomain(ctx: APGuiCtx): {
+  panel: HTMLElement
+  dispose: () => void
+} {
+  const gardenSub = document.createElement('div')
+  gardenSub.classList.add('ap-garden-domain')
+
+  // "Grass": ô stick bật/tắt + bộ slider chi tiết cỏ (Số đo/Độ cong/Bóng đổ/Bụi cỏ). KHÔNG preview (ở Lab).
+  const grassPanel = document.createElement('div')
+  buildGrass3dControls(grassPanel, ctx) // 🌿 ô stick bật/tắt 3D grass (DỜI từ tab Tree cũ)
+  const grassTabs = buildGrassTweak(ctx, grassPanel) // slider chi tiết cỏ (CHUYỂN từ tab Lab)
+
+  // "Tree": placeholder cây 3D (sắp có).
+  const treePanel = document.createElement('div')
+  const treeNote = document.createElement('div')
+  treeNote.className = 'ap-site-empty'
+  treeNote.textContent = '🌲 Trees — coming soon'
+  treePanel.appendChild(treeNote)
+
+  gardenSub.append(grassPanel, treePanel)
+  const tabs = new Tabs(
+    gardenSub,
+    [
+      { label: 'Grass', panel: grassPanel, title: '3D grass — bật/tắt + chi tiết lá/bụi' },
+      { label: 'Tree', panel: treePanel, title: 'Cây 3D (sắp có)' },
+    ],
+    {
+      classes: {
+        bar: 'ap-tab-bar ap-garden-tabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-garden-sub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+    }
+  )
+  return {
+    panel: gardenSub,
+    dispose: (): void => {
+      tabs.dispose()
+      for (const t of grassTabs) t.dispose() // gỡ tab cỏ (Lá đơn|Bụi cỏ + Số đo|Độ cong|Bóng đổ)
+    },
+  }
 }
 
 // Seed 4 góc polygon từ chữ nhật width×depth (mm, local) khi chuyển Rect → Free (để kéo đỉnh tiếp).
@@ -759,12 +810,12 @@ function buildWaterDomain(ctx: APGuiCtx): {
   }
 }
 
-// Hàng tab con SITE (Ground|Fence|Tree|Water) — tách khỏi setupSitePanel cho rule-50.
+// Hàng tab con SITE (Ground|Fence|Garden|Water) — tách khỏi setupSitePanel cho rule-50.
 function makeSiteTabs(
   host: HTMLElement,
   ground: HTMLElement,
   fence: HTMLElement,
-  tree: HTMLElement,
+  garden: HTMLElement,
   water: HTMLElement
 ): Tabs {
   return new Tabs(
@@ -772,7 +823,7 @@ function makeSiteTabs(
     [
       { label: 'Ground', panel: ground, title: 'Surface material / lot' },
       { label: 'Fence', panel: fence, title: 'Fence' },
-      { label: 'Tree', panel: tree, title: '3D grass (any surface) + trees' },
+      { label: 'Garden', panel: garden, title: 'Grass (3D, any surface) + trees' },
       { label: 'Water', panel: water, title: 'Water: Pool / Pond / Puddle' },
     ],
     {
@@ -787,7 +838,8 @@ function makeSiteTabs(
   )
 }
 
-// Panel "🌳 Ground" (drawer tab) — chia BẬC TAB con "Ground" | "Fence" | "Tree" | "Water" (folder-style).
+// Panel "🌳 Ground" (drawer tab) — chia BẬC TAB con "Ground" | "Fence" | "Garden" | "Water" (folder-style).
+// "Garden" lồng BẬC 2 (Grass|Tree) — Grass = on/off + slider chi tiết cỏ (chuyển từ Lab; preview ở lại Lab).
 // Trả { panel, dispose, navigateToWater }: panel cho drawer Tabs; navigateToWater = click hồ 3D → mở tab hồ.
 export function setupSitePanel(
   ctx: APGuiCtx,
@@ -800,7 +852,7 @@ export function setupSitePanel(
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-site-panel'
 
-  // Sub-tab "Ground": SURFACE (vật liệu nền) + lô + bảng coverage. KHÔNG còn cỏ-3D (đã tách sang Tree).
+  // Sub-tab "Ground": SURFACE (vật liệu nền) + lô + bảng coverage. KHÔNG còn cỏ-3D (đã tách sang Garden).
   const groundSub = document.createElement('div')
   const { el: roEl, refresh } = readout(ctx)
   ctx.registerSiteReadout(refresh)
@@ -811,26 +863,23 @@ export function setupSitePanel(
   const fenceSub = document.createElement('div')
   buildFenceControls(fenceSub, ctx)
 
-  // Sub-tab "Tree": LỚP THỰC VẬT 3D độc lập surface — cỏ-3D (mọc nền bất kỳ) + cây (sắp có).
-  const treeSub = document.createElement('div')
-  buildGrass3dControls(treeSub, ctx)
-  const treeNote = document.createElement('div')
-  treeNote.className = 'ap-site-empty'
-  treeNote.textContent = '🌲 Trees — coming soon'
-  treeSub.appendChild(treeNote)
+  // Sub-tab "Garden": BẬC 2 (Grass|Tree) — Grass = ô stick + chi tiết cỏ + preview (gom từ tab Lab cũ).
+  const garden = buildGardenDomain(ctx)
+  const gardenSub = garden.panel
 
   // Sub-tab "Water": BẬC 2 (Pool|Pond|Puddle) — tông xanh nước curated, tách khỏi tông nâu Ground.
   const water = buildWaterDomain(ctx)
   const waterSub = water.panel
 
-  p.append(groundSub, fenceSub, treeSub, waterSub)
+  p.append(groundSub, fenceSub, gardenSub, waterSub)
   container?.appendChild(p)
 
-  const tabs = makeSiteTabs(p, groundSub, fenceSub, treeSub, waterSub)
+  const tabs = makeSiteTabs(p, groundSub, fenceSub, gardenSub, waterSub)
   return {
     panel: p,
     dispose: (): void => {
       tabs.dispose()
+      garden.dispose()
       water.dispose()
     },
     // Click hồ 3D → mở sub-tab "Water" (index 3) rồi ủy quyền water domain mở type+instance tab của cfg.

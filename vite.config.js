@@ -11,6 +11,7 @@ export default {
       '@': resolve(__dirname, 'src'),
       'threejs-modules': resolve(__dirname, '../threejs-modules'),
       'building-kit': resolve(__dirname, '../threejs-modules/building'), // shared building engine
+      assets: resolve(__dirname, '../../assets'), // shared 3D assets (textures…) — import ?url + meta.json
     },
   },
 
@@ -18,6 +19,7 @@ export default {
     host: true,
     port: 3002, // 3001 = Doraemon
     open: !('SANDBOX_URL' in process.env || 'CODESANDBOX_HOST' in process.env),
+    fs: { allow: [resolve(__dirname, '..'), resolve(__dirname, '../../assets')] }, // serve THREEJS/ (modules) + Engine/assets/
   },
 
   build: {

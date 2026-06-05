@@ -66,18 +66,20 @@ ArchPlanLab (extends BaseWorld)
   │
   ├── 🗄️ Drawer PHẢI (.ap-drawer) ← shell bền; cobalt trong suốt; Tabs ngang (mở tab nào cũng PHỦ KÍN drawer):
   │     ├── 🏠 Building            ← lil-gui (floors → instances → structure/roof/dims/walls)
-  │     ├── 🌳 Ground              ← BẬC TAB con Ground|Fence|Tree|Water folder-style (English; Ground/Fence/Tree tông NÂU,
-  │     │                            Water tông XANH NƯỚC curated --wt-* tách riêng); Ground=SURFACE vật liệu(grass/soil/gravel)+lô ·
-  │     │                            Tree=🌿 cỏ-3D ĐỘC LẬP surface (mọc nền bất kỳ)+cây sắp có · Water=💧 LỒNG NHIỀU BẬC (English):
-  │     │                            bậc2 Pool|Pond|Puddle ▸ bậc3 instance Pl/Pd/Pe + ＋ (đa-hồ site.waters[], instance mới enabled=false) ▸
+  │     ├── 🌳 Ground              ← BẬC TAB con Ground|Fence|Garden|Water folder-style (English; Ground/Fence tông NÂU,
+  │     │                            Garden tông XANH curated --gd-* + Water tông XANH NƯỚC --wt-* tách riêng); Ground=SURFACE vật liệu(grass/soil/gravel)+lô ·
+  │     │                            Garden=🌿 THỰC VẬT 3D, LỒNG BẬC 2 (Grass|Tree, palette --gd-* OKLCH green ramp bg-1→bg-5): Grass = ô on/off
+  │     │                            cỏ-3D (mọc nền bất kỳ) + SLIDER chi tiết cỏ (CHUYỂN từ Lab) → TAB cấp1 Lá đơn|Bụi cỏ; Lá đơn có cấp2 Số đo|Độ cong|Bóng đổ
+  │     │                            (Số đo=mật độ/cao/thon/thân/gốc/đốt · Độ cong=T→P/dọc+cụp 1 chiều/fold · Bóng đổ=đậm/cao bóng+màu 2 mặt+Vệt) +
+  │     │                            Bụi cỏ=Lá/bụi+Xòe+Nghiêng (🔎 preview Ở LẠI tab Lab, KHÔNG ở đây); Tree=placeholder cây sắp có ·
+  │     │                            Water=💧 LỒNG NHIỀU BẬC (English): bậc2 Pool|Pond|Puddle ▸ bậc3 instance Pl/Pd/Pe + ＋ (đa-hồ site.waters[], instance mới enabled=false) ▸
   │     │                            bậc4 (mỗi Pl/Pd) Pool edge|Surface|Bottom ▸ bậc5 (Bottom) Floor|Walls. Pool edge=Form/W/D/PosX/PosZ+Edge width(coping 500mm)+Edge mat ·
   │     │                            Surface=Water color/Mirror/Wave/Ripple/Murk · Floor=Floor color+Floor mat · Walls=Wall depth+Wall mat (mat=placeholder 'None').
   │     │                            Pond=render Y NHƯ Pool (renderWaters; đổi param sau) · Puddle=placeholder. Coping = rect-frame quanh hồ (buildPoolEdge).
-  │     │                            (bg-1→bg-4 lồng cấp, l5 về bg-3 cho chữ/track trắng đọc được). bảng Lot/House/Coverage/Garden ĐÁY tab Ground
-  │     ├── 🎛️ Lab                 ← TAB cấp1 Lá đơn|Bụi cỏ; Lá đơn có TAB cấp2 Số đo|Độ cong|Bóng đổ (bg sáng dần = lồng cấp):
-  │     │                            Số đo=mật độ/cao/thon/thân/gốc/đốt · Độ cong=T→P/dọc+cụp 1 chiều/fold · Bóng đổ=đậm/cao bóng
-  │     │                            +màu 2 mặt(ngoài/trong)+Vệt(bật/tắt+Đậm+Rộng, live); Bụi cỏ=Lá/bụi+Xòe+Nghiêng (mặt trong vào tâm+splay);
-  │     │                            🔎 preview xoay/pan/zoom + nền gradient + 2 MẶT 2 MÀU
+  │     │                            (bg-1→bg-4 lồng cấp, l5 về bg-3 cho chữ/track trắng đọc được). bảng Lot/House/Coverage/Garden ĐÁY tab Ground.
+  │     ├── 🎛️ Lab                 ← BÀN THÍ NGHIỆM (nền TRẮNG): giữ 🔎 preview WebGPU 1 vật thể đang dựng (xoay/pan/zoom, 2 MẶT 2 MÀU).
+  │     │                            Quy trình: thêm slider + soi preview tạo vật thể → xong CHUYỂN control sang panel dùng (cỏ→Garden ▸ Grass),
+  │     │                            preview Ở LẠI cho vật thể kế. (setupLabBench; slider cỏ split sang buildGrassTweak. 2026-06-05)
   │     └── ⬇ Footer DÙNG CHUNG    ← `_buildDrawerFooter` (ngoài body cuộn, MỌI tab thấy): undo/redo + Build/Reset/Save/Load/JSON
   │                                  (trước nằm trong panel Building → đã lôi ra drawer vì là dòng chung; wire thẳng method, bền qua _rebuildGUI)
   │

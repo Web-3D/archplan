@@ -1,6 +1,6 @@
 /**
  * VỊ TRÍ   — archplan/src/archplan/gui/grass-preview.ts
- * VAI TRÒ  — Bảng preview nhỏ cạnh panel 🎛️ Tinh chỉnh: mini-scene WebGPU render ĐÚNG 1 ngọn cỏ.
+ * VAI TRÒ  — Bảng preview nhỏ trong tab Ground ▸ Garden ▸ Grass: mini-scene WebGPU render ĐÚNG 1 ngọn cỏ.
  *            Vừa quan sát vừa tinh chỉnh 1 lá → áp hàng loạt ra bãi ngoài. Live-sync cùng grass3d.
  * LIÊN HỆ  — ArchPlanLab dựng + giữ ref; rebuild(cfg) khi structural, getGrass() để tune uniform live.
  *
