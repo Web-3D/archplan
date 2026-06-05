@@ -108,7 +108,19 @@ function addMaterialControls(folder: GUI, seg: SegmentState, ctx: APGuiCtx): voi
     addBrickControls(folder, seg, ctx, seg.material === 'brick') // relief chỉ cho shader brick
   }
   if (seg.material === 'wood-strip') addWoodStripControls(folder, seg, ctx)
+  if (seg.material === 'jp-shoji' || seg.material === 'jp-shoji-glass')
+    addShojiControls(folder, seg, ctx)
   if (seg.material === 'jp-shoji-glass') addShojiGlassControls(folder, seg, ctx)
+}
+
+// Controls shoji (jp-shoji*): số đo trục gỗ + nan gỗ + độ nhiễu vân (nhám koshita). Self-heal né gui.add undefined.
+function addShojiControls(folder: GUI, seg: SegmentState, ctx: APGuiCtx): void {
+  if (typeof seg.trucCell !== 'number') seg.trucCell = 0.25
+  if (typeof seg.nanCell !== 'number') seg.nanCell = 0.125
+  if (typeof seg.woodGrain !== 'number') seg.woodGrain = 0.4
+  live(folder.add(seg, 'trucCell', 0.1, 1, 0.01).name('Trục gỗ m'), ctx)
+  live(folder.add(seg, 'nanCell', 0.04, 0.5, 0.005).name('Nan gỗ m'), ctx)
+  live(folder.add(seg, 'woodGrain', 0, 1.5, 0.05).name('Grain (nhám)'), ctx)
 }
 
 // Controls kính shoji (jp-shoji-glass): độ phản chiếu + độ mờ ô kính. Self-heal field thiếu (né gui.add undefined).
