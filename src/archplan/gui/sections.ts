@@ -89,13 +89,14 @@ function addMaterialControls(folder: GUI, seg: SegmentState, ctx: APGuiCtx): voi
   ctrls[ctrls.length - 1].domElement.classList.add('ap-mat-last')
   live(folder.add(seg, 'matScale', 0.3, 3, 0.05).name('Pattern scale'), ctx)
   // Tường tranh Nhật (jp-screen) — select RIÊNG (né phá lưới 4 nhóm 'ap-mat'); mutual-exclude qua seg.material.
-  const JP_VALS: WallMaterial[] = ['jp-screen', 'jp-shoji']
+  const JP_VALS: WallMaterial[] = ['jp-screen', 'jp-shoji', 'jp-shoji-glass']
   const jpProxy: { v: WallMaterial } = { v: JP_VALS.includes(seg.material) ? seg.material : 'none' }
   folder
     .add(jpProxy, 'v', {
       'Japanese: off': 'none',
       'Seigaiha 青海波': 'jp-screen',
       'Shoji 障子': 'jp-shoji',
+      'Shoji glass': 'jp-shoji-glass',
     })
     .name('Japanese')
     .onChange(() => {
