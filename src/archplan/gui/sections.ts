@@ -377,22 +377,43 @@ function buildFoundationSubfolder(parent: GUI, s: StructureState, ctx: APGuiCtx)
   f.domElement.classList.add('ap-found') // fontsize 7px — chung style với Stairs
   f.add(s, 'showFoundation').name('Show foundation').onChange(ctx.build)
   s.foundType ??= 'concrete' // backfill design cũ (né gui.add undefined)
-  f.add(s, 'foundType', { Concrete: 'concrete', 'Wood deck (JP)': 'wood-deck' })
+  f.add(s, 'foundType', {
+    Concrete: 'concrete',
+    'Wood deck (JP)': 'wood-deck',
+    'Stone pillar': 'stone-pillar',
+  })
     .name('Type')
     .onChange(() => {
-      ctx.rebuild() // đổi type → dựng lại GUI để hiện/ẩn slider Post spacing (wood-deck)
+      ctx.rebuild() // đổi type → dựng lại GUI để hiện/ẩn slider Post spacing / Pillar radius
       ctx.build()
     })
-  live(f.add(s, 'foundH', 100, 2000, 50).name('Height'), ctx)
+  const foundHMax = s.foundType === 'stone-pillar' ? 4000 : 2000 // trụ đá cao tới 4m (cột chống cao)
+  live(f.add(s, 'foundH', 100, foundHMax, 50).name('Height'), ctx)
   if (s.foundType === 'wood-deck') {
     s.deckPostSpacing ??= 1500
     live(f.add(s, 'deckPostSpacing', 600, 4000, 100).name('Post spacing mm'), ctx) // #10 mật độ lưới cột
   }
+  if (s.foundType === 'stone-pillar') buildStonePillarSliders(f, s, ctx)
   live(f.add(s.foundOh, 'n', 0, 2, 0.05).name('Expand N m'), ctx)
   live(f.add(s.foundOh, 'e', 0, 2, 0.05).name('Expand E m'), ctx)
   live(f.add(s.foundOh, 's', 0, 2, 0.05).name('Expand S m'), ctx)
   live(f.add(s.foundOh, 'w', 0, 2, 0.05).name('Expand W m'), ctx)
   return f
+}
+
+// Slider riêng móng 'stone-pillar' (trụ đá giữa + tiết diện 16 xà + thanh chống xiên đốt/cong). Tách khỏi
+// buildFoundationSubfolder để giữ complexity ≤10. Backfill ??= cho design cũ (né gui.add undefined).
+function buildStonePillarSliders(f: GUI, s: StructureState, ctx: APGuiCtx): void {
+  s.pillarRadius ??= 500
+  s.beamWidth ??= 100
+  s.beamHeight ??= 120
+  s.strutSegments ??= 6
+  s.strutCurve ??= 0
+  live(f.add(s, 'pillarRadius', 150, 2000, 50).name('Pillar radius mm'), ctx) // bán kính trụ đá giữa
+  live(f.add(s, 'beamWidth', 30, 400, 10).name('Beam width mm'), ctx) // bề rộng tiết diện 16 xà
+  live(f.add(s, 'beamHeight', 30, 400, 10).name('Beam height mm'), ctx) // bề cao tiết diện 16 xà
+  live(f.add(s, 'strutSegments', 1, 16, 1).name('Strut segments'), ctx) // số đốt thanh chống xiên
+  live(f.add(s, 'strutCurve', -1500, 1500, 50).name('Strut curve mm'), ctx) // độ cong (0=thẳng)
 }
 
 // Cầu thang — footprint chiếu lên Y khoét lỗ slab tầng trên (cầu thang đi xuống)

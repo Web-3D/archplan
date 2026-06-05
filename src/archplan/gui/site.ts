@@ -11,12 +11,18 @@
  */
 
 import type {
+  FenceConfig,
   GroundMaterialKey,
   WaterConfig,
   WaterKind,
   WaterMaterialKey,
 } from 'threejs-modules/site/state'
-import { GROUND_THICK_MAX, GROUND_THICK_MIN, makeWater } from 'threejs-modules/site/state'
+import {
+  GROUND_THICK_MAX,
+  GROUND_THICK_MIN,
+  makeFence,
+  makeWater,
+} from 'threejs-modules/site/state'
 import { type TabItem, Tabs } from 'threejs-modules/ui/Tabs'
 
 // Chất liệu mặt hồ (floor/wall): None (màu phẳng) | Caro (tile — checker + grout hồ bơi). Thêm stone/concrete… sau.
@@ -583,12 +589,11 @@ function buildPuddleInstance(
   return { dispose: (): void => tabs.dispose() }
 }
 
-// Hàng rào (bật, kiểu gỗ/tường, chiều cao).
-function buildFenceControls(body: HTMLElement, ctx: APGuiCtx): void {
-  const site = ctx.site
+// Hàng rào 1 LỚP (bật, kiểu gỗ/tường, vật liệu, chiều cao, cổng). f = FenceConfig của lớp (đa-lớp site.fences).
+function buildFenceControls(body: HTMLElement, ctx: APGuiCtx, f: FenceConfig): void {
   body.appendChild(
-    toggleRow('Fence', site.fence.enabled, (on) => {
-      site.fence.enabled = on
+    toggleRow('Fence', f.enabled, (on) => {
+      f.enabled = on
       ctx.applySite(true)
     })
   )
@@ -597,8 +602,8 @@ function buildFenceControls(body: HTMLElement, ctx: APGuiCtx): void {
     ['Wall', 'wall'],
   ]
   body.appendChild(
-    selectRow('Type', typeOpts, site.fence.type, (v) => {
-      site.fence.type = v
+    selectRow('Type', typeOpts, f.type, (v) => {
+      f.type = v
       ctx.applySite(true)
     })
   )
@@ -609,10 +614,32 @@ function buildFenceControls(body: HTMLElement, ctx: APGuiCtx): void {
     ['Stone', 'stone'],
   ]
   body.appendChild(
-    selectRow('Wall mat', wallTexOpts, site.fence.wallTex ?? 'plain', (v) => {
-      site.fence.wallTex = v
+    selectRow('Wall mat', wallTexOpts, f.wallTex ?? 'plain', (v) => {
+      f.wallTex = v
       ctx.applySite(true)
     })
+  )
+  buildFenceSliders(body, ctx, f)
+  buildGateControls(body, ctx, f)
+}
+
+// Slider inset (lùi mép lô — đa-lớp đồng tâm phân biệt bằng inset) + chiều cao. Kéo = path tinh gọn (chỉ rào).
+function buildFenceSliders(body: HTMLElement, ctx: APGuiCtx, f: FenceConfig): void {
+  const live = (v: number, c: boolean, set: (mmv: number) => void): void => {
+    set(Math.round(v * 1000))
+    if (c) ctx.applySite(true)
+    else ctx.applyFenceLive()
+  }
+  body.appendChild(
+    sliderRow(
+      'Inset m',
+      0,
+      6,
+      0.05,
+      f.inset / 1000,
+      (v, c) => live(v, c, (m) => (f.inset = m)),
+      1000
+    )
   )
   body.appendChild(
     sliderRow(
@@ -620,24 +647,18 @@ function buildFenceControls(body: HTMLElement, ctx: APGuiCtx): void {
       0.3,
       3,
       0.1,
-      site.fence.height / 1000,
-      (v, c) => {
-        site.fence.height = Math.round(v * 1000)
-        if (c) ctx.applySite(true)
-        else ctx.applyFenceLive() // kéo cao tường = path tinh gọn (chỉ rào)
-      },
+      f.height / 1000,
+      (v, c) => live(v, c, (m) => (f.height = m)),
       1000
     )
   )
-  buildGateControls(body, ctx)
 }
 
 // CỔNG ra vào (chỉ hiệu lực Type=Wall): bật + cạnh; slider tách buildGateSliders (giữ Rule-50).
-function buildGateControls(body: HTMLElement, ctx: APGuiCtx): void {
-  const site = ctx.site
+function buildGateControls(body: HTMLElement, ctx: APGuiCtx, f: FenceConfig): void {
   body.appendChild(
-    toggleRow('Gate (cổng)', site.fence.gate ?? false, (on) => {
-      site.fence.gate = on
+    toggleRow('Gate (cổng)', f.gate ?? false, (on) => {
+      f.gate = on
       ctx.applySite(true)
     })
   )
@@ -648,17 +669,16 @@ function buildGateControls(body: HTMLElement, ctx: APGuiCtx): void {
     ['Trái', '3'],
   ]
   body.appendChild(
-    selectRow('Gate side', gateSideOpts, String(site.fence.gateSide ?? 0), (v) => {
-      site.fence.gateSide = Number(v)
+    selectRow('Gate side', gateSideOpts, String(f.gateSide ?? 0), (v) => {
+      f.gateSide = Number(v)
       ctx.applySite(true)
     })
   )
-  buildGateSliders(body, ctx)
+  buildGateSliders(body, ctx, f)
 }
 
 // Slider cổng: bề rộng + vị trí dọc cạnh + chiều cao 2 cột (mm). Đều applySite(commit) kiểu live.
-function buildGateSliders(body: HTMLElement, ctx: APGuiCtx): void {
-  const f = ctx.site.fence
+function buildGateSliders(body: HTMLElement, ctx: APGuiCtx, f: FenceConfig): void {
   const mm = (
     label: string,
     min: number,
@@ -685,6 +705,73 @@ function buildGateSliders(body: HTMLElement, ctx: APGuiCtx): void {
   mm('Gate W m', 0.6, 6, f.gateWidth ?? 1400, (v) => (f.gateWidth = v))
   mm('Gate pos m', -12, 12, f.gatePos ?? 0, (v) => (f.gatePos = v))
   mm('Gate cột H m', 0.6, 3.5, f.gatePostH ?? 1600, (v) => (f.gatePostH = v))
+}
+
+// Sub-tab "Fence" → hàng tab INSTANCE lớp rào (F1/F2… + ＋). Mỗi lớp = 1 FenceConfig trong site.fences (vòng
+// đồng tâm ở inset riêng). ＋ thêm lớp (inset +500mm né chồng lớp ngoài); ✕ xoá lớp. Tabs động → rebuild
+// (dispose + tạo lại) mỗi thêm/xoá + applySite. Trả { panel, dispose, navigateToFence(idx) } (click rào 3D).
+// 1 pane lớp rào i: controls + nút ✕ xoá lớp. remove → splice + rebuild (focus lớp trước) + applySite.
+function buildFencePane(
+  ctx: APGuiCtx,
+  fence: FenceConfig,
+  i: number,
+  rebuild: (focus?: number) => void
+): HTMLElement {
+  const pane = document.createElement('div')
+  buildFenceControls(pane, ctx, fence)
+  pane.appendChild(
+    removeRow('✕ Remove layer', () => {
+      ctx.site.fences.splice(ctx.site.fences.indexOf(fence), 1)
+      rebuild(Math.max(0, i - 1))
+      ctx.applySite(true)
+    })
+  )
+  return pane
+}
+
+function buildFenceDomain(ctx: APGuiCtx): {
+  panel: HTMLElement
+  dispose: () => void
+  navigateToFence: (idx: number) => void
+} {
+  const host = document.createElement('div')
+  host.classList.add('ap-fence-domain')
+  let tabs: Tabs | null = null
+  const rebuild = (focus = 0): void => {
+    tabs?.dispose()
+    host.replaceChildren()
+    const items: TabItem[] = ctx.site.fences.map((fence, i) => {
+      const pane = buildFencePane(ctx, fence, i, rebuild)
+      host.appendChild(pane)
+      return { label: `F${i + 1}`, panel: pane, title: `Fence layer ${i + 1}` }
+    })
+    const addBtn = addInstanceButton('Fence', () => {
+      const last = ctx.site.fences[ctx.site.fences.length - 1]
+      ctx.site.fences.push(makeFence({ inset: (last?.inset ?? 100) + 500 })) // lớp trong: inset lớn hơn
+      rebuild(ctx.site.fences.length - 1)
+      ctx.applySite(true)
+    })
+    tabs = new Tabs(host, items, {
+      classes: {
+        bar: 'ap-tab-bar ap-fence-itabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-fence-isub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+      addEl: addBtn,
+      initial: focus,
+    })
+  }
+  rebuild()
+  return {
+    panel: host,
+    dispose: (): void => tabs?.dispose(),
+    navigateToFence: (idx: number): void => {
+      const clamped = Math.max(0, Math.min(idx, ctx.site.fences.length - 1))
+      tabs?.select(clamped, { trusted: false })
+    },
+  }
 }
 
 // Nút ✕ xoá 1 instance hồ (hàng riêng, canh phải).
@@ -917,7 +1004,7 @@ export function setupSitePanel(
   panel: HTMLElement
   dispose: () => void
   navigateToWater: (cfg: WaterConfig) => boolean
-  navigateToFence: () => void
+  navigateToFence: (idx: number) => void
 } {
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-site-panel'
@@ -929,9 +1016,9 @@ export function setupSitePanel(
   buildGroundControls(groundSub, ctx, refresh)
   groundSub.appendChild(roEl)
 
-  // Sub-tab "Fence": hàng rào.
-  const fenceSub = document.createElement('div')
-  buildFenceControls(fenceSub, ctx)
+  // Sub-tab "Fence": hàng rào ĐA-LỚP (instance-tab F1/F2… + ＋).
+  const fence = buildFenceDomain(ctx)
+  const fenceSub = fence.panel
 
   // Sub-tab "Garden": BẬC 2 (Grass|Tree) — Grass = ô stick + chi tiết cỏ + preview (gom từ tab Lab cũ).
   const garden = buildGardenDomain(ctx)
@@ -949,6 +1036,7 @@ export function setupSitePanel(
     panel: p,
     dispose: (): void => {
       tabs.dispose()
+      fence.dispose()
       garden.dispose()
       water.dispose()
     },
@@ -957,9 +1045,10 @@ export function setupSitePanel(
       tabs.select(3, { trusted: false })
       return water.navigateToWater(cfg)
     },
-    // Click rào 3D → mở sub-tab "Fence" (index 1).
-    navigateToFence: (): void => {
+    // Click rào 3D → mở sub-tab "Fence" (index 1) + tab lớp idx.
+    navigateToFence: (idx: number): void => {
       tabs.select(1, { trusted: false })
+      fence.navigateToFence(idx)
     },
   }
 }

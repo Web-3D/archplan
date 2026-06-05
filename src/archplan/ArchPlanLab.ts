@@ -64,8 +64,8 @@ import {
 import {
   buildSiteFence,
   buildSiteGrass,
+  gateWorldSpec,
   grassBuildSig,
-  pondWorldXZ,
   renderSiteState,
   siteGrassExclude,
   type SiteRenderCtx,
@@ -75,6 +75,7 @@ import {
 import {
   coverageStats,
   defaultSiteState,
+  type FenceConfig,
   renderPuddles,
   renderWaters,
   type SiteState,
@@ -93,6 +94,7 @@ import { type HighlightHost, HighlightOverlay } from './interaction/highlight' /
 import { type ManipulateHost, ManipulateTool } from './interaction/manipulate' // 🤚 Move + 🎯 Focus — tách monolith
 import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 khay swatch atelier — tách monolith
 import { SunGizmo, type SunGizmoHost } from './interaction/sunGizmo' // ☀ sun = vật thể kéo trong scene
+import { WaterTool, type WaterToolHost } from './interaction/waterDrag' // 💧 kéo hồ/đỉnh/viền 3D — tách monolith
 import {
   CoordPicker,
   type GroundType,
@@ -167,7 +169,7 @@ export class ArchPlanLab extends BaseWorld {
   private drawerTabs: Tabs | null = null // tab ngang đầu drawer (🏠 Building | 🌳 Ground | 🎛️ Lab)
   private _siteDispose: (() => void) | null = null // teardown tab CON panel Ground (outer + Garden domain + Water domain)
   private _siteNavigate: ((cfg: WaterConfig) => boolean) | null = null // click hồ 3D → nhảy GUI tới tab hồ đó
-  private _siteNavigateFence: (() => void) | null = null // 🧱 click rào 3D → nhảy GUI tới sub-tab Fence
+  private _siteNavigateFence: ((idx: number) => void) | null = null // 🧱 click rào 3D → nhảy GUI tới lớp rào idx
   private drawerPanels: HTMLElement[] = [] // panel non-gui trong drawer (Ground + Lab) — gỡ khi teardown
   private _drawerTab = 0 // tab drawer đang mở — nhớ qua _rebuildGUI
   private lDrawer: HTMLElement | null = null // drawer TRÁI: bảng Tools (Surface+tọa độ) — ẩn mặc định
@@ -217,31 +219,12 @@ export class ArchPlanLab extends BaseWorld {
   // Move tool (kéo element) + Focus (click→GUI) — tách ra interaction/manipulate.ts. moveMode + nút
   // GIỮ ở lab (điều phối 3 mode loại trừ); phiên kéo + map anchor folder nằm trong ManipulateTool.
   private manipulate: ManipulateTool | null = null
+  private waterTool: WaterTool | null = null // 💧 kéo hồ/đỉnh/viền 3D (interaction/waterDrag.ts); lab giữ _siteWaters/_activeWater
   private moveMode = false
   private _hiddenFloors = new Set<string>() // 🙈 floor.id ẩn (xây tầng dưới khỏi bị che) — transient, không persist
   private _syncMoveToggle: ((on: boolean) => void) | null = null // sync nút 🤚 trong gui Tools
-  // 💧 Phiên kéo hồ trong 3D (Move tool). body = dời cả hồ; vertex = nắn 1 đỉnh polygon (shape='free').
-  private _waterDrag:
-    | {
-        kind: 'body'
-        cfg: WaterConfig
-        surf: WaterSurface
-        plane: THREE.Plane
-        sx: number
-        sz: number
-        ox0: number
-        oz0: number
-      }
-    | { kind: 'vertex'; cfg: WaterConfig; surf: WaterSurface; plane: THREE.Plane; idx: number }
-    | null = null
-  // Handle đỉnh polygon hồ (overlay editor) — group ở scene; chỉ hiện khi shape='free' + moveMode.
-  private _waterHandles: THREE.Group | null = null
-  private _waterHandleGeo: THREE.SphereGeometry | null = null // dùng chung mọi handle
-  // 💧 Viền form hồ ở MẶT NỀN (mặt phẳng FILL mờ vẽ-trên-cùng) — hiện LÚC KÉO: mặt nước chui dưới đất (lỗ
-  // chưa theo) nên không thấy vị trí; mảng mờ này định vị "đang đặt ở đâu". Ẩn khi buông (rebuild đặt nước vào).
-  private _waterOutline: THREE.Mesh | null = null
-  private _waterOutlineMat: THREE.MeshBasicMaterial | null = null
-  private _waterHandleMat: THREE.MeshBasicMaterial | null = null
+  // 💧 Phiên kéo hồ + handle đỉnh + viền-định-vị → interaction/waterDrag.ts (WaterTool). Lab chỉ giữ
+  // _siteWaters (render zip) + _activeWater (pool đang chọn) — tool đọc/ghi qua WaterToolHost.
   // _downPos = vị trí nhấn (phân biệt click vs drag/orbit) — _onPointerUp dùng cho click→Focus.
   private _downPos: { x: number; y: number } | null = null
   // brick-3d — geometry thật, không merge; track để dispose mỗi build.
@@ -272,6 +255,11 @@ export class ArchPlanLab extends BaseWorld {
   private _fenceMats: THREE.Material[] = []
   private _fenceShaders: { dispose(): void }[] = []
   private _fenceSig = ''
+  // 🚪 Pick-box CỔNG vô hình (group riêng → KHÔNG lẫn raycast _tryClickFence). Move mode kéo box → trượt cổng
+  // dọc cạnh (ghi gatePos). Dựng lại trong _syncFence (mỗi fence có gate). _gateDrag = phiên kéo đang chạy.
+  private readonly _gatePickGroup = new THREE.Group()
+  private _gatePickGeos: THREE.BufferGeometry[] = []
+  private _gateDrag: { fenceIdx: number; axis: 'x' | 'z'; plane: THREE.Plane } | null = null
   private _liveRebuild = false // true trong rAF live-drag (kéo nhà/hồ/slider) → hoãn rải-lại-cỏ vì exclude
   // Chữ ký SITE (nền/nước/rào, BỎ grass3d — cỏ quản riêng). Kéo NHÀ đổi `state` chứ KHÔNG đổi `site` →
   // sig giữ nguyên → KHÔNG dựng lại reflector RTT mỗi frame (trị leak/tụt-fps lúc kéo nhà). '' = chưa dựng.
@@ -285,14 +273,13 @@ export class ArchPlanLab extends BaseWorld {
   private _slabTexMaps: PhotoGroundMaps | null = null
   private _slabTex: PhotoGround | null = null
   private _slabTexLoading = false
-  // 🧱 Fence wall: maps + TexturedSurface CACHE 1 lần/kind (đổi cinder↔stone → dispose bộ cũ). Material cache
-  // (KHÔNG tạo mới mỗi rebuild → KHÔNG recompile shader khi kéo cổng = trị tụt fps). Bơm opts.fenceWallMat. Lab sở hữu.
-  private _fenceTex: {
-    kind: 'cinder' | 'stone'
-    maps: TexturedSurfaceMaps
-    surf: TexturedSurface
-  } | null = null
-  private _fenceTexLoading = false
+  // 🧱 Fence wall: maps + TexturedSurface CACHE 1 lần MỖI KIND (cinder/stone độc lập — đa-lớp rào có thể trộn
+  // 2 texture khác nhau, mỗi kind cache riêng → KHÔNG thrash recompile). Material cache (KHÔNG tạo mới mỗi rebuild
+  // → KHÔNG recompile shader khi kéo cổng = trị tụt fps). Bơm opts.fenceWallMat per-fence (_syncFence). Lab sở hữu.
+  private _fenceTex: Partial<
+    Record<'cinder' | 'stone', { maps: TexturedSurfaceMaps; surf: TexturedSurface }>
+  > = {}
+  private _fenceTexLoading: Partial<Record<'cinder' | 'stone', boolean>> = {}
   // 💧 Hồ ĐANG SỐNG (đa-instance): cfg↔surf zip theo renderWaters(site). _activeWater = pool của tab đang
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
@@ -399,13 +386,19 @@ export class ArchPlanLab extends BaseWorld {
       return
     }
     if (this.moveMode) {
-      if (this._tryStartWaterDrag(e)) return // 💧 trúng mặt hồ (gần hơn pick-box) → kéo hồ
-      this.manipulate?.dragStart(e) // Move tool: nhấn-giữ element → kéo (focus GUI ngay khi nhấn)
+      this._pointerDownMove(e)
       return
     }
     if (!this.pickMode) return
     this.picking = true
     this._pickAt(e)
+  }
+
+  // Move mode nhấn xuống: ưu tiên hồ → cổng → element building. Tách khỏi _onPointerDown (giữ complexity ≤10).
+  private _pointerDownMove(e: PointerEvent): void {
+    if (this.waterTool?.tryStartDrag(e)) return // 💧 trúng mặt hồ (gần hơn pick-box) → kéo hồ
+    if (this._tryStartGateDrag(e)) return // 🚪 trúng cổng → trượt dọc cạnh rào
+    this.manipulate?.dragStart(e) // Move tool: nhấn-giữ element → kéo (focus GUI ngay khi nhấn)
   }
   private readonly _onPointerMove = (e: PointerEvent): void => {
     if (this.sunGizmo?.isDragging()) {
@@ -419,10 +412,24 @@ export class ArchPlanLab extends BaseWorld {
     if (this.pickMode && this.picking) this._pickAt(e)
   }
 
-  // Move mode đang kéo: ưu tiên hồ (_waterDrag) rồi tới element building (manipulate).
+  // Move mode đang kéo: ưu tiên hồ (waterTool) → cổng (_gateDrag) → element building (manipulate).
   private _moveModeMove(e: PointerEvent): void {
-    if (this._waterDrag) this._waterDragMove(e)
+    if (this.waterTool?.isDragging()) this.waterTool.dragMove(e)
+    else if (this._gateDrag) this._gateDragMove(e)
     else if (this.manipulate?.isDragging()) this.manipulate.dragMove(e)
+  }
+
+  // Buông cổng: commit (nuốt rAF live → _syncFence stone thật + gate box trở lại + autosave). Tách khỏi
+  // _onPointerUp (giữ complexity ≤10). Cổng KHÔNG vào undo (site G0) — chỉ autosave.
+  private _commitGateDrag(): void {
+    this._gateDrag = null
+    if (this._siteRaf) {
+      cancelAnimationFrame(this._siteRaf) // nuốt rAF live đang chờ → commit là bản cuối (stone thật, hết :lod)
+      this._siteRaf = 0
+    }
+    this._syncFence()
+    this.store.autosave(this.state, this.site)
+    if (this.sun) this.sun.shadow.needsUpdate = true
   }
   private readonly _onPointerUp = (e: PointerEvent): void => {
     if (this.sunGizmo?.isDragging()) {
@@ -430,10 +437,13 @@ export class ArchPlanLab extends BaseWorld {
       this._downPos = null
       return
     }
-    if (this._waterDrag) {
-      this._waterDrag = null
-      this._hideWaterOutline() // ẩn viền định vị — rebuild đặt nước + lỗ vào vị trí mới
-      this._applySite(true) // 💧 commit: cỏ né lại dưới hồ vị trí mới + autosave (Move giữ nguyên)
+    if (this.waterTool?.isDragging()) {
+      this.waterTool.endDrag() // ẩn viền + commit (_applySite: cỏ né lại dưới hồ vị trí mới + autosave)
+      this._downPos = null
+      return
+    }
+    if (this._gateDrag) {
+      this._commitGateDrag()
       this._downPos = null
       return
     }
@@ -454,7 +464,7 @@ export class ArchPlanLab extends BaseWorld {
     const dx = e.clientX - this._downPos.x
     const dy = e.clientY - this._downPos.y
     if (dx * dx + dy * dy >= 25) return // kéo/orbit, không phải click
-    if (this._tryClickWater(e)) return // 💧 click trúng hồ → trỏ GUI hồ
+    if (this.waterTool?.tryClick(e)) return // 💧 click trúng hồ → trỏ GUI hồ
     if (this._tryClickFence(e)) return // 🧱 click trúng rào → trỏ GUI Fence
     this.manipulate?.clickFocus(e) // building element → trỏ folder tương ứng
   }
@@ -506,8 +516,8 @@ export class ArchPlanLab extends BaseWorld {
   private _setMoveMode(on: boolean): void {
     this.moveMode = on
     this.manipulate?.cancelDrag()
-    this._waterDrag = null // huỷ kéo hồ đang dở (đổi mode / thoát chuột phải / Alt)
-    this._hideWaterOutline() // tắt viền định vị nếu đang kéo hồ dở
+    this.waterTool?.cancelDrag() // huỷ kéo hồ đang dở + ẩn viền (đổi mode / thoát chuột phải)
+    this._gateDrag = null // huỷ kéo cổng đang dở
     if (on) {
       this._setPaintMode(false)
       this.palette?.markSwatch(null)
@@ -515,7 +525,7 @@ export class ArchPlanLab extends BaseWorld {
     }
     if (this.controls) this.controls.enabled = !on
     this._syncMoveToggle?.(on) // đổi class nút 🤚 (ap-move-on) — text bỏ, chỉ symbol
-    this._rebuildWaterHandles() // 💧 hiện/ẩn handle đỉnh hồ theo moveMode
+    this.waterTool?.rebuildHandles() // 💧 hiện/ẩn handle đỉnh hồ theo moveMode
     this._renderScene() // bật/tắt Move → dựng lại building để áp/bỏ tường-phẳng + nhuốm xanh "nghệ" ngay
   }
 
@@ -529,17 +539,6 @@ export class ArchPlanLab extends BaseWorld {
     )
   }
 
-  // Entry hồ ACTIVE (pool của tab đang chọn) trong _siteWaters — null nếu hồ đó chưa render (tắt/placeholder).
-  private _activeWaterEntry(): { cfg: WaterConfig; surf: WaterSurface } | null {
-    return this._siteWaters.find((x) => x.cfg === this._activeWater) ?? null
-  }
-
-  // Chọn pool active (GUI đổi tab Pl, hoặc kéo trúng thân 1 hồ) → 3D drag/handle nhắm hồ này.
-  setActiveWaterCfg(cfg: WaterConfig): void {
-    this._activeWater = cfg
-    this._rebuildWaterHandles()
-  }
-
   // Click/kéo trúng 1 hồ trong 3D → MỞ GUI tới tab hồ đó: drawer "Ground" (idx1) → Water → type (Pool/Pond/
   // Puddle) → instance (Pl/Pd/Pe). Tách khỏi setActiveWaterCfg (cái đó còn gọi từ GUI onChange → tránh vòng).
   private _navigateToWater(cfg: WaterConfig): void {
@@ -547,195 +546,93 @@ export class ArchPlanLab extends BaseWorld {
     this._siteNavigate?.(cfg)
   }
 
-  // 🧱 Click trúng RÀO trong 3D → mở GUI: drawer "Ground" (idx1) → sub-tab "Fence". Như click hồ trỏ GUI.
-  private _navigateToFence(): void {
+  // 🧱 Click trúng RÀO trong 3D → mở GUI: drawer "Ground" (idx1) → sub-tab "Fence" → instance lớp idx.
+  private _navigateToFence(idx: number): void {
     this.drawerTabs?.select(1, { trusted: false }) // Building|Ground|Lab → Ground
-    this._siteNavigateFence?.()
+    this._siteNavigateFence?.(idx)
   }
 
-  // Click thường trúng RÀO (gần hơn building pick) → trỏ GUI Fence. Trả false → nhường building clickFocus.
-  private _tryClickFence(e: PointerEvent): boolean {
-    if (!this.site.show || !this.site.fence.enabled || this._fenceGroup.children.length === 0) {
-      return false
+  // Lớp rào của object trúng (đi ngược parent tới mesh mang userData.fenceIdx). -1 nếu không thuộc rào.
+  private _fenceIdxOf(obj: THREE.Object3D | null): number {
+    let o = obj
+    while (o && o !== this._fenceGroup) {
+      if (typeof o.userData.fenceIdx === 'number') return o.userData.fenceIdx
+      o = o.parent
     }
+    return -1
+  }
+
+  // Click thường trúng RÀO (gần hơn building pick) → trỏ GUI Fence (lớp trúng). Trả false → nhường building.
+  private _tryClickFence(e: PointerEvent): boolean {
+    if (!this.site.show || !this.site.fences.some((f) => f.enabled)) return false
+    if (this._fenceGroup.children.length === 0) return false
     this._ray.setFromCamera(this._ndc(e), this.camera)
     const fHit = this._ray.intersectObjects(this._fenceGroup.children, true)[0]
     if (!fHit) return false
     const pHit = this._ray.intersectObjects(this.pickGroup.children, false)[0]
     if (pHit && pHit.distance < fHit.distance) return false // building element gần hơn → nhường
-    this._navigateToFence()
+    this._navigateToFence(Math.max(0, this._fenceIdxOf(fHit.object)))
     return true
   }
 
-  // Raycast mặt nước: trả entry + điểm trúng NẾU có hồ gần hơn building pick (else null → nhường building).
-  // Dùng chung cho click-focus (trỏ GUI, mode thường) lẫn bắt đầu kéo thân hồ (Move mode).
-  private _pickWaterEntry(
-    e: PointerEvent
-  ): { entry: { cfg: WaterConfig; surf: WaterSurface }; point: THREE.Vector3 } | null {
-    if (this._siteWaters.length === 0) return null
+  // 🚪 Nhấn Move trúng pick-box CỔNG → bắt đầu kéo trượt cổng dọc cạnh rào. Trả false (không trúng / building
+  // gần hơn) → nhường manipulate. Lưu phiên kéo: fenceIdx + trục tiếp tuyến + mặt phẳng ngang @đỉnh-cột.
+  private _tryStartGateDrag(e: PointerEvent): boolean {
+    if (this._gatePickGroup.children.length === 0) return false
     this._ray.setFromCamera(this._ndc(e), this.camera)
-    const meshes = this._siteWaters.map((x) => x.surf.getMesh())
-    const wHit = this._ray.intersectObjects(meshes, false)[0]
-    if (!wHit) return null
+    const gHit = this._ray.intersectObjects(this._gatePickGroup.children, false)[0]
+    if (!gHit) return false
     const pHit = this._ray.intersectObjects(this.pickGroup.children, false)[0]
-    if (pHit && pHit.distance < wHit.distance) return null // building element gần hơn → nhường
-    const entry = this._siteWaters.find((x) => x.surf.getMesh() === wHit.object)
-    return entry ? { entry, point: wHit.point } : null
-  }
-
-  // Click thường (mode KHÔNG pick/paint/move) trúng mặt nước → set active + mở GUI tới tab hồ (như click
-  // tường/sàn trỏ GUI). Trả false → nhường _maybeClickFocus cho building. KHÔNG bắt đầu kéo.
-  private _tryClickWater(e: PointerEvent): boolean {
-    const got = this._pickWaterEntry(e)
-    if (!got) return false
-    this.setActiveWaterCfg(got.entry.cfg)
-    this._navigateToWater(got.entry.cfg)
-    return true
-  }
-
-  // Nhấn Move: ưu tiên ĐỈNH polygon (hồ active, free) → thân hồ GẦN NHẤT trong mọi hồ → nhường manipulate.
-  private _tryStartWaterDrag(e: PointerEvent): boolean {
-    if (this._siteWaters.length === 0) return false
-    this._ray.setFromCamera(this._ndc(e), this.camera)
-    const active = this._activeWaterEntry()
-    if (active && this._tryStartVertexDrag(active)) {
-      this.canvas.setPointerCapture(e.pointerId) // đỉnh trước (handle nhỏ, nằm trên mặt hồ active)
-      return true
-    }
-    const got = this._pickWaterEntry(e)
-    if (!got) return false
-    const { entry, point } = got
-    this.setActiveWaterCfg(entry.cfg) // kéo hồ nào → hồ đó thành active
-    this._navigateToWater(entry.cfg) // + mở GUI tới tab hồ đó (click thẳng vào pool/pond/puddle)
-    this._waterDrag = {
-      kind: 'body',
-      cfg: entry.cfg,
-      surf: entry.surf,
-      plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -point.y),
-      sx: point.x,
-      sz: point.z,
-      ox0: entry.cfg.offsetX,
-      oz0: entry.cfg.offsetZ,
-    }
-    this.canvas.setPointerCapture(e.pointerId)
-    return true
-  }
-
-  // Trúng 1 handle đỉnh (hồ active) → phiên kéo đỉnh (ray đã set ở caller). Mặt chiếu = ngang tại mặt nước.
-  private _tryStartVertexDrag(entry: { cfg: WaterConfig; surf: WaterSurface }): boolean {
-    const handles = this._waterHandles
-    if (!handles || handles.children.length === 0) return false
-    const hit = this._ray.intersectObjects(handles.children, false)[0]
-    const idx = hit ? (hit.object.userData as { vi?: number }).vi : undefined
+    if (pHit && pHit.distance < gHit.distance) return false // building element gần hơn → nhường
+    const idx = gHit.object.userData.gateFenceIdx
     if (typeof idx !== 'number') return false
-    this._waterDrag = {
-      kind: 'vertex',
-      cfg: entry.cfg,
-      surf: entry.surf,
-      plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -entry.surf.getMesh().position.y),
-      idx,
+    const fence = this.site.fences[idx]
+    if (!fence) return false
+    const gs = gateWorldSpec(fence, this.site)
+    if (!gs) return false
+    this.canvas.setPointerCapture(e.pointerId)
+    this._navigateToFence(idx) // cổng = phần của rào → mở GUI tới lớp đó
+    const planeY = gs.top + gs.postH / 2
+    this._gateDrag = {
+      fenceIdx: idx,
+      axis: gs.axis,
+      plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY),
     }
-    return true // pointer capture do caller _tryStartWaterDrag lo
+    return true
   }
 
-  // Kéo hồ: chiếu lên mặt ngang → dispatch dời-thân / nắn-đỉnh.
-  private _waterDragMove(e: PointerEvent): void {
-    const d = this._waterDrag
+  // Kéo cổng: chiếu ray → mặt phẳng ngang → lấy thành phần tiếp tuyến (x cạnh trước/sau, z cạnh trái/phải) →
+  // ghi gatePos (mm). buildSiteFence tự kẹp gap trong cạnh. Path tinh gọn _applyFenceLive (chỉ rào, LOD box).
+  private _gateDragMove(e: PointerEvent): void {
+    const d = this._gateDrag
     if (!d) return
+    const fence = this.site.fences[d.fenceIdx]
+    if (!fence) return
     this._ray.setFromCamera(this._ndc(e), this.camera)
     const cur = new THREE.Vector3()
     if (!this._ray.ray.intersectPlane(d.plane, cur)) return
-    if (d.kind === 'body') this._waterDragBody(d, cur)
-    else this._waterDragVertex(d, cur)
+    fence.gatePos = Math.round((d.axis === 'x' ? cur.x : cur.z) * 1000)
+    this._applyFenceLive() // i chang slider cổng — rebuild CHỈ rào, throttle rAF
   }
 
-  // Dời cả hồ: ghi offset (mm) vào cfg + DỜI MESH LIVE (reflector.target con → theo cùng) + handle theo. Đáy/
-  // viền/lỗ-nền KHÔNG rebuild ở đây (tái tạo reflector mỗi frame = leak+lag) → theo sau khi BUÔNG (commit).
-  private _waterDragBody(
-    d: { cfg: WaterConfig; surf: WaterSurface; sx: number; sz: number; ox0: number; oz0: number },
-    cur: THREE.Vector3
-  ): void {
-    d.cfg.offsetX = Math.round(d.ox0 + (cur.x - d.sx) * 1000)
-    d.cfg.offsetZ = Math.round(d.oz0 + (cur.z - d.sz) * 1000)
-    const mesh = d.surf.getMesh()
-    mesh.position.set(d.cfg.offsetX / 1000, mesh.position.y, d.cfg.offsetZ / 1000)
-    this._waterHandles?.position.set(mesh.position.x, mesh.position.y + 0.05, mesh.position.z)
-    this._showWaterOutline(d.cfg) // viền form ở mặt nền → định vị (mặt nước chui dưới đất khi lỗ chưa theo)
-  }
-
-  // Nắn 1 đỉnh hồ active: world → local (trừ tâm hồ) → ghi points[idx] (mm) + dựng lại GEOMETRY mặt nước live
-  // (setShape, KHÔNG tái tạo reflector) + dời handle. Đáy/viền theo sau khi buông.
-  private _waterDragVertex(
-    d: { cfg: WaterConfig; surf: WaterSurface; idx: number },
-    cur: THREE.Vector3
-  ): void {
-    const mesh = d.surf.getMesh()
-    const p = d.cfg.points[d.idx]
-    if (!p) return
-    p.x = Math.round((cur.x - mesh.position.x) * 1000)
-    p.z = Math.round((cur.z - mesh.position.z) * 1000)
-    d.surf.setShape(d.cfg.points.map((q) => ({ x: q.x / 1000, z: q.z / 1000 })))
-    const handle = this._waterHandles?.children[d.idx]
-    if (handle) handle.position.set(p.x / 1000, 0, p.z / 1000)
-    this._showWaterOutline(d.cfg) // viền form theo hình mới (định vị khi đáy/lỗ chưa theo)
-  }
-
-  // 💧 Mảng mờ form hồ ở MẶT NỀN (rim) — ShapeGeometry FILL vẽ-trên-cùng (depthTest/depthWrite=false,
-  // renderOrder cao) theo polygon hồ. Hiện lúc kéo để định vị (mặt nước chui dưới đất vì lỗ chưa rebuild).
-  // Geo dựng lại mỗi lần kéo (nhỏ → rẻ); mat dùng chung.
-  private _showWaterOutline(cfg: WaterConfig): void {
-    const poly = pondWorldXZ(cfg) // world XZ (đã gồm offset/points)
-    if (poly.length < 3) return
-    const y = this.site.groundThick / 1000 + 0.015 // 1.5cm trên mặt nền
-    const shape = new THREE.Shape()
-    poly.forEach((q, i) => (i === 0 ? shape.moveTo(q.x, -q.z) : shape.lineTo(q.x, -q.z))) // XY: x, −z
-    shape.closePath()
-    const geo = new THREE.ShapeGeometry(shape)
-    geo.rotateX(-Math.PI / 2) // XY → nằm ngang XZ
-    geo.translate(0, y, 0)
-    if (!this._waterOutline) {
-      this._waterOutlineMat = new THREE.MeshBasicMaterial({
-        color: 0x4cd9ff,
-        transparent: true,
-        opacity: 0.4,
-        depthTest: false, // vẽ trên cùng dù đất/nước che
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      })
-      this._waterOutline = new THREE.Mesh(geo, this._waterOutlineMat)
-      this._waterOutline.renderOrder = 999
-      this._waterOutline.frustumCulled = false
-      this.scene.add(this._waterOutline)
-    } else {
-      this._waterOutline.geometry.dispose()
-      this._waterOutline.geometry = geo
-    }
-    this._waterOutline.visible = true
-  }
-
-  private _hideWaterOutline(): void {
-    if (this._waterOutline) this._waterOutline.visible = false
-  }
-
-  // Dựng lại handle đỉnh hồ ACTIVE: group tại tâm hồ (world), mỗi handle = sphere tại đỉnh (local). Chỉ khi
-  // hồ active ĐANG render + shape='free' + moveMode (≥3 đỉnh). Geo/mat dùng chung → clear chỉ gỡ mesh.
-  private _rebuildWaterHandles(): void {
-    const g = this._waterHandles
-    if (!g) return
-    g.clear()
-    const entry = this._activeWaterEntry()
-    const w = entry?.cfg
-    if (!entry || !w || w.shape !== 'free' || !this.moveMode || w.points.length < 3) return
-    const mesh = entry.surf.getMesh()
-    g.position.set(mesh.position.x, mesh.position.y + 0.05, mesh.position.z)
-    const geo = (this._waterHandleGeo ??= new THREE.SphereGeometry(0.12, 12, 8))
-    const mat = (this._waterHandleMat ??= new THREE.MeshBasicMaterial({ color: 0xffcc33 }))
-    w.points.forEach((p, i) => {
-      const h = new THREE.Mesh(geo, mat)
-      h.position.set(p.x / 1000, 0, p.z / 1000)
-      h.userData = { vi: i }
-      g.add(h)
-    })
+  // 🚪 Pick-box vô hình ôm khoảng-trống cổng của lớp `idx` (visible=false → 0 render, Raycaster vẫn hit). Dày
+  // theo trục tiếp tuyến = bề rộng gap; perpendicular nới rộng cho dễ tóm. Dựng trong _syncFence khi không kéo.
+  private _addGatePick(fence: FenceConfig, idx: number): void {
+    const gs = gateWorldSpec(fence, this.site)
+    if (!gs) return
+    if (!this._pickMat) this._pickMat = new THREE.MeshBasicMaterial()
+    const along = Math.max(0.4, gs.halfSpan * 2)
+    const grab = 0.45 // m — bề perpendicular (xuyên mặt tường) cho dễ tóm cổng
+    const geo =
+      gs.axis === 'x'
+        ? new THREE.BoxGeometry(along, gs.postH, grab)
+        : new THREE.BoxGeometry(grab, gs.postH, along)
+    const mesh = new THREE.Mesh(geo, this._pickMat)
+    mesh.position.set(gs.cx, gs.top + gs.postH / 2, gs.cz)
+    mesh.visible = false
+    mesh.userData = { gateFenceIdx: idx }
+    this._gatePickGeos.push(geo)
+    this._gatePickGroup.add(mesh)
   }
 
   // Cọ palette: click element trong 3D → sơn màu cọ đang cầm. Chưa chọn swatch → không sơn.
@@ -798,10 +695,10 @@ export class ArchPlanLab extends BaseWorld {
     this.scene.add(this.siteGroup) // 🌳 nền + lô (dưới building)
     this.scene.add(this._grassGroup) // 🌿 cỏ — group BỀN, KHÔNG xoá mỗi rebuild (dirty-check riêng)
     this.scene.add(this._fenceGroup) // 🧱 rào — group BỀN (dirty-check riêng, né rebuild nước khi kéo slider rào)
+    this.scene.add(this._gatePickGroup) // 🚪 pick-box cổng vô hình (Move mode kéo trượt cổng)
     this.scene.add(this.buildingGroup)
     this.scene.add(this.pickGroup) // SPIKE: lớp pick vô hình cho brush paint
-    this._waterHandles = new THREE.Group() // 💧 overlay handle đỉnh polygon hồ (free + moveMode)
-    this.scene.add(this._waterHandles)
+    this.waterTool = new WaterTool(this._waterHost()) // 💧 kéo hồ/đỉnh/viền (tự add handle group vào scene)
     this.manipulate = new ManipulateTool(this._manipulateHost()) // trước _setupGUI: nhận registerFocus
     this.highlight = new HighlightOverlay(this._highlightHost())
     // Listener ĐĂNG KÝ TRƯỚC _setupGUI/_buildScene: phím tắt (Z move, X palette) + pointer KHÔNG được phụ
@@ -914,6 +811,12 @@ export class ArchPlanLab extends BaseWorld {
     this.css2dEl?.remove()
     this.css2dEl = null
     this.css2dRenderer = null
+    this._disposeActors()
+  }
+
+  // Dispose nhóm "actor" scene (figure/coordPicker/sun/guard/devHud/waterTool). Tách khỏi
+  // _disposeSceneResources (giữ complexity ≤10 — mỗi ?.dispose là 1 nhánh).
+  private _disposeActors(): void {
     this.humanFigure?.dispose()
     this.humanFigure = null
     this.coordPicker?.dispose()
@@ -926,20 +829,8 @@ export class ArchPlanLab extends BaseWorld {
     this.guard = null
     this.devHud?.dispose()
     this.devHud = null
-    this._disposeWaterHandles()
-  }
-
-  // 💧 Dispose geo/mat handle đỉnh dùng chung (group ở scene tự dọn khi scene teardown).
-  private _disposeWaterHandles(): void {
-    this._waterHandleGeo?.dispose()
-    this._waterHandleMat?.dispose()
-    this._waterHandleGeo = null
-    this._waterHandleMat = null
-    this._waterOutline?.removeFromParent() // 💧 mảng định vị
-    this._waterOutline?.geometry.dispose()
-    this._waterOutlineMat?.dispose()
-    this._waterOutline = null
-    this._waterOutlineMat = null
+    this.waterTool?.dispose() // 💧 handle geo/mat + outline + gỡ handle group khỏi scene
+    this.waterTool = null
   }
 
   // ── Scene setup ────────────────────────────────────────────────────────────
@@ -1188,8 +1079,8 @@ export class ArchPlanLab extends BaseWorld {
       registerSiteReadout: (fn) => (this._refreshSiteReadout = fn),
       tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
       tuneWater: (cfg, apply, persist) => this._tuneWater(cfg, apply, persist),
-      setActiveWater: (cfg) => this.setActiveWaterCfg(cfg),
-      previewWater: (cfg) => this._showWaterOutline(cfg),
+      setActiveWater: (cfg) => this.waterTool?.setActiveCfg(cfg),
+      previewWater: (cfg) => this.waterTool?.showOutline(cfg),
       applySun: () => this._applySun(),
       ...this._gridGroupCtx(),
       setPickMode: (on) => this._setPickMode(on),
@@ -1470,6 +1361,26 @@ export class ArchPlanLab extends BaseWorld {
       rebuildDragShape: () => this._rebuildDragShapeLive(),
       endInstDragSplit: () => this._endInstDragSplit(),
       refreshGuiNumbers: () => this.gui?.controllersRecursive().forEach((c) => c.updateDisplay()),
+    }
+  }
+
+  // Host cho WaterTool: scene refs + state hồ (lab giữ _siteWaters/_activeWater) + điều hướng/commit.
+  private _waterHost(): WaterToolHost {
+    return {
+      canvas: this.canvas,
+      camera: this.camera,
+      raycaster: this._ray,
+      scene: this.scene,
+      pickGroup: this.pickGroup,
+      site: () => this.site,
+      moveMode: () => this.moveMode,
+      siteWaters: () => this._siteWaters,
+      activeWater: () => this._activeWater,
+      setActiveWater: (cfg) => {
+        this._activeWater = cfg
+      },
+      navigateToWater: (cfg) => this._navigateToWater(cfg),
+      commitSite: () => this._applySite(true),
     }
   }
 
@@ -1922,7 +1833,7 @@ export class ArchPlanLab extends BaseWorld {
     if (!this._activeWater || !this.site.waters.includes(this._activeWater)) {
       this._activeWater = this.site.waters.find((w) => w.kind === 'pool') ?? null
     }
-    this._rebuildWaterHandles() // 💧 handle đỉnh theo hồ active mới (free + moveMode)
+    this.waterTool?.rebuildHandles() // 💧 handle đỉnh theo hồ active mới (free + moveMode)
     this._rebuildEditorGround() // 🕳️ khoét lỗ hồ vào nền backdrop editor → không che đáy basin
     this._rebuildGrid() // 🕳️ khoét lưới y=0 theo bbox hồ → hết sọc lưới đè lên lòng hồ
   }
@@ -1940,17 +1851,7 @@ export class ArchPlanLab extends BaseWorld {
         this._ensureGroundTex()
       }
     }
-    const wallTex =
-      this.site.fence.enabled && this.site.fence.type === 'wall'
-        ? (this.site.fence.wallTex ?? 'plain')
-        : 'plain'
-    if (wallTex !== 'plain') {
-      if (this._fenceTex?.kind === wallTex) {
-        opts.fenceWallMat = this._fenceTex.surf.getMaterial() // CACHED material → KHÔNG recompile mỗi rebuild
-      } else {
-        this._ensureFenceTex(wallTex)
-      }
-    }
+    // Fence material KHÔNG resolve ở đây nữa (đa-lớp → mỗi lớp 1 kind riêng) — _syncFence bơm per-fence.
     return opts
   }
 
@@ -2021,8 +1922,8 @@ export class ArchPlanLab extends BaseWorld {
   // 🧱 Load texture set tường rào theo kind (cinder/stone) 1 lần. Đổi kind → dispose bộ cũ. Xong → invalidate
   // siteSig + _renderSite (tường rào hiện texture thay màu phẳng tạm). Material do site-kit tạo (ctx.shaders).
   private _ensureFenceTex(kind: 'cinder' | 'stone'): void {
-    if (this._fenceTex?.kind === kind || this._fenceTexLoading) return
-    this._fenceTexLoading = true
+    if (this._fenceTex[kind] || this._fenceTexLoading[kind]) return
+    this._fenceTexLoading[kind] = true
     const spec: SurfaceTextureSpec =
       kind === 'cinder'
         ? {
@@ -2039,18 +1940,16 @@ export class ArchPlanLab extends BaseWorld {
           }
     loadSurfaceTextureSet(spec, this.renderer)
       .then((maps) => {
-        this._fenceTex?.surf.dispose() // dispose material cũ (đổi cinder↔stone)
-        disposeSurfaceTextureSet(this._fenceTex?.maps ?? null) // free maps cũ
         const tile =
           kind === 'cinder' ? cinderManifest.tileSizeMeters : stoneManifest.tileSizeMeters
-        const surf = new TexturedSurface({ maps, tileSizeMeters: tile }) // CACHE 1 lần → né recompile mỗi rebuild
-        this._fenceTex = { kind, maps, surf }
-        this._fenceTexLoading = false
+        const surf = new TexturedSurface({ maps, tileSizeMeters: tile }) // CACHE 1 lần/kind → né recompile mỗi rebuild
+        this._fenceTex[kind] = { maps, surf }
+        this._fenceTexLoading[kind] = false
         this._fenceSig = '' // ép _syncFence dựng lại RÀO với material mới (KHÔNG đụng site nặng)
         this._renderSite()
       })
       .catch((e: unknown) => {
-        this._fenceTexLoading = false
+        this._fenceTexLoading[kind] = false
         console.warn('[ArchPlanLab] load fence wall texture lỗi — giữ màu phẳng:', e)
       })
   }
@@ -2065,9 +1964,11 @@ export class ArchPlanLab extends BaseWorld {
     this._slabTex = null
     disposeSurfaceTextureSet(this._slabTexMaps)
     this._slabTexMaps = null
-    this._fenceTex?.surf.dispose() // TexturedSurface material (cache lab-lifetime)
-    disposeSurfaceTextureSet(this._fenceTex?.maps ?? null)
-    this._fenceTex = null
+    for (const k of ['cinder', 'stone'] as const) {
+      this._fenceTex[k]?.surf.dispose() // TexturedSurface material (cache lab-lifetime) MỖI kind
+      disposeSurfaceTextureSet(this._fenceTex[k]?.maps ?? null)
+    }
+    this._fenceTex = {}
   }
 
   // 🌿 Dựng/GIỮ bãi cỏ theo chữ ký structural (grassBuildSig). Sig GIỐNG lần trước → giữ nguyên mesh,
@@ -2088,41 +1989,57 @@ export class ArchPlanLab extends BaseWorld {
     if (this._siteGrass) this._grassGroup.add(this._siteGrass.getMesh())
   }
 
-  // 🧱 Dựng/GIỮ rào theo chữ ký _fenceSig (= JSON site.fence). Giống lần trước → giữ nguyên (rào ở group BỀN
+  // 🧱 Dựng/GIỮ rào theo chữ ký _fenceSig (= JSON site.fences[]). Giống lần trước → giữ nguyên (rào ở group BỀN
   // sống qua _clearSite). Khác → dispose cũ + dựng lại vào _fenceGroup. Đây là chỗ trị "kéo slider rào/cổng
   // → rebuild cả nước-RTT mỗi frame = tụt fps": rào tách khỏi siteSig nên kéo nó CHỈ dựng lại rào (rẻ).
   private _syncFence(): void {
     // sig nhúng cờ LOD (':lod' khi kéo) → buông tay (cùng fence-state nhưng KHÔNG còn :lod) vẫn rebuild lên
-    // STONE thật (nếu không, sig giống frame-live cuối → early-return → kẹt box LOD).
+    // STONE thật (nếu không, sig giống frame-live cuối → early-return → kẹt box LOD). ĐA-LỚP: sig = JSON fences[].
     const lod = this._liveRebuild ? ':lod' : ''
-    const sig =
-      this.site.show && this.site.fence.enabled ? JSON.stringify(this.site.fence) + lod : 'off'
+    const anyEnabled = this.site.fences.some((f) => f.enabled)
+    const sig = this.site.show && anyEnabled ? JSON.stringify(this.site.fences) + lod : 'off'
     if (sig === this._fenceSig) return
     this._fenceSig = sig
     this._clearFence()
     if (sig === 'off') return
-    const opts = this._siteTexOpts() // bơm fenceWallMat (cached) hoặc kick-off load (load xong → _fenceSig='' + re-render)
-    opts.fenceLodBox = this._liveRebuild // 🚀 đang kéo → stone dùng box mỏng (rẻ); buông → stone thật
-    buildSiteFence(
-      this.site,
-      {
-        group: this._fenceGroup,
-        geos: this._fenceGeos,
-        mats: this._fenceMats,
-        shaders: this._fenceShaders,
-      },
-      opts
-    )
+    const base = this._siteTexOpts() // skipGrass/skipFence + ground (fence material resolve per-lớp dưới đây)
+    const ctx: SiteRenderCtx = {
+      group: this._fenceGroup,
+      geos: this._fenceGeos,
+      mats: this._fenceMats,
+      shaders: this._fenceShaders,
+    }
+    // Dựng MỖI lớp enabled vào group chung; tag userData.fenceIdx (click rào 3D → nhảy GUI đúng lớp).
+    this.site.fences.forEach((fence, idx) => {
+      if (!fence.enabled) return
+      const opts: SiteRenderOpts = { ...base, fenceLodBox: this._liveRebuild }
+      const wallTex = fence.type === 'wall' ? (fence.wallTex ?? 'plain') : 'plain'
+      if (wallTex !== 'plain') {
+        const cached = this._fenceTex[wallTex]
+        if (cached)
+          opts.fenceWallMat = cached.surf.getMaterial() // CACHED → KHÔNG recompile mỗi rebuild
+        else this._ensureFenceTex(wallTex) // kick-off load → xong: _fenceSig='' + re-render
+      }
+      const before = this._fenceGroup.children.length
+      buildSiteFence(fence, this.site, ctx, opts)
+      for (let i = before; i < this._fenceGroup.children.length; i++) {
+        this._fenceGroup.children[i].userData.fenceIdx = idx
+      }
+      if (!this._liveRebuild) this._addGatePick(fence, idx) // 🚪 pick-box cổng (bỏ lúc kéo — đỡ churn)
+    })
   }
 
   private _clearFence(): void {
     for (const g of this._fenceGeos) g.dispose()
     for (const m of this._fenceMats) m.dispose()
     for (const s of this._fenceShaders) s.dispose()
+    for (const g of this._gatePickGeos) g.dispose() // 🚪 pick-box cổng (geo riêng; _pickMat shared, KHÔNG dispose)
     this._fenceGeos = []
     this._fenceMats = []
     this._fenceShaders = []
+    this._gatePickGeos = []
     this._fenceGroup.clear()
+    this._gatePickGroup.clear()
   }
 
   // 🕳️ Nền backdrop editor (Plane 80×80 @ y=0, đặc) sẽ CHE đáy basin (basin chạy xuống dưới y=0). Khi có
@@ -2248,7 +2165,7 @@ export class ArchPlanLab extends BaseWorld {
       cancelAnimationFrame(this._siteRaf) // commit nuốt rAF live đang chờ → render cuối là bản này
       this._siteRaf = 0
     }
-    if (persist) this._hideWaterOutline() // commit (buông slider/đổi gì) → ẩn viền preview, nước đã đặt vào
+    if (persist) this.waterTool?.hideOutline() // commit (buông slider/đổi gì) → ẩn viền preview, nước đã đặt vào
     this._renderSite()
     // (Lab preview ĐỘC LẬP scene — KHÔNG _previewRebuild theo edit nữa: né lag + sandbox riêng cho Factory.)
     this._refreshSiteReadout?.()

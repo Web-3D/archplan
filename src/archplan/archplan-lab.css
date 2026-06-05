@@ -1373,6 +1373,39 @@
 .ap-drawer .ap-site-panel .ap-site-readout {
   margin-top: auto;
 }
+/* ── 🧱 Fence domain: hàng tab INSTANCE lớp rào (F1/F2… + ＋) trong sub-panel Fence (bg-2 #5c4423). Tab active
+   + isub = bg-3 (#6e5530, sáng hơn 1 bậc → thấy lồng cấp). Tone nâu khớp site, KHÔNG đổi tông như water/garden. */
+.ap-fence-itabs {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 0; /* dính isub */
+  padding-left: 2px;
+  flex-wrap: wrap;
+}
+.ap-fence-itabs > .ap-tab-btn {
+  flex: 0 0 auto; /* tab nhỏ co theo nội dung (F1/F2…); nhiều → wrap */
+  min-width: 30px;
+  padding: 0 9px;
+  height: 18px;
+  font-size: 8px;
+  background: rgba(92, 68, 35, 0.5); /* bg-2 mờ — inactive chìm vào Fence panel */
+  border-color: rgba(181, 138, 60, 0.35);
+  color: #d3b888; /* nâu sáng */
+}
+.ap-fence-itabs > .ap-tab-btn.ap-tab-active {
+  background: #6e5530; /* = isub → dính liền */
+  border-color: rgba(181, 138, 60, 0.6);
+  border-bottom-color: transparent;
+  color: #f5ead2; /* text kem */
+}
+.ap-fence-itabs > .ap-tab-add {
+  flex: 0 0 auto; /* nút ＋ co theo nội dung */
+  min-width: 22px;
+}
+.ap-fence-isub {
+  background: #6e5530; /* instance pane — sáng hơn Fence bg-2 */
+  padding: 6px;
+}
 /* placeholder sub-tab Tree (chưa có tính năng). */
 .ap-site-empty {
   padding: 12px 4px;
