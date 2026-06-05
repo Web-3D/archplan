@@ -89,11 +89,18 @@ export interface ManipulateHost {
   buildScene(): void
   buildSceneLive(): void
   translateBuildingLive(dx: number, dz: number): void // kéo-cả-nhà (1 inst): dời group theo Δ mét, KHÔNG rebuild
+  // 🚀 Kéo 1 shape khi CÓ NHIỀU shape (split-render): start = dựng shape khác (static) + shape đang kéo (group
+  // riêng) 1 lần; translate = dời group shape đang kéo mỗi frame (0 rebuild); end = full rebuild commit.
+  beginInstDragSplit(instId: string): void
+  instDragTranslate(dx: number, dz: number): void
+  rebuildDragShape(): void // kéo ELEMENT (cột/cửa/cầu thang) đa-shape: rebuild CHỈ shape chứa element (others static)
+  endInstDragSplit(): void
   refreshGuiNumbers(): void
 }
 
 export class ManipulateTool {
   private _drag: DragSession | null = null
+  private _splitActive = false // phiên kéo này dùng split-render (đa-shape) → translate/rebuild shape kéo, others static
   private _focusAnchors = new Map<string, GUI>()
 
   constructor(private readonly host: ManipulateHost) {}
@@ -133,7 +140,10 @@ export class ManipulateTool {
     return this._drag !== null
   }
   cancelDrag(): void {
+    const split = this._splitActive
+    this._splitActive = false
     this._drag = null
+    if (split) this.host.endInstDragSplit() // dọn dragGroup + full rebuild (kẻo shape đang kéo biến mất)
   }
 
   private _ndcOf(e: PointerEvent): THREE.Vector2 {
@@ -167,7 +177,17 @@ export class ManipulateTool {
     if (!inst) return
     this._focusGuiFor(ud) // 3D → GUI: nhấn vật thể → trỏ thẳng panel tương ứng
     this._drag = this._makeDragSession(inst, ud, hit.point, hit.object.rotation.y)
-    if (this._drag) this.canvas.setPointerCapture(e.pointerId)
+    if (this._drag) {
+      this.canvas.setPointerCapture(e.pointerId)
+      // ĐA-SHAPE → split-render 1 lần (shape khác static, shape chứa element đang kéo vào group riêng): kéo
+      // SHAPE = translate group đó; kéo ELEMENT (cột/cửa/cầu thang) = rebuild CHỈ group đó → mượt bất kể số
+      // shape. ('inst' fast = 1 shape duy nhất → giữ path dời-cả-group; split vô ích vì dragged = cả nhà.)
+      const isFastInst = this._drag.kind === 'inst' && this._drag.fast
+      if (this.host.instanceCount() > 1 && !isFastInst) {
+        this.host.beginInstDragSplit(inst.id)
+        this._splitActive = true
+      }
+    }
   }
 
   // Click thường (không Move): chỉ trỏ GUI tới panel của element, không kéo.
@@ -322,6 +342,9 @@ export class ManipulateTool {
         return // bỏ qua _buildSceneLive: commit (rebuild + reset offset) để dragEnd lo
       }
       if (e.ctrlKey) this._applySnap(d.inst) // giữ Ctrl → hít khối kề (chỉ multi-instance: fast=1 inst né nhánh này)
+      // Đa-shape: DỜI group shape đang kéo (split) — 0 rebuild shape khác. Δ theo posX/posZ (gồm snap).
+      this.host.instDragTranslate((d.inst.posX - d.x0) / 1000, (d.inst.posZ - d.z0) / 1000)
+      return // bỏ qua _buildSceneLive: split chỉ translate; dragEnd full-rebuild commit
     } else if (d.kind === 'colz') {
       const c = Math.cos(d.rotR)
       const s = Math.sin(d.rotR)
@@ -335,7 +358,10 @@ export class ManipulateTool {
       d.target.x = Math.max(0, Math.min(d.xHi, d.x0 + along))
       d.target.yOffset = Math.max(0, Math.min(d.yHi, d.y0 + dy * 1000))
     }
-    this._buildSceneLive()
+    // Element (cột/cửa/ban công): geometry shape đổi → rebuild. Split (đa-shape) → CHỈ shape chứa nó; không
+    // thì full (1 shape = cả nhà). Cả 2 đều throttle rAF ≤1/frame ở host.
+    if (this._splitActive) this.host.rebuildDragShape()
+    else this._buildSceneLive()
   }
 
   // Giữ Ctrl khi kéo khối: hít MẶT NGOÀI vào khối kề CÙNG TẦNG + canh thẳng mép (nam châm như game xây).
@@ -350,8 +376,12 @@ export class ManipulateTool {
 
   // Buông chuột: commit 1 lần (history + persist) + refresh số GUI (giữ Move mode + folder state).
   dragEnd(): void {
+    const split = this._splitActive
+    this._splitActive = false
     this._drag = null
-    this._buildScene()
+    if (split)
+      this.host.endInstDragSplit() // split: dọn dragGroup + full rebuild merge commit (history/persist trong đó)
+    else this._buildScene()
     this.host.refreshGuiNumbers()
   }
 }

@@ -174,6 +174,12 @@ export class ArchPlanLab extends BaseWorld {
   private readonly buildingGroup = new THREE.Group()
   private buildingGeos: THREE.BufferGeometry[] = []
   private buildingMats: THREE.Material[] = []
+  // 🚀 Split-drag: shape ĐANG KÉO dựng vào group riêng (translate mỗi frame, 0 rebuild); shape khác static
+  // trong buildingGroup. Buông tay = full rebuild merge. Geos/mats riêng (dispose ở _clearDragGroup).
+  private _dragGroup: THREE.Group | null = null
+  private _dragGeos: THREE.BufferGeometry[] = []
+  private _dragMats: THREE.Material[] = []
+  private _dragInstId: string | null = null // shape đang kéo (split) — rebuild riêng khi kéo element (cột/cửa/cầu thang)
   // SPIKE palette brush — lớp pick vô hình (1 box/tường, visible=false → 0 render, vẫn raycast vì
   // Raycaster bỏ qua .visible) để click tường trong 3D xác định đúng tường kể cả khi render đã merge.
   private readonly pickGroup = new THREE.Group()
@@ -828,6 +834,8 @@ export class ArchPlanLab extends BaseWorld {
     this._siteGrass = null
     disposeSurfaceTextureSet(this._groundTex) // 🌱 ground texture (lab sở hữu — PhotoGround.dispose không đụng)
     this._groundTex = null
+    this._clearDragGroup() // 🚀 split-drag group (nếu dispose giữa phiên kéo)
+    this._dragGroup = null
     this.wallMats.dispose() // dispose + clear toàn bộ material cache + brick textures
     this._disposeEnvironment()
     this._disposeGround()
@@ -1329,8 +1337,111 @@ export class ArchPlanLab extends BaseWorld {
       buildScene: () => this._buildScene(),
       buildSceneLive: () => this._buildSceneLive(),
       translateBuildingLive: (dx, dz) => this._translateBuildingLive(dx, dz),
+      beginInstDragSplit: (id) => this._beginInstDragSplit(id),
+      instDragTranslate: (dx, dz) => this._instDragTranslate(dx, dz),
+      rebuildDragShape: () => this._rebuildDragShapeLive(),
+      endInstDragSplit: () => this._endInstDragSplit(),
       refreshGuiNumbers: () => this.gui?.controllersRecursive().forEach((c) => c.updateDisplay()),
     }
+  }
+
+  // 🚀 SPLIT-DRAG (kéo 1 shape khi có NHIỀU shape): dựng 1 lần — shape khác (static) vào buildingGroup +
+  // pick; shape ĐANG KÉO vào _dragGroup riêng (visual, KHÔNG pick — không cần raycast giữa drag). Mỗi frame
+  // chỉ translate _dragGroup → 0 rebuild shape khác → mượt bất kể số shape. plainWalls=true (LOD phẳng, rẻ).
+  private _beginInstDragSplit(instId: string): void {
+    if (this._rafBuild) {
+      cancelAnimationFrame(this._rafBuild)
+      this._rafBuild = 0
+    }
+    if (!this._dragGroup) {
+      this._dragGroup = new THREE.Group()
+      this.buildingGroup.parent?.add(this._dragGroup) // sibling buildingGroup (cùng scene)
+    }
+    this._clearDragGroup()
+    this._liveRebuild = true // cỏ hoãn rải lại lúc kéo (chỉ exclude đổi)
+    // static: MỌI shape TRỪ shape đang kéo → buildingGroup + pick (1 lần, giữ suốt phiên kéo)
+    this._clearBuilding()
+    const others = renderBuildingState(
+      this.state,
+      {
+        wallCache: this.wallMats,
+        group: this.buildingGroup,
+        geos: this.buildingGeos,
+        mats: this.buildingMats,
+        brick3d: this.brick3dWalls,
+        wood: this.woodWalls,
+        strip: this.stripWalls,
+      },
+      true, // plainWalls: LOD tường phẳng (rẻ + tintable)
+      this._hiddenFloors,
+      (id) => id !== instId
+    )
+    for (const p of others) this._addPick(p.cx, p.cy, p.cz, p.sx, p.sy, p.sz, p.rotDeg, p.ud)
+    this._dragInstId = instId
+    this._renderDragShape() // dragged shape → _dragGroup (kéo element = rebuild lại cái này, KHÔNG đụng shape khác)
+    this._setBuildingTint(this.moveMode) // nhuốm xanh CẢ static (shape kéo giữ màu gốc → nổi bật, dễ canh)
+    this._renderSite() // nền/cỏ + đôn buildingGroup lên mặt nền (set buildingGroup.position = (0,lift,0))
+    const lift = this.site.show ? this.site.groundThick / 1000 : 0
+    this._dragGroup.position.set(0, lift, 0) // ngang buildingGroup; translate cộng (dx,dz) khi kéo
+    this._liveRebuild = false
+    if (this.sun) this.sun.shadow.needsUpdate = true
+  }
+
+  // Render CHỈ shape đang kéo vào _dragGroup (clear cũ trước). Dùng cho begin + rebuild mỗi frame khi kéo
+  // ELEMENT (cột/cửa/cầu thang đổi local pos → geometry shape này đổi; shape khác static → KHÔNG đụng).
+  // brick3d/wood/strip rỗng vì plainWalls=true. pos giữ (0,lift,0) — element dời TRONG shape, shape không dời.
+  private _renderDragShape(): void {
+    if (!this._dragGroup || !this._dragInstId) return
+    this._clearDragGroup()
+    const id = this._dragInstId
+    renderBuildingState(
+      this.state,
+      {
+        wallCache: this.wallMats,
+        group: this._dragGroup,
+        geos: this._dragGeos,
+        mats: this._dragMats,
+        brick3d: [],
+        wood: [],
+        strip: [],
+      },
+      true,
+      this._hiddenFloors,
+      (i) => i === id
+    )
+  }
+
+  // Kéo ELEMENT: rebuild shape đang kéo THROTTLE ≤1/frame (rAF) — né rebuild 120+/giây theo poll chuột.
+  // Reuse _rafBuild (split-drag KHÔNG gọi _buildSceneLive; dragEnd→_buildScene cancel raf này).
+  private _rebuildDragShapeLive(): void {
+    if (this._rafBuild) return
+    this._rafBuild = requestAnimationFrame(() => {
+      this._rafBuild = 0
+      this._renderDragShape()
+    })
+  }
+
+  // Mỗi frame kéo SHAPE: DỜI group shape đang kéo (Δ mét, gồm snap) — 0 rebuild. Bóng update lúc buông (né tụt fps).
+  private _instDragTranslate(dx: number, dz: number): void {
+    if (!this._dragGroup) return
+    const lift = this.site.show ? this.site.groundThick / 1000 : 0
+    this._dragGroup.position.set(dx, lift, dz)
+  }
+
+  // Buông/huỷ kéo: dọn _dragGroup + full rebuild merge commit (shape kéo về buildingGroup tại pos mới + pick đủ).
+  private _endInstDragSplit(): void {
+    this._clearDragGroup()
+    this._dragInstId = null
+    this._buildScene() // commit: history + autosave + _renderScene full (merge lại, pick đủ)
+  }
+
+  // Dispose geometry/material của _dragGroup (KHÔNG dispose wallMats cache — shared). Giữ group rỗng để tái dùng.
+  private _clearDragGroup(): void {
+    for (const g of this._dragGeos) g.dispose()
+    for (const m of this._dragMats) m.dispose()
+    this._dragGeos = []
+    this._dragMats = []
+    this._dragGroup?.clear()
   }
 
   // Kéo-cả-nhà (1 instance) LIVE: DỜI buildingGroup + pickGroup theo Δ mét — KHÔNG rebuild geometry.
