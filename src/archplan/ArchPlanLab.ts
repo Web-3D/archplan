@@ -177,6 +177,7 @@ export class ArchPlanLab extends BaseWorld {
   // GIỮ ở lab (điều phối 3 mode loại trừ); phiên kéo + map anchor folder nằm trong ManipulateTool.
   private manipulate: ManipulateTool | null = null
   private moveMode = false
+  private _hiddenFloors = new Set<string>() // 🙈 floor.id ẩn (xây tầng dưới khỏi bị che) — transient, không persist
   private _syncMoveToggle: ((on: boolean) => void) | null = null // sync nút 🤚 trong gui Tools
   // 💧 Phiên kéo hồ trong 3D (Move tool). body = dời cả hồ; vertex = nắn 1 đỉnh polygon (shape='free').
   private _waterDrag:
@@ -1105,8 +1106,7 @@ export class ArchPlanLab extends BaseWorld {
       addInstance: (fId, key) => this._addInstance(fId, key),
       removeInstance: (fId, id) => this._removeInstance(fId, id),
       resetInstance: (fId, id) => this._resetInstance(fId, id),
-      removeFloor: (id) => this._removeFloor(id),
-      addFloor: () => this._addFloor(),
+      ...this._floorCtx(),
       resetState: () => this._resetState(),
       exportJSON: () => this.store.exportJSON(this.state, this.site),
       saveFile: () => void this.store.saveFile(this.state, this.site),
@@ -1305,6 +1305,7 @@ export class ArchPlanLab extends BaseWorld {
       raycaster: this._ray,
       pickGroup: this.pickGroup,
       locateInst: (id) => this._locateInst(id)?.inst ?? null,
+      siblingInstances: (id) => this._siblingInstances(id),
       instanceCount: () => this.state.floors.reduce((n, f) => n + f.instances.length, 0),
       buildScene: () => this._buildScene(),
       buildSceneLive: () => this._buildSceneLive(),
@@ -1413,6 +1414,19 @@ export class ArchPlanLab extends BaseWorld {
     this._buildScene()
   }
 
+  // 4 callback quản tầng cho GUI ctx (gom 1 spread → giữ _makeGuiCtx dưới Rule-50, như _gridGroupCtx).
+  private _floorCtx(): Pick<
+    APGuiCtx,
+    'removeFloor' | 'addFloor' | 'isFloorHidden' | 'setFloorHidden'
+  > {
+    return {
+      removeFloor: (id) => this._removeFloor(id),
+      addFloor: () => this._addFloor(),
+      isFloorHidden: (id) => this._hiddenFloors.has(id),
+      setFloorHidden: (id, hidden) => this._setFloorHidden(id, hidden),
+    }
+  }
+
   private _addFloor(): void {
     this.state.floors.push(mkFloor())
     this._rebuildGUI()
@@ -1422,8 +1436,17 @@ export class ArchPlanLab extends BaseWorld {
   private _removeFloor(id: string): void {
     if (this.state.floors.length <= 1) return
     this.state.floors = this.state.floors.filter((f) => f.id !== id)
+    this._hiddenFloors.delete(id) // dọn cờ ẩn của tầng đã xoá
     this._rebuildGUI()
     this._buildScene()
+  }
+
+  // 🙈 Ẩn/hiện 1 tầng (transient, KHÔNG persist): re-render geometry (tầng ẩn bỏ dựng, giữ stacking) —
+  // KHÔNG history, KHÔNG rebuild GUI (giữ trạng thái panel + checkbox tự cập nhật). Để xây tầng dưới khỏi bị che.
+  private _setFloorHidden(id: string, hidden: boolean): void {
+    if (hidden) this._hiddenFloors.add(id)
+    else this._hiddenFloors.delete(id)
+    this._renderScene()
   }
 
   private _onDimChange(inst: ShapeInstance): void {
@@ -1448,6 +1471,13 @@ export class ArchPlanLab extends BaseWorld {
       if (inst) return { inst, fi }
     }
     return null
+  }
+
+  // Khối shape KHÁC trên CÙNG tầng với `id` (cho Ctrl-snap nam-châm). [] nếu không tìm thấy / 1 mình.
+  private _siblingInstances(id: string): ShapeInstance[] {
+    const loc = this._locateInst(id)
+    if (!loc) return []
+    return this.state.floors[loc.fi].instances.filter((i) => i.id !== id)
   }
 
   // Cao độ đáy tường của 1 floor = tổng chiều cao các tầng dưới (khớp BuildingFromState.buildFloor: maxLift+maxFloorH).
@@ -1553,7 +1583,8 @@ export class ArchPlanLab extends BaseWorld {
         wood: this.woodWalls,
         strip: this.stripWalls,
       },
-      this.moveMode // LOD tường phẳng KHI ở Move mode → tintable + rẻ khi kéo (brick là thủ phạm CPU); tắt = gạch
+      this.moveMode, // LOD tường phẳng KHI ở Move mode → tintable + rẻ khi kéo (brick là thủ phạm CPU); tắt = gạch
+      this._hiddenFloors // 🙈 tầng ẩn → bỏ dựng mesh/pick (giữ chiều cao stacking)
     )
     for (const p of placements) this._addPick(p.cx, p.cy, p.cz, p.sx, p.sy, p.sz, p.rotDeg, p.ud)
     this._setBuildingTint(this.moveMode) // bật Move → nhuốm xanh CẢ NHÀ ngay (nghệ); tắt Move → màu gốc

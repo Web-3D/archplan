@@ -96,6 +96,8 @@ Hồ (`WaterSurface`) là **site element rời** (ở `siteGroup`, không có `i
 - **X** — thả/thu MENU 🎨 Palette (lưới swatch, `palette.togglePanel()`); KHÔNG phải popover tìm-kiếm-màu. Guard `_isPlainX`, né Ctrl/Meta/Alt+X.
 - **Bật Move (Z) → CẢ NHÀ nhuốm xanh "nghệ"** ngay (LOD tường phẳng + `_setBuildingTint` theo `moveMode`, `_setMoveMode`→`_renderScene`); tắt Move = màu/gạch gốc.
 - **`** (backquote) — ẩn/hiện DevHud perf. **Chuột phải** — thoát Move/Paint/Pick.
+- **Giữ Ctrl khi kéo khối shape (Move)** — SNAP nam-châm: hít MẶT NGOÀI khối vào khối kề CÙNG TẦNG + canh thẳng mép (`snap.ts` `snapDelta`, ngưỡng 0.4m). Chỉ khi ≥2 khối (1 khối = fast-path dời group, không snap). Thả Ctrl = kéo tự do.
+- **🙈 Ẩn tầng** (checkbox mỗi floor folder, `gui.ts`) — bỏ dựng mesh/pick tầng đó (GIỮ chiều cao stacking) để xây tầng dưới không bị che. `ctx.setFloorHidden`→`_setFloorHidden`→`_renderScene` (transient, KHÔNG persist). Lõi: `renderBuildingState(state, ctx, plainWalls, hiddenFloors)` skip floor trong `buildFloor`.
 
 ---
 
@@ -106,5 +108,7 @@ Hồ (`WaterSurface`) là **site element rời** (ở `siteGroup`, không có `i
 | Pick box | `_addPick`, `_addWallPickBox`, `_addOpeningPickBox` |
 | Paint | `_applyBrush` (merge), `_pushPainted` (structure), `wallColor`, `_matKey` |
 | Move | `PickUD`, `DragSession`, `_makeDragSession`, `_dragMove`, `_horizPlane`, `_wallPlane`, `_localDrag` |
+| Snap (Ctrl) | `snap.ts` (`instAABB`/`snapDelta`), `_applySnap`, host `siblingInstances` |
+| Floor ẩn | `_hiddenFloors`, `_setFloorHidden`, `_floorCtx`, ctx `isFloorHidden`/`setFloorHidden`, lõi `renderBuildingState` arg `hiddenFloors` |
 | Focus | `ctx.registerFocus` (ctx), `_focusAnchors`, `_focusKey`, `_focusGuiFor` |
 | Mode | `_setMoveMode`/`_setPaintMode`/`_setPickMode` (loại trừ nhau) |

@@ -246,6 +246,10 @@ export function buildFloorFolder(gui: GUI, floor: FloorDef, fi: number, ctx: APG
   }
   // Dropdown "＋" thêm shape nằm cuối hàng tab shape
   buildTabBar(fCh, instPanels, mkShapeSelect(floor.id, ctx))
+  // 🙈 Ẩn tầng: bỏ dựng mesh (giữ chiều cao) → xây tầng dưới không bị tầng trên che. Transient, không persist.
+  f.add({ hidden: ctx.isFloorHidden(floor.id) }, 'hidden')
+    .name('🙈 Ẩn tầng')
+    .onChange((v: boolean) => ctx.setFloorHidden(floor.id, v))
   if (ctx.state.floors.length > 1) {
     f.add(
       {

@@ -25,9 +25,14 @@ import type {
   ShapeInstance,
   StairState,
 } from '../state/state'
+import { instAABB, snapDelta } from './snap'
 
 // userData gắn trên mỗi pick box (vô hình) — định danh element để paint/move.
 export type PickUD = { instId?: string; segIdx?: number; key?: string; opIdx?: number }
+
+// Snap nam-châm (mét) khi giữ Ctrl kéo khối: ngưỡng hít MẶT khối kề + ngưỡng canh thẳng mép vuông góc.
+const SNAP_FLUSH = 0.4
+const SNAP_ALIGN = 0.4
 
 // 1 phiên kéo Move tool. Mỗi element kéo trong ràng buộc riêng (KHÔNG rời cha):
 //  inst→XZ tự do · col/stairs→XZ local (un-rotate rotY) · bal→trượt dọc tường · open→mặt tường 2D.
@@ -79,6 +84,7 @@ export interface ManipulateHost {
   raycaster: THREE.Raycaster
   pickGroup: THREE.Group
   locateInst(id: string): ShapeInstance | null
+  siblingInstances(id: string): ShapeInstance[] // khối shape KHÁC cùng tầng với id — cho Ctrl-snap
   instanceCount(): number // tổng instance mọi tầng — quyết định fast-path kéo-cả-nhà (chỉ khi ==1)
   buildScene(): void
   buildSceneLive(): void
@@ -315,6 +321,7 @@ export class ManipulateTool {
         this.host.translateBuildingLive(dx, dz) // 1 inst → DỜI group (0 rebuild, mượt dù nhà phức tạp cỡ nào)
         return // bỏ qua _buildSceneLive: commit (rebuild + reset offset) để dragEnd lo
       }
+      if (e.ctrlKey) this._applySnap(d.inst) // giữ Ctrl → hít khối kề (chỉ multi-instance: fast=1 inst né nhánh này)
     } else if (d.kind === 'colz') {
       const c = Math.cos(d.rotR)
       const s = Math.sin(d.rotR)
@@ -329,6 +336,16 @@ export class ManipulateTool {
       d.target.yOffset = Math.max(0, Math.min(d.yHi, d.y0 + dy * 1000))
     }
     this._buildSceneLive()
+  }
+
+  // Giữ Ctrl khi kéo khối: hít MẶT NGOÀI vào khối kề CÙNG TẦNG + canh thẳng mép (nam châm như game xây).
+  // Sửa posX/posZ TRƯỚC rebuild (snap.ts pure). Không khối kề trong tầm → no-op (kéo tự do).
+  private _applySnap(inst: ShapeInstance): void {
+    const sibs = this.host.siblingInstances(inst.id)
+    if (sibs.length === 0) return
+    const { dx, dz } = snapDelta(instAABB(inst), sibs.map(instAABB), SNAP_FLUSH, SNAP_ALIGN)
+    inst.posX += Math.round(dx * 1000)
+    inst.posZ += Math.round(dz * 1000)
   }
 
   // Buông chuột: commit 1 lần (history + persist) + refresh số GUI (giữ Move mode + folder state).

@@ -64,6 +64,8 @@ export interface APGuiCtx {
   resetInstance(floorId: string, id: string): void
   removeFloor(id: string): void
   addFloor(): void
+  isFloorHidden(id: string): boolean // 🙈 tầng đang ẩn? (ẩn để xây tầng dưới không bị che)
+  setFloorHidden(id: string, hidden: boolean): void // ẩn/hiện tầng → re-render (giữ stacking, không persist)
   resetState(): void
   exportJSON(): void
   saveFile(): void
