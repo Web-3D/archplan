@@ -336,7 +336,7 @@ export function setupLabBench(container: Element | null): {
   const note = document.createElement('div')
   note.className = 'ap-lab-note'
   note.textContent =
-    'Preview vật thể đang dựng. Tinh chỉnh xong → chuyển control sang panel dùng (vd Garden ▸ Grass).'
+    'Sandbox ĐỘC LẬP scene (Factory). Thử nghiệm vật thể mới ở đây; xong → chuyển code sang GUI chung.'
   const previewHost = document.createElement('div')
   previewHost.className = 'ap-preview-host' // 🔎 preview WebGPU — luôn hiện trong Lab
   p.append(ttl, note, previewHost)

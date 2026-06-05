@@ -182,7 +182,7 @@ function buildGroundControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => vo
   const T = GROUND_THICK_MIN / 10
   const Tmax = GROUND_THICK_MAX / 10
   body.appendChild(
-    toggleRow('Show ground + fence', site.show, (on) => {
+    toggleRow('Show ground', site.show, (on) => {
       site.show = on
       ctx.applySite(true)
       refresh()
@@ -602,6 +602,18 @@ function buildFenceControls(body: HTMLElement, ctx: APGuiCtx): void {
       ctx.applySite(true)
     })
   )
+  // Vật liệu MẶT tường rào (chỉ hiệu lực khi Type=Wall): phẳng / cinder-blocks / stone (texture PBR triplanar).
+  const wallTexOpts: [string, 'plain' | 'cinder' | 'stone'][] = [
+    ['Plain', 'plain'],
+    ['Cinder', 'cinder'],
+    ['Stone', 'stone'],
+  ]
+  body.appendChild(
+    selectRow('Wall mat', wallTexOpts, site.fence.wallTex ?? 'plain', (v) => {
+      site.fence.wallTex = v
+      ctx.applySite(true)
+    })
+  )
   body.appendChild(
     sliderRow(
       'Height m',
@@ -611,11 +623,68 @@ function buildFenceControls(body: HTMLElement, ctx: APGuiCtx): void {
       site.fence.height / 1000,
       (v, c) => {
         site.fence.height = Math.round(v * 1000)
-        ctx.applySite(c)
+        if (c) ctx.applySite(true)
+        else ctx.applyFenceLive() // kéo cao tường = path tinh gọn (chỉ rào)
       },
       1000
     )
   )
+  buildGateControls(body, ctx)
+}
+
+// CỔNG ra vào (chỉ hiệu lực Type=Wall): bật + cạnh; slider tách buildGateSliders (giữ Rule-50).
+function buildGateControls(body: HTMLElement, ctx: APGuiCtx): void {
+  const site = ctx.site
+  body.appendChild(
+    toggleRow('Gate (cổng)', site.fence.gate ?? false, (on) => {
+      site.fence.gate = on
+      ctx.applySite(true)
+    })
+  )
+  const gateSideOpts: [string, string][] = [
+    ['Trước', '0'],
+    ['Sau', '1'],
+    ['Phải', '2'],
+    ['Trái', '3'],
+  ]
+  body.appendChild(
+    selectRow('Gate side', gateSideOpts, String(site.fence.gateSide ?? 0), (v) => {
+      site.fence.gateSide = Number(v)
+      ctx.applySite(true)
+    })
+  )
+  buildGateSliders(body, ctx)
+}
+
+// Slider cổng: bề rộng + vị trí dọc cạnh + chiều cao 2 cột (mm). Đều applySite(commit) kiểu live.
+function buildGateSliders(body: HTMLElement, ctx: APGuiCtx): void {
+  const f = ctx.site.fence
+  const mm = (
+    label: string,
+    min: number,
+    max: number,
+    val: number,
+    set: (mmv: number) => void
+  ): void => {
+    body.appendChild(
+      sliderRow(
+        label,
+        min,
+        max,
+        0.1,
+        val / 1000,
+        (v, c) => {
+          set(Math.round(v * 1000))
+          if (c) ctx.applySite(true)
+          else ctx.applyFenceLive() // kéo = path TINH GỌN (chỉ rào, LOD box) — i chang windows, hết tụt fps
+        },
+        1000
+      )
+    )
+  }
+  mm('Gate W m', 0.6, 6, f.gateWidth ?? 1400, (v) => (f.gateWidth = v))
+  mm('Gate pos m', -12, 12, f.gatePos ?? 0, (v) => (f.gatePos = v))
+  mm('Gate cột H m', 0.6, 3.5, f.gatePostH ?? 1600, (v) => (f.gatePostH = v))
 }
 
 // Nút ✕ xoá 1 instance hồ (hàng riêng, canh phải).
@@ -848,6 +917,7 @@ export function setupSitePanel(
   panel: HTMLElement
   dispose: () => void
   navigateToWater: (cfg: WaterConfig) => boolean
+  navigateToFence: () => void
 } {
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-site-panel'
@@ -886,6 +956,10 @@ export function setupSitePanel(
     navigateToWater: (cfg: WaterConfig): boolean => {
       tabs.select(3, { trusted: false })
       return water.navigateToWater(cfg)
+    },
+    // Click rào 3D → mở sub-tab "Fence" (index 1).
+    navigateToFence: (): void => {
+      tabs.select(1, { trusted: false })
     },
   }
 }

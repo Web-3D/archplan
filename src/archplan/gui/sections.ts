@@ -163,7 +163,11 @@ function buildSlabSubfolder(parent: GUI, s: StructureState, ctx: APGuiCtx): GUI 
   f.add(s, 'showSlab').name('Show slab').onChange(ctx.build)
   live(f.add(s, 'slabThick', 50, 500, 10).name('Thickness mm'), ctx)
   s.slabMaterial ??= 'none' // backfill design cũ (né gui.add(undefined) blank app)
-  f.add(s, 'slabMaterial', { Concrete: 'none', 'Wood (demo)': 'wood' })
+  f.add(s, 'slabMaterial', {
+    Concrete: 'none',
+    'Wood (demo)': 'wood',
+    'Walnut (tex)': 'walnut-tex', // 🪵 texture ảnh PBR (PhotoGround, sàn ngang) — lab load + bơm material
+  })
     .name('Material')
     .onChange(ctx.build)
   return f
@@ -189,6 +193,15 @@ function buildOneBalcony(parent: GUI, inst: ShapeInstance, balconyIdx: number, c
   live(f.add(b, 'y', -3000, 12000, 50).name('Y mm'), ctx)
   live(f.add(b, 'railH', 200, 2000, 50).name('Rail H mm'), ctx)
   live(f.add(b, 'slabT', 50, 400, 10).name('Slab T mm'), ctx)
+  b.railStyle ??= 'solid' // backfill design cũ (né gui.add(undefined))
+  f.add(b, 'railStyle', {
+    'Solid (bê tông)': 'solid',
+    'Metal + thanh dọc': 'metal-bar',
+    'Gỗ vuông + thanh dọc': 'wood-bar',
+    'Khung kính (phản chiếu)': 'glass-frame',
+  })
+    .name('Rail style')
+    .onChange(ctx.build)
   f.add(
     {
       fn: () => {

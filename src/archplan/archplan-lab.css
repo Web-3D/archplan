@@ -1486,13 +1486,30 @@
   border-bottom-color: transparent;
   color: #e8f2dc; /* text */
 }
-/* ── 🎛️ Lab = bàn thí nghiệm: nền TRẮNG (theo yêu cầu) — như trang giấy lab; preview WebGPU nổi giữa. ── */
-.ap-drawer .ap-lab-panel {
-  background: #f5f7f5; /* gần trắng (giảm chói trên drawer tối) */
+/* ── 🧪 Lab = PHẦN RIÊNG: float persistent NGOÀI drawer (tách khỏi GUI chung — Factory phát triển vật thể
+   mới, độc lập scene). Toggle 🧪 bật/tắt; kéo theo title. Nền TRẮNG như trang giấy lab; preview WebGPU giữa. */
+.ap-lab-float {
+  position: absolute;
+  top: 48px;
+  right: 64px;
+  z-index: 210;
+  width: 248px;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+.ap-lab-float.ap-lab-hidden {
+  opacity: 0;
+  transform: scale(0.96);
+  pointer-events: none; /* ẩn = không bắt chuột */
+}
+.ap-lab-float .ap-lab-panel {
+  background: #f5f7f5; /* gần trắng */
   border-color: #c7cdc9;
   color: #2a322c; /* chữ tối trên nền sáng */
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4); /* nổi khỏi scene */
 }
-.ap-drawer .ap-lab-panel .ap-scan-title {
+.ap-lab-float .ap-lab-panel .ap-scan-title {
   color: #3a4a3e; /* tiêu đề tối */
 }
 .ap-lab-note {
@@ -1503,8 +1520,31 @@
   padding-bottom: 5px;
   border-bottom: 1px dashed #cdd4cf;
 }
-.ap-drawer .ap-lab-panel .ap-preview-host {
+.ap-lab-float .ap-lab-panel .ap-preview-host {
   margin-top: 0; /* preview ngay dưới note (không dồn đáy) */
+}
+/* 🧪 nút toggle Lab — góc trên-phải (cạnh tay kéo drawer). on = viền vàng. */
+.ap-lab-toggle {
+  position: absolute;
+  top: 8px;
+  right: 26px;
+  z-index: 211;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(180, 200, 188, 0.4);
+  border-radius: 7px;
+  background: rgba(14, 46, 38, 0.92);
+  color: #eef3f0;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ap-lab-toggle:hover {
+  background: rgba(14, 46, 38, 0.98);
+}
+.ap-lab-toggle.ap-lab-toggle-on {
+  border-color: #e0b860; /* vàng = đang hiện */
+  box-shadow: 0 0 0 1px #e0b860 inset;
 }
 /* ── 🎛️ Tinh chỉnh: BẬC TAB con (Lá đơn | Bụi cỏ) — folder-style như Ground, tông XANH RÊU hợp cỏ. ── */
 .ap-tweak-tabs {
