@@ -95,7 +95,7 @@ Tầng layer (`groundLayers[]`, mesh `userData.groundLayerIdx` trong `siteGroup`
 | Tương tác | Tầng ground làm sao |
 |---|---|
 | **🤚 Move** | Raycast `siteGroup` tìm mesh có `groundLayerIdx` (`_tryStartLayerDrag`, gọi SAU khi nhường building element). Kéo mặt-phẳng-ngang @điểm-neo → **dời `mesh.position`** (0 rebuild — né recompile NodeMaterial / reflector RTT mỗi frame; `PERFORMANCE.md`). Thả → gập Δ vào `offsetX/Z` + `_applySite(true)` (re-carve lỗ nước + autosave). Anchor: `_tryStartLayerDrag` / `_layerDragMove` / `_commitLayerDrag`; clear ở `_setMoveMode`. |
-| **👆 Focus** | click tầng 3D → trỏ GUI Ground▸Gn (đang thêm). |
+| **👆 Focus** | click tầng 3D (gần hơn building pick) → mở drawer Ground → sub-tab Ground → instance tab **Gn**. Anchor: `_tryClickLayer`/`_navigateToLayer` (lab) → site `navigateToGroundLayer` → ground domain `navigateToLayer` (chọn tab idx+1; G0=tab0). G0 base KHÔNG tag → không focus. |
 | **🎨 Paint / P Pick** | KHÔNG — chỉnh qua GUI Ground ▸ G1/G2… (Surface / Length / Width / Thickness / ✕). |
 
 > Lỗ né nước (pool/pond/puddle + dải edge) carve ở **lõi** `site/render/fromState.ts` (`buildGroundLayers`→`layerGeometry` clip Sutherland-Hodgman). Kéo live: lỗ đi theo tạm, re-carve khi thả.

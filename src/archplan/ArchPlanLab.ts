@@ -291,6 +291,7 @@ export class ArchPlanLab extends BaseWorld {
   private _siteDispose: (() => void) | null = null // teardown tab CON panel Ground (outer + Garden domain + Water domain)
   private _siteNavigate: ((cfg: WaterConfig) => boolean) | null = null // click hồ 3D → nhảy GUI tới tab hồ đó
   private _siteNavigateFence: ((idx: number) => void) | null = null // 🧱 click rào 3D → nhảy GUI tới lớp rào idx
+  private _siteNavigateLayer: ((idx: number) => void) | null = null // 🟫 click tầng ground 3D → nhảy GUI Ground▸Gn
   private drawerPanels: HTMLElement[] = [] // panel non-gui trong drawer (Ground + Lab) — gỡ khi teardown
   private _drawerTab = 0 // tab drawer đang mở — nhớ qua _rebuildGUI
   private lDrawer: HTMLElement | null = null // drawer TRÁI: bảng Tools (Surface+tọa độ) — ẩn mặc định
@@ -681,6 +682,7 @@ export class ArchPlanLab extends BaseWorld {
     if (dx * dx + dy * dy >= 25) return // kéo/orbit, không phải click
     if (this.waterTool?.tryClick(e)) return // 💧 click trúng hồ → trỏ GUI hồ
     if (this._tryClickFence(e)) return // 🧱 click trúng rào → trỏ GUI Fence
+    if (this._tryClickLayer(e)) return // 🟫 click trúng tầng ground → trỏ GUI Ground▸Gn
     this.manipulate?.clickFocus(e) // building element → trỏ folder tương ứng
   }
   // Chuột phải khi đang pick/paint/move → thoát mode + chặn menu chuột phải
@@ -789,6 +791,26 @@ export class ArchPlanLab extends BaseWorld {
     if (pHit && pHit.distance < fHit.distance) return false // building element gần hơn → nhường
     this._navigateToFence(Math.max(0, this._fenceIdxOf(fHit.object)))
     return true
+  }
+
+  // 🟫 Click trúng TẦNG ground (G1+, mesh có groundLayerIdx) GẦN HƠN building pick → trỏ GUI Ground▸Gn. Trả
+  // false (không trúng / building gần hơn) → nhường building. G0 base không có tag → bỏ qua.
+  private _tryClickLayer(e: PointerEvent): boolean {
+    if (!this.site.show || !this.site.groundLayers?.length) return false
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const hits = this._ray.intersectObjects(this.siteGroup.children, true)
+    const hit = hits.find((h) => typeof h.object.userData.groundLayerIdx === 'number')
+    if (!hit) return false
+    const pHit = this._ray.intersectObjects(this.pickGroup.children, false)[0]
+    if (pHit && pHit.distance < hit.distance) return false // building element gần hơn → nhường
+    this._navigateToLayer(hit.object.userData.groundLayerIdx as number)
+    return true
+  }
+
+  // 🟫 Click trúng TẦNG ground → mở GUI: drawer "Ground" (idx1) → sub-tab "Ground" → instance tab Gn.
+  private _navigateToLayer(idx: number): void {
+    this.drawerTabs?.select(1, { trusted: false }) // Building|Ground|Lab → Ground
+    this._siteNavigateLayer?.(idx)
   }
 
   // 🚪 Nhấn Move trúng pick-box CỔNG → bắt đầu kéo trượt cổng dọc cạnh rào. Trả false (không trúng / building
@@ -974,13 +996,13 @@ export class ArchPlanLab extends BaseWorld {
     this.controls.target.add(move)
   }
 
-  // ⟲/⟳ GIỮ Z = xoay camera trái · C = xoay phải (quanh tâm orbit, mặt phẳng ngang/azimuth). Rơi vào _keysDown
+  // ⟲/⟳ GIỮ Z = xoay camera phải · C = xoay trái (quanh tâm orbit, mặt phẳng ngang/azimuth). Rơi vào _keysDown
   // như WASD → giữ phím là xoay liên tục; controls.update() (onUpdate) orient camera lại về target.
   private _applyRotate(): void {
     if (!this.controls) return
     let dir = 0
-    if (this._keysDown.has('KeyZ')) dir -= 1 // trái
-    if (this._keysDown.has('KeyC')) dir += 1 // phải
+    if (this._keysDown.has('KeyZ')) dir += 1 // phải
+    if (this._keysDown.has('KeyC')) dir -= 1 // trái
     if (dir === 0) return
     const angle = dir * 0.03 // rad mỗi frame (~1.7°)
     const t = this.controls.target
@@ -1501,6 +1523,7 @@ export class ArchPlanLab extends BaseWorld {
     this._siteDispose = site.dispose
     this._siteNavigate = site.navigateToWater // refresh mỗi _rebuildGUI (panel dựng lại) → luôn trỏ panel hiện tại
     this._siteNavigateFence = site.navigateToFence // 🧱 click rào 3D → sub-tab Fence
+    this._siteNavigateLayer = site.navigateToGroundLayer // 🟫 click tầng ground 3D → sub-tab Ground▸Gn
     this.drawerPanels = [site.panel] // chỉ Ground (Lab ở float riêng); gỡ khi teardown
     this._buildDrawerTabs(drawerBody, site.panel)
     this._buildFloatingTools(ctx)
@@ -1761,6 +1784,7 @@ export class ArchPlanLab extends BaseWorld {
     this._siteDispose = null
     this._siteNavigate = null // panel cũ gỡ → bỏ ref navigate (gắn lại ở _buildLeftTools kế tiếp)
     this._siteNavigateFence = null
+    this._siteNavigateLayer = null
     // tab con cỏ (Lá đơn|Bụi cỏ + Số đo|Độ cong|Bóng đổ) + Garden Tabs do site.dispose() lo; Lab panel = preview-only (no Tabs)
     this.drawerTabs?.dispose() // gỡ tab bar drawer (KHÔNG đụng panel — caller sở hữu)
     this.drawerTabs = null

@@ -264,7 +264,7 @@ function buildLotSliders(body: HTMLElement, ctx: APGuiCtx, refresh: () => void):
 function buildGroundDomain(
   ctx: APGuiCtx,
   refresh: () => void
-): { panel: HTMLElement; dispose: () => void } {
+): { panel: HTMLElement; dispose: () => void; navigateToLayer: (idx: number) => void } {
   const host = document.createElement('div')
   host.classList.add('ap-ground-domain')
   let tabs: Tabs | null = null
@@ -299,7 +299,16 @@ function buildGroundDomain(
     })
   }
   rebuild()
-  return { panel: host, dispose: (): void => tabs?.dispose() }
+  return {
+    panel: host,
+    dispose: (): void => tabs?.dispose(),
+    // Click tầng 3D → chọn tab Gn (idx 0-based → tab idx+1 vì G0 base = tab 0).
+    navigateToLayer: (idx: number): void => {
+      const n = ctx.site.groundLayers?.length ?? 0
+      if (n === 0) return
+      tabs?.select(Math.max(0, Math.min(idx, n - 1)) + 1, { trusted: false })
+    },
+  }
 }
 
 // 1 pane tầng surface chồng: Surface (vật liệu) + Thickness 1–10cm + ✕ xoá. Xoá → splice + rebuild + applySite.
@@ -1112,6 +1121,7 @@ export function setupSitePanel(
   dispose: () => void
   navigateToWater: (cfg: WaterConfig) => boolean
   navigateToFence: (idx: number) => void
+  navigateToGroundLayer: (idx: number) => void
 } {
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-site-panel'
@@ -1159,6 +1169,11 @@ export function setupSitePanel(
     navigateToFence: (idx: number): void => {
       tabs.select(1, { trusted: false })
       fence.navigateToFence(idx)
+    },
+    // Click tầng ground 3D → mở sub-tab "Ground" (index 0) + tab Gn của layer idx.
+    navigateToGroundLayer: (idx: number): void => {
+      tabs.select(0, { trusted: false })
+      ground.navigateToLayer(idx)
     },
   }
 }
