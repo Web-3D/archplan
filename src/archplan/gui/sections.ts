@@ -108,6 +108,15 @@ function addMaterialControls(folder: GUI, seg: SegmentState, ctx: APGuiCtx): voi
     addBrickControls(folder, seg, ctx, seg.material === 'brick') // relief chỉ cho shader brick
   }
   if (seg.material === 'wood-strip') addWoodStripControls(folder, seg, ctx)
+  if (seg.material === 'jp-shoji-glass') addShojiGlassControls(folder, seg, ctx)
+}
+
+// Controls kính shoji (jp-shoji-glass): độ phản chiếu + độ mờ ô kính. Self-heal field thiếu (né gui.add undefined).
+function addShojiGlassControls(folder: GUI, seg: SegmentState, ctx: APGuiCtx): void {
+  if (typeof seg.glassReflect !== 'number') seg.glassReflect = 0.6
+  if (typeof seg.glassOpacity !== 'number') seg.glassOpacity = 0.45
+  live(folder.add(seg, 'glassReflect', 0, 1, 0.02).name('Reflect'), ctx)
+  live(folder.add(seg, 'glassOpacity', 0, 1, 0.02).name('Opacity (mờ)'), ctx)
 }
 
 // Controls màu rãnh vữa (brick/brick-3d) + độ lõm/đậm rãnh (chỉ 'brick' shader) — range 0–2 (đậm hơn).
