@@ -125,6 +125,10 @@ function buildSlabSubfolder(parent: GUI, s: StructureState, ctx: APGuiCtx): GUI 
   f.domElement.classList.add('ap-found') // chung style nhỏ 7px với Foundation/Stairs
   f.add(s, 'showSlab').name('Show slab').onChange(ctx.build)
   live(f.add(s, 'slabThick', 50, 500, 10).name('Thickness mm'), ctx)
+  s.slabMaterial ??= 'none' // backfill design cũ (né gui.add(undefined) blank app)
+  f.add(s, 'slabMaterial', { Concrete: 'none', 'Wood (demo)': 'wood' })
+    .name('Material')
+    .onChange(ctx.build)
   return f
 }
 
