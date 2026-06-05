@@ -25,7 +25,7 @@ export default {
   build: {
     outDir: '../dist',
     emptyOutDir: true,
-    sourcemap: true,
+    sourcemap: false, // prod: giấu source TS + nhẹ ~6MB. Dev (:3002) vẫn có sourcemap để debug.
     rollupOptions: {
       input: { main: resolve(__dirname, 'src/index.html') },
       output: { manualChunks: { 'three-vendor': ['three'] } },

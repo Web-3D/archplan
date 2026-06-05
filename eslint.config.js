@@ -9,7 +9,7 @@ import globals from 'globals'
 /** @type {import('eslint').Linter.FlatConfig[]} */
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', '*.config.js'],
+    ignores: ['dist/**', 'node_modules/**', '*.config.js', 'src/public/**'],
   },
 
   js.configs.recommended,

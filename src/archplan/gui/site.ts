@@ -133,7 +133,8 @@ function selectRow<T extends string>(
   label: string,
   opts: [string, T][],
   initial: T,
-  onChange: (v: T) => void
+  onChange: (v: T) => void,
+  onOpen?: () => void // ⏳ mousedown (user sắp mở dropdown) → prefetch (câu giờ chờ load)
 ): HTMLElement {
   const row = document.createElement('div')
   row.style.cssText = 'display:flex;align-items:center;gap:4px;margin-bottom:4px'
@@ -151,6 +152,7 @@ function selectRow<T extends string>(
     sel.appendChild(o)
   }
   sel.addEventListener('change', () => onChange(sel.value as T))
+  if (onOpen) sel.addEventListener('mousedown', onOpen)
   row.appendChild(lbl)
   row.appendChild(sel)
   return row
@@ -211,10 +213,16 @@ function buildGroundControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => vo
     })
   )
   body.appendChild(
-    selectRow('Surface', GROUND_OPTS, site.ground, (v) => {
-      site.ground = v
-      ctx.applySite(true)
-    })
+    selectRow(
+      'Surface',
+      GROUND_OPTS,
+      site.ground,
+      (v) => {
+        site.ground = v
+        ctx.applySite(true)
+      },
+      () => ctx.prefetchGroundTextures?.()
+    )
   )
   body.appendChild(
     sliderRow(
@@ -346,10 +354,16 @@ function buildGroundLayerPane(
 ): HTMLElement {
   const pane = document.createElement('div')
   pane.appendChild(
-    selectRow('Surface', GROUND_OPTS, layer.material, (v) => {
-      layer.material = v
-      ctx.applySite(true)
-    })
+    selectRow(
+      'Surface',
+      GROUND_OPTS,
+      layer.material,
+      (v) => {
+        layer.material = v
+        ctx.applySite(true)
+      },
+      () => ctx.prefetchGroundTextures?.()
+    )
   )
   pane.appendChild(layerSlider(ctx, layer, 'length', 'Length m', 0.5, 40, 0.1, 1000))
   pane.appendChild(layerSlider(ctx, layer, 'width', 'Width m', 0.5, 40, 0.1, 1000))

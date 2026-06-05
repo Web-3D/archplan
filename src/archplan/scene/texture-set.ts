@@ -5,8 +5,9 @@
  *            colorSpace (srgb/linear theo manifest) + anisotropy → trả PhotoGroundMaps cho lõi PhotoGround.
  * LIÊN HỆ  — Dùng bởi ArchPlanLab (ground 'grass-tex'). Spec = url + colorSpace mỗi map (lấy từ meta.json).
  *
- * ⚠️ KTX2: cần transcoder (basis) + renderer.detectSupport. Hiện asset là JPG nên nhánh KTX2 CHƯA chạy
- *    thực tế (toktx chưa cài) — đã đặt sẵn, finalize + test khi có .ktx2. JPG path đầy đủ.
+ * ⚠️ KTX2: cần transcoder (basis, serve local từ public/basis/) + renderer.detectSupport. Asset production/ =
+ *    .ktx2 (toktx v4.4: basecolor ETC1S sRGB, normal UASTC RDO linear, rough/ao ETC1S linear, genmipmap).
+ *    JPG path vẫn giữ (loadOne chọn loader theo đuôi) cho consumer khác / fallback.
  */
 
 import { NoColorSpace, RepeatWrapping, SRGBColorSpace, type Texture, TextureLoader } from 'three'
@@ -31,9 +32,10 @@ export interface SurfaceTextureSpec {
 let _ktx2: KTX2Loader | null = null
 function ktx2Loader(renderer: WebGPURenderer): KTX2Loader {
   if (_ktx2) return _ktx2
-  // Transcoder basis từ CDN three 0.174 (khớp version). detectSupport: WebGPURenderer ok (cast type examples).
+  // Transcoder basis serve LOCAL từ public/basis/ (copy từ three/examples/jsm/libs/basis — khớp version 0.174).
+  // KHÔNG dùng CDN: deploy không phụ thuộc mạng ngoài + offline-safe. detectSupport: WebGPURenderer ok (cast type examples).
   _ktx2 = new KTX2Loader()
-    .setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/libs/basis/')
+    .setTranscoderPath('/basis/')
     .detectSupport(renderer as unknown as Parameters<KTX2Loader['detectSupport']>[0])
   return _ktx2
 }

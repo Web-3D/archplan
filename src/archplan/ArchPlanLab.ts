@@ -19,77 +19,77 @@
 import './archplan-lab.css'
 
 import bgravelManifest from 'assets/textures/beach_gravel/meta.json'
-import bgravelAoUrl from 'assets/textures/beach_gravel/production/ao.jpg?url'
-import bgravelBaseColorUrl from 'assets/textures/beach_gravel/production/basecolor.jpg?url'
-import bgravelNormalUrl from 'assets/textures/beach_gravel/production/normal.jpg?url'
-import bgravelRoughnessUrl from 'assets/textures/beach_gravel/production/roughness.jpg?url'
+import bgravelAoUrl from 'assets/textures/beach_gravel/production/ao.ktx2?url'
+import bgravelBaseColorUrl from 'assets/textures/beach_gravel/production/basecolor.ktx2?url'
+import bgravelNormalUrl from 'assets/textures/beach_gravel/production/normal.ktx2?url'
+import bgravelRoughnessUrl from 'assets/textures/beach_gravel/production/roughness.ktx2?url'
 // 🧱 Fence wall 'cinder'/'stone' = tường DỌC → TexturedSurface (triplanar). 4 map (có AO).
 import cinderManifest from 'assets/textures/cinder-blocks-wall/meta.json'
-import cinderAoUrl from 'assets/textures/cinder-blocks-wall/production/ao.jpg?url'
-import cinderBaseColorUrl from 'assets/textures/cinder-blocks-wall/production/basecolor.jpg?url'
-import cinderNormalUrl from 'assets/textures/cinder-blocks-wall/production/normal.jpg?url'
-import cinderRoughnessUrl from 'assets/textures/cinder-blocks-wall/production/roughness.jpg?url'
+import cinderAoUrl from 'assets/textures/cinder-blocks-wall/production/ao.ktx2?url'
+import cinderBaseColorUrl from 'assets/textures/cinder-blocks-wall/production/basecolor.ktx2?url'
+import cinderNormalUrl from 'assets/textures/cinder-blocks-wall/production/normal.ktx2?url'
+import cinderRoughnessUrl from 'assets/textures/cinder-blocks-wall/production/roughness.ktx2?url'
 import cgravelManifest from 'assets/textures/construction_grave/meta.json'
-import cgravelAoUrl from 'assets/textures/construction_grave/production/ao.jpg?url'
-import cgravelBaseColorUrl from 'assets/textures/construction_grave/production/basecolor.jpg?url'
-import cgravelNormalUrl from 'assets/textures/construction_grave/production/normal.jpg?url'
-import cgravelRoughnessUrl from 'assets/textures/construction_grave/production/roughness.jpg?url'
+import cgravelAoUrl from 'assets/textures/construction_grave/production/ao.ktx2?url'
+import cgravelBaseColorUrl from 'assets/textures/construction_grave/production/basecolor.ktx2?url'
+import cgravelNormalUrl from 'assets/textures/construction_grave/production/normal.ktx2?url'
+import cgravelRoughnessUrl from 'assets/textures/construction_grave/production/roughness.ktx2?url'
 // 🪵 Gỗ KHUNG-DƯỚI stone-pillar (understructMaterial='wood-tex') = Old Plywood — tách hẳn vân deck.
 import oldplyManifest from 'assets/textures/Old-piwood/meta.json'
-import oldplyAoUrl from 'assets/textures/Old-piwood/production/ao.jpg?url'
-import oldplyBaseColorUrl from 'assets/textures/Old-piwood/production/basecolor.jpg?url'
-import oldplyNormalUrl from 'assets/textures/Old-piwood/production/normal.jpg?url'
-import oldplyRoughnessUrl from 'assets/textures/Old-piwood/production/roughness.jpg?url'
+import oldplyAoUrl from 'assets/textures/Old-piwood/production/ao.ktx2?url'
+import oldplyBaseColorUrl from 'assets/textures/Old-piwood/production/basecolor.ktx2?url'
+import oldplyNormalUrl from 'assets/textures/Old-piwood/production/normal.ktx2?url'
+import oldplyRoughnessUrl from 'assets/textures/Old-piwood/production/roughness.ktx2?url'
 // 🏜️ Ground texture thêm (sand/gravel/asphalt) — PhotoGround, keyed theo GroundMaterialKey.
 import sandManifest from 'assets/textures/rippled_sand/meta.json'
-import sandAoUrl from 'assets/textures/rippled_sand/production/ao.jpg?url'
-import sandBaseColorUrl from 'assets/textures/rippled_sand/production/basecolor.jpg?url'
-import sandNormalUrl from 'assets/textures/rippled_sand/production/normal.jpg?url'
-import sandRoughnessUrl from 'assets/textures/rippled_sand/production/roughness.jpg?url'
+import sandAoUrl from 'assets/textures/rippled_sand/production/ao.ktx2?url'
+import sandBaseColorUrl from 'assets/textures/rippled_sand/production/basecolor.ktx2?url'
+import sandNormalUrl from 'assets/textures/rippled_sand/production/normal.ktx2?url'
+import sandRoughnessUrl from 'assets/textures/rippled_sand/production/roughness.ktx2?url'
 import romanManifest from 'assets/textures/roman_stone_floor/meta.json'
-import romanAoUrl from 'assets/textures/roman_stone_floor/production/ao.jpg?url'
-import romanBaseColorUrl from 'assets/textures/roman_stone_floor/production/basecolor.jpg?url'
-import romanNormalUrl from 'assets/textures/roman_stone_floor/production/normal.jpg?url'
-import romanRoughnessUrl from 'assets/textures/roman_stone_floor/production/roughness.jpg?url'
+import romanAoUrl from 'assets/textures/roman_stone_floor/production/ao.ktx2?url'
+import romanBaseColorUrl from 'assets/textures/roman_stone_floor/production/basecolor.ktx2?url'
+import romanNormalUrl from 'assets/textures/roman_stone_floor/production/normal.ktx2?url'
+import romanRoughnessUrl from 'assets/textures/roman_stone_floor/production/roughness.ktx2?url'
 import asphaltManifest from 'assets/textures/rough_asphalt/meta.json'
-import asphaltAoUrl from 'assets/textures/rough_asphalt/production/ao.jpg?url'
-import asphaltBaseColorUrl from 'assets/textures/rough_asphalt/production/basecolor.jpg?url'
-import asphaltNormalUrl from 'assets/textures/rough_asphalt/production/normal.jpg?url'
-import asphaltRoughnessUrl from 'assets/textures/rough_asphalt/production/roughness.jpg?url'
+import asphaltAoUrl from 'assets/textures/rough_asphalt/production/ao.ktx2?url'
+import asphaltBaseColorUrl from 'assets/textures/rough_asphalt/production/basecolor.ktx2?url'
+import asphaltNormalUrl from 'assets/textures/rough_asphalt/production/normal.ktx2?url'
+import asphaltRoughnessUrl from 'assets/textures/rough_asphalt/production/roughness.ktx2?url'
 import stoneManifest from 'assets/textures/stone-wall/meta.json'
-import stoneAoUrl from 'assets/textures/stone-wall/production/ao.jpg?url'
-import stoneBaseColorUrl from 'assets/textures/stone-wall/production/basecolor.jpg?url'
-import stoneNormalUrl from 'assets/textures/stone-wall/production/normal.jpg?url'
-import stoneRoughnessUrl from 'assets/textures/stone-wall/production/roughness.jpg?url'
+import stoneAoUrl from 'assets/textures/stone-wall/production/ao.ktx2?url'
+import stoneBaseColorUrl from 'assets/textures/stone-wall/production/basecolor.ktx2?url'
+import stoneNormalUrl from 'assets/textures/stone-wall/production/normal.ktx2?url'
+import stoneRoughnessUrl from 'assets/textures/stone-wall/production/roughness.ktx2?url'
 // 🌳 Vỏ cây KHUNG-DƯỚI stone-pillar (understructMaterial='bark-tex') = Tree Bark — tuỳ chọn thứ 2.
 import barkManifest from 'assets/textures/tree_bark/meta.json'
-import barkAoUrl from 'assets/textures/tree_bark/production/ao.jpg?url'
-import barkBaseColorUrl from 'assets/textures/tree_bark/production/basecolor.jpg?url'
-import barkNormalUrl from 'assets/textures/tree_bark/production/normal.jpg?url'
-import barkRoughnessUrl from 'assets/textures/tree_bark/production/roughness.jpg?url'
+import barkAoUrl from 'assets/textures/tree_bark/production/ao.ktx2?url'
+import barkBaseColorUrl from 'assets/textures/tree_bark/production/basecolor.ktx2?url'
+import barkNormalUrl from 'assets/textures/tree_bark/production/normal.ktx2?url'
+import barkRoughnessUrl from 'assets/textures/tree_bark/production/roughness.ktx2?url'
 // 🌱 Texture ground 'grass-tex' = Uncut Grass (assets/textures/uncut-grass). Manifest cho tileSizeMeters;
 // ?url cho từng map (Vite serve qua alias 'assets' + fs.allow). Loader chọn KTX2/Texture theo đuôi file.
 import grassManifest from 'assets/textures/uncut-grass/meta.json'
-import grassAoUrl from 'assets/textures/uncut-grass/production/ao.jpg?url'
-import grassBaseColorUrl from 'assets/textures/uncut-grass/production/basecolor.jpg?url'
-import grassNormalUrl from 'assets/textures/uncut-grass/production/normal.jpg?url'
-import grassRoughnessUrl from 'assets/textures/uncut-grass/production/roughness.jpg?url'
+import grassAoUrl from 'assets/textures/uncut-grass/production/ao.ktx2?url'
+import grassBaseColorUrl from 'assets/textures/uncut-grass/production/basecolor.ktx2?url'
+import grassNormalUrl from 'assets/textures/uncut-grass/production/normal.ktx2?url'
+import grassRoughnessUrl from 'assets/textures/uncut-grass/production/roughness.ktx2?url'
 // 🪵 Slab 'walnut-tex' = Walnut Veneer (sàn NGANG → PhotoGround). KHÔNG có AO map (scan thiếu).
 import walnutManifest from 'assets/textures/walnut-veneer/meta.json'
-import walnutBaseColorUrl from 'assets/textures/walnut-veneer/production/basecolor.jpg?url'
-import walnutNormalUrl from 'assets/textures/walnut-veneer/production/normal.jpg?url'
-import walnutRoughnessUrl from 'assets/textures/walnut-veneer/production/roughness.jpg?url'
+import walnutBaseColorUrl from 'assets/textures/walnut-veneer/production/basecolor.ktx2?url'
+import walnutNormalUrl from 'assets/textures/walnut-veneer/production/normal.ktx2?url'
+import walnutRoughnessUrl from 'assets/textures/walnut-veneer/production/roughness.ktx2?url'
 // 🪵 Gỗ DECK móng 'wood-tex' + slab 'planks-tex' = Wooden Planks (TexturedSurface triplanar — móng có mặt 3D).
 import planksManifest from 'assets/textures/Wooden_Plank/meta.json'
-import planksAoUrl from 'assets/textures/Wooden_Plank/production/ao.jpg?url'
-import planksBaseColorUrl from 'assets/textures/Wooden_Plank/production/basecolor.jpg?url'
-import planksNormalUrl from 'assets/textures/Wooden_Plank/production/normal.jpg?url'
-import planksRoughnessUrl from 'assets/textures/Wooden_Plank/production/roughness.jpg?url'
+import planksAoUrl from 'assets/textures/Wooden_Plank/production/ao.ktx2?url'
+import planksBaseColorUrl from 'assets/textures/Wooden_Plank/production/basecolor.ktx2?url'
+import planksNormalUrl from 'assets/textures/Wooden_Plank/production/normal.ktx2?url'
+import planksRoughnessUrl from 'assets/textures/Wooden_Plank/production/roughness.ktx2?url'
 import pavementManifest from 'assets/textures/worn_pavement/meta.json'
-import pavementAoUrl from 'assets/textures/worn_pavement/production/ao.jpg?url'
-import pavementBaseColorUrl from 'assets/textures/worn_pavement/production/basecolor.jpg?url'
-import pavementNormalUrl from 'assets/textures/worn_pavement/production/normal.jpg?url'
-import pavementRoughnessUrl from 'assets/textures/worn_pavement/production/roughness.jpg?url'
+import pavementAoUrl from 'assets/textures/worn_pavement/production/ao.ktx2?url'
+import pavementBaseColorUrl from 'assets/textures/worn_pavement/production/basecolor.ktx2?url'
+import pavementNormalUrl from 'assets/textures/worn_pavement/production/normal.ktx2?url'
+import pavementRoughnessUrl from 'assets/textures/worn_pavement/production/roughness.ktx2?url'
 import { computeLocalBbox } from 'building-kit/build' // footprint nhà (m²) cho bảng số liệu lô
 import { renderBuildingState } from 'building-kit/render/fromState' // renderer chung lõi (Phase 1b)
 import { makeSurfaceMaterial, WallMaterialCache } from 'building-kit/wallMaterials' // material engine
@@ -429,6 +429,11 @@ export class ArchPlanLab extends BaseWorld {
     Record<'cinder' | 'stone', { maps: TexturedSurfaceMaps; surf: TexturedSurface }>
   > = {}
   private _fenceTexLoading: Partial<Record<'cinder' | 'stone', boolean>> = {}
+  // ⏳ Badge "đang tải vật liệu" — hiện khi BẤT KỲ texture set đang load ASYNC ("câu giờ chờ load": user thấy
+  // ĐANG chạy chứ không tưởng đơ; texture KTX2 ~vài MB tải khi áp vật liệu mới). Tự-tạo lazy + CSS inline (KHÔNG
+  // đụng archplan-lab.css của Factory). Drive từ onUpdate, _texLoadShown = change-detect → chỉ chạm DOM khi đổi.
+  private _texLoadBadge: HTMLDivElement | null = null
+  private _texLoadShown = false
   // 💧 Hồ ĐANG SỐNG (đa-instance): cfg↔surf zip theo renderWaters(site). _activeWater = pool của tab đang
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
@@ -967,6 +972,40 @@ export class ArchPlanLab extends BaseWorld {
     this.css2dRenderer?.render(this.scene, this.camera)
     this.guard?.check()
     this.devHud?.update(this.renderer.info, deltaTime)
+    this._updateTexLoadBadge()
+  }
+
+  // ⏳ True nếu bất kỳ texture set nào đang load ASYNC (ground/slab/deck/khung-dưới/rào). Vài boolean → rẻ/frame.
+  private _anyTexLoading(): boolean {
+    return (
+      this._slabTexLoading ||
+      this._foundWoodLoading ||
+      this._underWoodLoading ||
+      this._underBarkLoading ||
+      Object.values(this._groundTexLoading).some(Boolean) ||
+      Object.values(this._fenceTexLoading).some(Boolean)
+    )
+  }
+
+  // ⏳ Toggle badge theo trạng thái load. Change-detect (_texLoadShown) → chỉ chạm DOM khi đổi (giữ fps-contract).
+  private _updateTexLoadBadge(): void {
+    const loading = this._anyTexLoading()
+    if (loading === this._texLoadShown) return
+    this._texLoadShown = loading
+    if (loading && !this._texLoadBadge) this._texLoadBadge = this._makeTexLoadBadge()
+    if (this._texLoadBadge) this._texLoadBadge.style.display = loading ? 'flex' : 'none'
+  }
+
+  private _makeTexLoadBadge(): HTMLDivElement {
+    const el = document.createElement('div')
+    el.textContent = '⏳ đang tải vật liệu…'
+    el.style.cssText =
+      'position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:50;display:none;' +
+      'align-items:center;gap:8px;padding:7px 14px;border-radius:999px;background:rgba(14,26,22,.86);' +
+      'color:#cde7dd;font:600 12px/1 ui-sans-serif,system-ui,sans-serif;border:1px solid rgba(120,200,170,.35);' +
+      'box-shadow:0 4px 14px rgba(0,0,0,.3);pointer-events:none;backdrop-filter:blur(4px)'
+    this.canvas.parentElement?.appendChild(el)
+    return el
   }
 
   private _applyHorizMove(move: THREE.Vector3, fwd: THREE.Vector3, speed: number): void {
@@ -1022,6 +1061,8 @@ export class ArchPlanLab extends BaseWorld {
     window.removeEventListener('pointerup', this._onPointerUp)
     this.canvas.removeEventListener('contextmenu', this._onContextMenu)
     this._keysDown.clear()
+    this._texLoadBadge?.remove()
+    this._texLoadBadge = null
     if (this._rafBuild) {
       cancelAnimationFrame(this._rafBuild)
       this._rafBuild = 0
@@ -1338,6 +1379,7 @@ export class ArchPlanLab extends BaseWorld {
       tuneWater: (cfg, apply, persist) => this._tuneWater(cfg, apply, persist),
       setActiveWater: (cfg) => this.waterTool?.setActiveCfg(cfg),
       previewWater: (cfg) => this.waterTool?.showOutline(cfg),
+      prefetchGroundTextures: () => this._prefetchGroundTextures(),
       applySun: () => this._applySun(),
       ...this._gridGroupCtx(),
       setPickMode: (on) => this._setPickMode(on),
@@ -2149,6 +2191,14 @@ export class ArchPlanLab extends BaseWorld {
       if (isGroundTexKey(l.material)) keys.add(l.material)
     }
     return [...keys]
+  }
+
+  // ⏳ Prefetch MỌI texture ground khả dụng (kick-off ASYNC; _ensureGroundTex tự guard trùng/đã-load). Gọi khi
+  // user mousedown dropdown Surface → bấm key nào cũng đã sẵn (hoặc đang tải → badge hiện). Bounded: chỉ ground set.
+  private _prefetchGroundTextures(): void {
+    for (const key of Object.keys(GROUND_TEX_SPEC) as GroundMaterialKey[]) {
+      this._ensureGroundTex(key)
+    }
   }
 
   // 🌱🏜️ Load texture set ground theo KEY (GROUND_TEX_SPEC) 1 lần/key, ASYNC. colorSpace theo PROTOCOL
