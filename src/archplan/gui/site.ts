@@ -18,8 +18,13 @@ import type {
 import { GROUND_THICK_MAX, GROUND_THICK_MIN, makeWater } from 'threejs-modules/site/state'
 import { type TabItem, Tabs } from 'threejs-modules/ui/Tabs'
 
-// Chất liệu bề mặt hồ — PLACEHOLDER: chỉ 'None' hiện tại; thêm tile/stone/concrete… khi làm material thật.
-const MATERIAL_OPTS: [string, WaterMaterialKey][] = [['None', 'none']]
+// Chất liệu mặt hồ (floor/wall): None (màu phẳng) | Caro (tile — checker + grout hồ bơi). Thêm stone/concrete… sau.
+const MATERIAL_OPTS: [string, WaterMaterialKey][] = [
+  ['None', 'none'],
+  ['Caro (tile)', 'tile'],
+]
+// Coping/edge chưa lát caro → chỉ 'None' (tách opts để dropdown Edge không hiện lựa chọn no-op).
+const EDGE_MAT_OPTS: [string, WaterMaterialKey][] = [['None', 'none']]
 
 import type { APGuiCtx } from './ctx'
 
@@ -288,17 +293,18 @@ function waterSlider(
   )
 }
 
-// Hàng chọn chất liệu (placeholder 'None'). Đổi → applySite (rebuild để áp material; hiện 'none' = no-op).
+// Hàng chọn chất liệu. Đổi → applySite (rebuild để áp material). opts: floor/wall = None+Caro; edge = None.
 type MatKey = 'floorMaterial' | 'wallMaterial' | 'edgeMaterial'
 function materialRow(
   host: HTMLElement,
   ctx: APGuiCtx,
   w: WaterConfig,
   label: string,
-  key: MatKey
+  key: MatKey,
+  opts: [string, WaterMaterialKey][] = MATERIAL_OPTS
 ): void {
   host.appendChild(
-    selectRow(label, MATERIAL_OPTS, w[key], (v) => {
+    selectRow(label, opts, w[key], (v) => {
       w[key] = v
       ctx.applySite(true)
     })
@@ -325,7 +331,7 @@ function buildEdgeTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig, withEdge
   waterSlider(host, ctx, w, 'Pos Z m', -10, 10, 'offsetZ')
   if (withEdge) {
     waterSlider(host, ctx, w, 'Edge width m', 0, 2, 'edgeWidth') // dải coping quanh hồ (0 = tắt)
-    materialRow(host, ctx, w, 'Edge mat', 'edgeMaterial')
+    materialRow(host, ctx, w, 'Edge mat', 'edgeMaterial', EDGE_MAT_OPTS) // coping: chỉ None (chưa lát caro)
   }
   const note = document.createElement('div')
   note.style.cssText = 'font-size:9px;opacity:.7;margin-top:4px;line-height:1.3'
@@ -397,17 +403,31 @@ function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void
 }
 type SurfKey = 'reflectivity' | 'flow' | 'distortion' | 'detail' | 'refract' | 'tint'
 
-// BẬC 4 "Bottom" (đáy hồ) → BẬC 5: Floor (đáy = màu đáy) | Walls (tường = độ sâu/chiều cao tường). Trả
-// Tabs (Floor|Walls) cho caller dispose. Lưu ý: basin 1 material → màu đáy (Floor) tô CẢ tường (chưa tách).
+// BẬC 4 "Bottom" (đáy hồ) → BẬC 5: Floor (đáy: màu + chất liệu) | Walls (tường: độ sâu + chất liệu). Trả
+// Tabs (Floor|Walls) cho caller dispose. Floor/wall = 2 mesh RIÊNG → material độc lập (None | Caro tile).
+// "Floor color" = màu nền (mat None) ĐỒNG THỜI màu GỐC dẫn xuất caro (mat tile) → đổi màu áp cả 2.
 function buildBottomTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): Tabs {
   const floor = document.createElement('div')
   floor.appendChild(
     colorRow('Floor color', w.bottomColor, (hex, c) => {
       w.bottomColor = hex
-      if (c) ctx.applySite(true) // material basin → dựng lại khi buông (không live)
+      if (c) ctx.applySite(true) // material basin → dựng lại khi buông (không live; tile dẫn xuất màu này)
     })
   )
   materialRow(floor, ctx, w, 'Floor mat', 'floorMaterial')
+  // 2 màu caro còn lại (ô chính = Floor color ở trên) — áp cho CẢ floor+wall khi mat='tile'. Đổi = rebuild.
+  floor.appendChild(
+    colorRow('Tile 2 color', w.tileColor2, (hex, c) => {
+      w.tileColor2 = hex
+      if (c) ctx.applySite(true)
+    })
+  )
+  floor.appendChild(
+    colorRow('Grout color', w.groutColor, (hex, c) => {
+      w.groutColor = hex
+      if (c) ctx.applySite(true)
+    })
+  )
   const walls = document.createElement('div')
   waterSlider(walls, ctx, w, 'Wall depth m', 0.1, 3, 'depthY') // depthY = độ sâu lòng hồ = chiều cao tường
   materialRow(walls, ctx, w, 'Wall mat', 'wallMaterial')
