@@ -167,6 +167,7 @@ function buildSlabSubfolder(parent: GUI, s: StructureState, ctx: APGuiCtx): GUI 
     Concrete: 'none',
     'Wood (demo)': 'wood',
     'Walnut (tex)': 'walnut-tex', // 🪵 texture ảnh PBR (PhotoGround, sàn ngang) — lab load + bơm material
+    'Wooden planks': 'planks-tex', // 🪵 dùng chung gỗ deck móng (Wooden Planks) — sàn + móng đồng vân
   })
     .name('Material')
     .onChange(ctx.build)
@@ -390,10 +391,14 @@ function buildFoundationSubfolder(parent: GUI, s: StructureState, ctx: APGuiCtx)
   const foundHMax = s.foundType === 'stone-pillar' ? 4000 : 2000 // trụ đá cao tới 4m (cột chống cao)
   live(f.add(s, 'foundH', 100, foundHMax, 50).name('Height'), ctx)
   if (s.foundType === 'wood-deck') {
+    s.foundMaterial ??= 'none' // gỗ deck: None (MeshToon) | Wood planks (texture)
+    f.add(s, 'foundMaterial', { None: 'none', 'Wood (planks)': 'wood-tex' })
+      .name('Wood mat')
+      .onChange(ctx.build)
     s.deckPostSpacing ??= 1500
     live(f.add(s, 'deckPostSpacing', 600, 4000, 100).name('Post spacing mm'), ctx) // #10 mật độ lưới cột
   }
-  if (s.foundType === 'stone-pillar') buildStonePillarSliders(f, s, ctx)
+  if (s.foundType === 'stone-pillar') buildStonePillarFolders(f, s, ctx) // 3 tab con: Deck | Khung dưới | Trụ đá
   live(f.add(s.foundOh, 'n', 0, 2, 0.05).name('Expand N m'), ctx)
   live(f.add(s.foundOh, 'e', 0, 2, 0.05).name('Expand E m'), ctx)
   live(f.add(s.foundOh, 's', 0, 2, 0.05).name('Expand S m'), ctx)
@@ -401,19 +406,69 @@ function buildFoundationSubfolder(parent: GUI, s: StructureState, ctx: APGuiCtx)
   return f
 }
 
-// Slider riêng móng 'stone-pillar' (trụ đá giữa + tiết diện 16 xà + thanh chống xiên đốt/cong). Tách khỏi
-// buildFoundationSubfolder để giữ complexity ≤10. Backfill ??= cho design cũ (né gui.add undefined).
-function buildStonePillarSliders(f: GUI, s: StructureState, ctx: APGuiCtx): void {
-  s.pillarRadius ??= 500
+// Móng 'stone-pillar' chia 3 TAB CON (folder lồng) cho dễ chỉnh: Deck (sàn gỗ) | Khung dưới (xà/trụ/chống) |
+// Trụ đá giữa. Mỗi tab giữ riêng số đo + texture. Tách 3 hàm (mỗi tab) để mỗi hàm complexity ≤10 (backfill ??=).
+function buildStonePillarFolders(f: GUI, s: StructureState, ctx: APGuiCtx): void {
+  buildDeckFolder(f, s, ctx)
+  buildUnderstructFolder(f, s, ctx)
+  buildPillarFolder(f, s, ctx)
+}
+
+// Tab Deck — sàn gỗ ngang trên cùng. Texture = Wooden Planks (foundMaterial='wood-tex') + LAN CAN 4 mặt
+// tuỳ chọn (dài/rộng/cao chỉnh được, khung độc lập). Lan can merge chung deck → cùng vân gỗ.
+function buildDeckFolder(f: GUI, s: StructureState, ctx: APGuiCtx): void {
+  s.foundMaterial ??= 'none'
+  s.deckRailShow ??= false
+  s.deckRailH ??= 900
+  s.deckRailLength ??= 5000
+  s.deckRailWidth ??= 5000
+  const deck = f.addFolder('Deck')
+  deck.domElement.classList.add('ap-found')
+  deck
+    .add(s, 'foundMaterial', { None: 'none', 'Wood (planks)': 'wood-tex' })
+    .name('Wood mat')
+    .onChange(ctx.build)
+  deck.add(s, 'deckRailShow').name('Lan can 4 mặt').onChange(ctx.build)
+  live(deck.add(s, 'deckRailLength', 500, 12000, 100).name('Rail length mm'), ctx) // dài khung (X)
+  live(deck.add(s, 'deckRailWidth', 500, 12000, 100).name('Rail width mm'), ctx) // rộng khung (Z)
+  live(deck.add(s, 'deckRailH', 200, 2000, 50).name('Rail height mm'), ctx) // cao lan can
+}
+
+// Tab Khung dưới — 2 tầng 8 xà + 8 trụ + 8 chống xiên. ĐỘC LẬP deck (size riêng) + texture riêng
+// (Old Plywood | Tree Bark). Kéo deck KHÔNG ảnh hưởng khung-dưới.
+function buildUnderstructFolder(f: GUI, s: StructureState, ctx: APGuiCtx): void {
+  s.understructSize ??= 5000
+  s.understructMaterial ??= 'none'
+  s.postRadius ??= 67
+  s.postLength ??= 1500
   s.beamWidth ??= 100
   s.beamHeight ??= 120
   s.strutSegments ??= 6
   s.strutCurve ??= 0
-  live(f.add(s, 'pillarRadius', 150, 2000, 50).name('Pillar radius mm'), ctx) // bán kính trụ đá giữa
-  live(f.add(s, 'beamWidth', 30, 400, 10).name('Beam width mm'), ctx) // bề rộng tiết diện 16 xà
-  live(f.add(s, 'beamHeight', 30, 400, 10).name('Beam height mm'), ctx) // bề cao tiết diện 16 xà
-  live(f.add(s, 'strutSegments', 1, 16, 1).name('Strut segments'), ctx) // số đốt thanh chống xiên
-  live(f.add(s, 'strutCurve', -1500, 1500, 50).name('Strut curve mm'), ctx) // độ cong (0=thẳng)
+  const u = f.addFolder('Khung dưới')
+  u.domElement.classList.add('ap-found')
+  live(u.add(s, 'understructSize', 1000, 12000, 100).name('Size mm'), ctx) // kích thước khung (độc lập deck)
+  u.add(s, 'understructMaterial', {
+    None: 'none',
+    'Old plywood': 'wood-tex',
+    'Tree bark': 'bark-tex',
+  })
+    .name('Texture')
+    .onChange(ctx.build) // texture riêng khung-dưới
+  live(u.add(s, 'postRadius', 20, 300, 5).name('Post radius mm'), ctx) // bán kính 8 cột trụ
+  live(u.add(s, 'postLength', 300, 4000, 50).name('Post length mm'), ctx) // dài cột = gap 2 tầng xà (xà dưới + xiên theo)
+  live(u.add(s, 'beamWidth', 30, 400, 10).name('Beam width mm'), ctx) // bề rộng tiết diện 16 xà
+  live(u.add(s, 'beamHeight', 30, 400, 10).name('Beam height mm'), ctx) // bề cao tiết diện 16 xà
+  live(u.add(s, 'strutSegments', 1, 16, 1).name('Strut segments'), ctx) // số đốt thanh chống xiên
+  live(u.add(s, 'strutCurve', -1500, 1500, 50).name('Strut curve mm'), ctx) // độ cong (0=thẳng)
+}
+
+// Tab Trụ đá giữa — cột đá tròn trung tâm (cao = foundH).
+function buildPillarFolder(f: GUI, s: StructureState, ctx: APGuiCtx): void {
+  s.pillarRadius ??= 500
+  const p = f.addFolder('Trụ đá giữa')
+  p.domElement.classList.add('ap-found')
+  live(p.add(s, 'pillarRadius', 150, 2000, 50).name('Radius mm'), ctx) // bán kính trụ đá giữa
 }
 
 // Cầu thang — footprint chiếu lên Y khoét lỗ slab tầng trên (cầu thang đi xuống)

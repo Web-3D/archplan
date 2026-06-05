@@ -12,6 +12,7 @@
 
 import type {
   FenceConfig,
+  GroundLayer,
   GroundMaterialKey,
   WaterConfig,
   WaterKind,
@@ -21,6 +22,7 @@ import {
   GROUND_THICK_MAX,
   GROUND_THICK_MIN,
   makeFence,
+  makeGroundLayer,
   makeWater,
 } from 'threejs-modules/site/state'
 import { type TabItem, Tabs } from 'threejs-modules/ui/Tabs'
@@ -32,6 +34,20 @@ const MATERIAL_OPTS: [string, WaterMaterialKey][] = [
 ]
 // Coping/edge chưa lát caro → chỉ 'None' (tách opts để dropdown Edge không hiện lựa chọn no-op).
 const EDGE_MAT_OPTS: [string, WaterMaterialKey][] = [['None', 'none']]
+
+// Bộ vật liệu bề mặt (dùng CHUNG base ground G0 + mọi TẦNG layer chồng G1+). Thứ tự = thứ tự dropdown.
+const GROUND_OPTS: [string, GroundMaterialKey][] = [
+  ['Grass (procedural)', 'grass'],
+  ['Photo grass (Uncut)', 'grass-tex'],
+  ['Soil', 'soil'],
+  ['Gravel', 'gravel'],
+  ['Rippled sand', 'rippled-sand'],
+  ['Construction gravel', 'construction-gravel'],
+  ['Beach gravel', 'beach-gravel'],
+  ['Rough asphalt', 'rough-asphalt'],
+  ['Worn pavement', 'worn-pavement'],
+  ['Roman stone floor', 'roman-stone-floor'],
+]
 
 import type { APGuiCtx } from './ctx'
 import { buildGrassTweak } from './tweak' // 🌿 slider chi tiết cỏ — DỜI vào Garden ▸ Grass (preview ở lại tab Lab)
@@ -194,14 +210,8 @@ function buildGroundControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => vo
       refresh()
     })
   )
-  const groundOpts: [string, GroundMaterialKey][] = [
-    ['Grass (procedural)', 'grass'],
-    ['Photo grass (Uncut)', 'grass-tex'],
-    ['Soil', 'soil'],
-    ['Gravel', 'gravel'],
-  ]
   body.appendChild(
-    selectRow('Surface', groundOpts, site.ground, (v) => {
+    selectRow('Surface', GROUND_OPTS, site.ground, (v) => {
       site.ground = v
       ctx.applySite(true)
     })
@@ -246,6 +256,103 @@ function buildLotSliders(body: HTMLElement, ctx: APGuiCtx, refresh: () => void):
       )
     )
   }
+}
+
+// Sub-tab "Ground" → hàng tab INSTANCE tầng surface (G0 base | G1/G2… layer chồng + ＋). G0 = nền lô gốc
+// (Show/Surface/Thickness/Lot). G1+ = tầng phủ lên (Surface + Thickness 1–10cm + ✕), stack chồng Y → top che
+// dưới (khoét lộ lớp dưới = phase sau). Tabs động → rebuild mỗi thêm/xoá + applySite. Trả { panel, dispose }.
+function buildGroundDomain(
+  ctx: APGuiCtx,
+  refresh: () => void
+): { panel: HTMLElement; dispose: () => void } {
+  const host = document.createElement('div')
+  host.classList.add('ap-ground-domain')
+  let tabs: Tabs | null = null
+  const rebuild = (focus = 0): void => {
+    tabs?.dispose()
+    host.replaceChildren()
+    const base = document.createElement('div')
+    buildGroundControls(base, ctx, refresh)
+    host.appendChild(base)
+    const items: TabItem[] = [{ label: 'G0', panel: base, title: 'Base ground (nền lô)' }]
+    const layers = (ctx.site.groundLayers ??= [])
+    layers.forEach((layer, i) => {
+      const pane = buildGroundLayerPane(ctx, layer, i, rebuild)
+      host.appendChild(pane)
+      items.push({ label: `G${i + 1}`, panel: pane, title: `Surface layer ${i + 1}` })
+    })
+    const addBtn = addInstanceButton('layer', () => {
+      layers.push(makeGroundLayer())
+      rebuild(layers.length) // focus tầng mới
+      ctx.applySite(true)
+    })
+    tabs = new Tabs(host, items, {
+      classes: {
+        bar: 'ap-tab-bar ap-fence-itabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-fence-isub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+      addEl: addBtn,
+      initial: focus,
+    })
+  }
+  rebuild()
+  return { panel: host, dispose: (): void => tabs?.dispose() }
+}
+
+// 1 pane tầng surface chồng: Surface (vật liệu) + Thickness 1–10cm + ✕ xoá. Xoá → splice + rebuild + applySite.
+// 1 slider số-đo layer (length/width/thickness): hiển thị theo factor (m=1000, cm=10), ghi mm. Tách cho
+// buildGroundLayerPane gọn (rule-50).
+function layerSlider(
+  ctx: APGuiCtx,
+  layer: GroundLayer,
+  key: 'length' | 'width' | 'thickness',
+  label: string,
+  min: number,
+  max: number,
+  step: number,
+  factor: number
+): HTMLElement {
+  return sliderRow(
+    label,
+    min,
+    max,
+    step,
+    layer[key] / factor,
+    (v, c) => {
+      layer[key] = Math.round(v * factor)
+      ctx.applySite(c)
+    },
+    factor
+  )
+}
+
+function buildGroundLayerPane(
+  ctx: APGuiCtx,
+  layer: GroundLayer,
+  i: number,
+  rebuild: (focus?: number) => void
+): HTMLElement {
+  const pane = document.createElement('div')
+  pane.appendChild(
+    selectRow('Surface', GROUND_OPTS, layer.material, (v) => {
+      layer.material = v
+      ctx.applySite(true)
+    })
+  )
+  pane.appendChild(layerSlider(ctx, layer, 'length', 'Length m', 0.5, 40, 0.1, 1000))
+  pane.appendChild(layerSlider(ctx, layer, 'width', 'Width m', 0.5, 40, 0.1, 1000))
+  pane.appendChild(layerSlider(ctx, layer, 'thickness', 'Thickness cm', 1, 10, 0.5, 10))
+  pane.appendChild(
+    removeRow('✕ Remove layer', () => {
+      ctx.site.groundLayers?.splice(i, 1)
+      rebuild(Math.max(0, i))
+      ctx.applySite(true)
+    })
+  )
+  return pane
 }
 
 // Cỏ 3D nhú lên (tier B — GrassBlades): LỚP THỰC VẬT độc lập surface — mọc trên nền BẤT KỲ (grass/soil/
@@ -1009,11 +1116,13 @@ export function setupSitePanel(
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-site-panel'
 
-  // Sub-tab "Ground": SURFACE (vật liệu nền) + lô + bảng coverage. KHÔNG còn cỏ-3D (đã tách sang Garden).
+  // Sub-tab "Ground": hàng INSTANCE-tab tầng surface (G0 base + G1/G2… layer chồng + ＋) — xếp lớp 3D. Bảng
+  // coverage (roEl) NẰM NGOÀI tabs (số liệu cả lô). KHÔNG còn cỏ-3D (đã tách sang Garden).
   const groundSub = document.createElement('div')
   const { el: roEl, refresh } = readout(ctx)
   ctx.registerSiteReadout(refresh)
-  buildGroundControls(groundSub, ctx, refresh)
+  const ground = buildGroundDomain(ctx, refresh)
+  groundSub.appendChild(ground.panel)
   groundSub.appendChild(roEl)
 
   // Sub-tab "Fence": hàng rào ĐA-LỚP (instance-tab F1/F2… + ＋).
@@ -1036,6 +1145,7 @@ export function setupSitePanel(
     panel: p,
     dispose: (): void => {
       tabs.dispose()
+      ground.dispose()
       fence.dispose()
       garden.dispose()
       water.dispose()

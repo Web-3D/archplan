@@ -18,17 +18,55 @@
 
 import './archplan-lab.css'
 
+import bgravelManifest from 'assets/textures/beach_gravel/meta.json'
+import bgravelAoUrl from 'assets/textures/beach_gravel/production/ao.jpg?url'
+import bgravelBaseColorUrl from 'assets/textures/beach_gravel/production/basecolor.jpg?url'
+import bgravelNormalUrl from 'assets/textures/beach_gravel/production/normal.jpg?url'
+import bgravelRoughnessUrl from 'assets/textures/beach_gravel/production/roughness.jpg?url'
 // 🧱 Fence wall 'cinder'/'stone' = tường DỌC → TexturedSurface (triplanar). 4 map (có AO).
 import cinderManifest from 'assets/textures/cinder-blocks-wall/meta.json'
 import cinderAoUrl from 'assets/textures/cinder-blocks-wall/production/ao.jpg?url'
 import cinderBaseColorUrl from 'assets/textures/cinder-blocks-wall/production/basecolor.jpg?url'
 import cinderNormalUrl from 'assets/textures/cinder-blocks-wall/production/normal.jpg?url'
 import cinderRoughnessUrl from 'assets/textures/cinder-blocks-wall/production/roughness.jpg?url'
+import cgravelManifest from 'assets/textures/construction_grave/meta.json'
+import cgravelAoUrl from 'assets/textures/construction_grave/production/ao.jpg?url'
+import cgravelBaseColorUrl from 'assets/textures/construction_grave/production/basecolor.jpg?url'
+import cgravelNormalUrl from 'assets/textures/construction_grave/production/normal.jpg?url'
+import cgravelRoughnessUrl from 'assets/textures/construction_grave/production/roughness.jpg?url'
+// 🪵 Gỗ KHUNG-DƯỚI stone-pillar (understructMaterial='wood-tex') = Old Plywood — tách hẳn vân deck.
+import oldplyManifest from 'assets/textures/Old-piwood/meta.json'
+import oldplyAoUrl from 'assets/textures/Old-piwood/production/ao.jpg?url'
+import oldplyBaseColorUrl from 'assets/textures/Old-piwood/production/basecolor.jpg?url'
+import oldplyNormalUrl from 'assets/textures/Old-piwood/production/normal.jpg?url'
+import oldplyRoughnessUrl from 'assets/textures/Old-piwood/production/roughness.jpg?url'
+// 🏜️ Ground texture thêm (sand/gravel/asphalt) — PhotoGround, keyed theo GroundMaterialKey.
+import sandManifest from 'assets/textures/rippled_sand/meta.json'
+import sandAoUrl from 'assets/textures/rippled_sand/production/ao.jpg?url'
+import sandBaseColorUrl from 'assets/textures/rippled_sand/production/basecolor.jpg?url'
+import sandNormalUrl from 'assets/textures/rippled_sand/production/normal.jpg?url'
+import sandRoughnessUrl from 'assets/textures/rippled_sand/production/roughness.jpg?url'
+import romanManifest from 'assets/textures/roman_stone_floor/meta.json'
+import romanAoUrl from 'assets/textures/roman_stone_floor/production/ao.jpg?url'
+import romanBaseColorUrl from 'assets/textures/roman_stone_floor/production/basecolor.jpg?url'
+import romanNormalUrl from 'assets/textures/roman_stone_floor/production/normal.jpg?url'
+import romanRoughnessUrl from 'assets/textures/roman_stone_floor/production/roughness.jpg?url'
+import asphaltManifest from 'assets/textures/rough_asphalt/meta.json'
+import asphaltAoUrl from 'assets/textures/rough_asphalt/production/ao.jpg?url'
+import asphaltBaseColorUrl from 'assets/textures/rough_asphalt/production/basecolor.jpg?url'
+import asphaltNormalUrl from 'assets/textures/rough_asphalt/production/normal.jpg?url'
+import asphaltRoughnessUrl from 'assets/textures/rough_asphalt/production/roughness.jpg?url'
 import stoneManifest from 'assets/textures/stone-wall/meta.json'
 import stoneAoUrl from 'assets/textures/stone-wall/production/ao.jpg?url'
 import stoneBaseColorUrl from 'assets/textures/stone-wall/production/basecolor.jpg?url'
 import stoneNormalUrl from 'assets/textures/stone-wall/production/normal.jpg?url'
 import stoneRoughnessUrl from 'assets/textures/stone-wall/production/roughness.jpg?url'
+// 🌳 Vỏ cây KHUNG-DƯỚI stone-pillar (understructMaterial='bark-tex') = Tree Bark — tuỳ chọn thứ 2.
+import barkManifest from 'assets/textures/tree_bark/meta.json'
+import barkAoUrl from 'assets/textures/tree_bark/production/ao.jpg?url'
+import barkBaseColorUrl from 'assets/textures/tree_bark/production/basecolor.jpg?url'
+import barkNormalUrl from 'assets/textures/tree_bark/production/normal.jpg?url'
+import barkRoughnessUrl from 'assets/textures/tree_bark/production/roughness.jpg?url'
 // 🌱 Texture ground 'grass-tex' = Uncut Grass (assets/textures/uncut-grass). Manifest cho tileSizeMeters;
 // ?url cho từng map (Vite serve qua alias 'assets' + fs.allow). Loader chọn KTX2/Texture theo đuôi file.
 import grassManifest from 'assets/textures/uncut-grass/meta.json'
@@ -41,6 +79,17 @@ import walnutManifest from 'assets/textures/walnut-veneer/meta.json'
 import walnutBaseColorUrl from 'assets/textures/walnut-veneer/production/basecolor.jpg?url'
 import walnutNormalUrl from 'assets/textures/walnut-veneer/production/normal.jpg?url'
 import walnutRoughnessUrl from 'assets/textures/walnut-veneer/production/roughness.jpg?url'
+// 🪵 Gỗ DECK móng 'wood-tex' + slab 'planks-tex' = Wooden Planks (TexturedSurface triplanar — móng có mặt 3D).
+import planksManifest from 'assets/textures/Wooden_Plank/meta.json'
+import planksAoUrl from 'assets/textures/Wooden_Plank/production/ao.jpg?url'
+import planksBaseColorUrl from 'assets/textures/Wooden_Plank/production/basecolor.jpg?url'
+import planksNormalUrl from 'assets/textures/Wooden_Plank/production/normal.jpg?url'
+import planksRoughnessUrl from 'assets/textures/Wooden_Plank/production/roughness.jpg?url'
+import pavementManifest from 'assets/textures/worn_pavement/meta.json'
+import pavementAoUrl from 'assets/textures/worn_pavement/production/ao.jpg?url'
+import pavementBaseColorUrl from 'assets/textures/worn_pavement/production/basecolor.jpg?url'
+import pavementNormalUrl from 'assets/textures/worn_pavement/production/normal.jpg?url'
+import pavementRoughnessUrl from 'assets/textures/worn_pavement/production/roughness.jpg?url'
 import { computeLocalBbox } from 'building-kit/build' // footprint nhà (m²) cho bảng số liệu lô
 import { renderBuildingState } from 'building-kit/render/fromState' // renderer chung lõi (Phase 1b)
 import { makeSurfaceMaterial, WallMaterialCache } from 'building-kit/wallMaterials' // material engine
@@ -76,6 +125,8 @@ import {
   coverageStats,
   defaultSiteState,
   type FenceConfig,
+  type GroundMaterialKey,
+  isGroundTexKey,
   renderPuddles,
   renderWaters,
   type SiteState,
@@ -86,10 +137,10 @@ import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
 import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
 
 import { DevHud } from './gui/devhud' // perf HUD dev (fps/budget/leak) — tách monolith
-import { GrassPreview } from './gui/grass-preview' // 🔎 preview 1 lá cỏ — host trong tab 🎛️ Lab
 import { type APGuiCtx, setupGUI, setupToolsPanel } from './gui/gui'
+import { setupRoofLab } from './gui/roof-lab' // 🔎 thí nghiệm MÁI trong Lab (preview + slider) — vật thể đang dựng
 import { setupSitePanel } from './gui/site' // 🌳 panel sân vườn (site/lô + Garden ▸ Grass = slider cỏ 3D)
-import { setupLabBench } from './gui/tweak' // 🎛️ Lab = bàn thí nghiệm: giữ 🔎 preview WebGPU 1 vật thể
+import { setupLabBench } from './gui/tweak' // 🎛️ Lab = bàn thí nghiệm: 2 khung trái + preview cột phải
 import { type HighlightHost, HighlightOverlay } from './interaction/highlight' // flash viền phần đang chỉnh — tách monolith
 import { type ManipulateHost, ManipulateTool } from './interaction/manipulate' // 🤚 Move + 🎯 Focus — tách monolith
 import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 khay swatch atelier — tách monolith
@@ -156,6 +207,76 @@ function keepSpans(min: number, max: number, gaps: [number, number][]): [number,
   }
   if (cur < max) out.push([cur, max])
   return out
+}
+
+// 🌱🏜️ Bảng texture GROUND (key → tile + spec URL) cho loader keyed. Thêm texture đất = thêm 1 dòng đây
+// (+ import map + GroundMaterialKey ở site/state). PhotoGround (UV world-XZ, lát theo tileSizeMeters).
+const GROUND_TEX_SPEC: Partial<
+  Record<GroundMaterialKey, { tile: number; spec: SurfaceTextureSpec }>
+> = {
+  'grass-tex': {
+    tile: grassManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: grassBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: grassNormalUrl, colorSpace: 'linear' },
+      roughness: { url: grassRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: grassAoUrl, colorSpace: 'linear' },
+    },
+  },
+  'rippled-sand': {
+    tile: sandManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: sandBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: sandNormalUrl, colorSpace: 'linear' },
+      roughness: { url: sandRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: sandAoUrl, colorSpace: 'linear' },
+    },
+  },
+  'construction-gravel': {
+    tile: cgravelManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: cgravelBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: cgravelNormalUrl, colorSpace: 'linear' },
+      roughness: { url: cgravelRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: cgravelAoUrl, colorSpace: 'linear' },
+    },
+  },
+  'beach-gravel': {
+    tile: bgravelManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: bgravelBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: bgravelNormalUrl, colorSpace: 'linear' },
+      roughness: { url: bgravelRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: bgravelAoUrl, colorSpace: 'linear' },
+    },
+  },
+  'rough-asphalt': {
+    tile: asphaltManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: asphaltBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: asphaltNormalUrl, colorSpace: 'linear' },
+      roughness: { url: asphaltRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: asphaltAoUrl, colorSpace: 'linear' },
+    },
+  },
+  'worn-pavement': {
+    tile: pavementManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: pavementBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: pavementNormalUrl, colorSpace: 'linear' },
+      roughness: { url: pavementRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: pavementAoUrl, colorSpace: 'linear' },
+    },
+  },
+  'roman-stone-floor': {
+    tile: romanManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: romanBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: romanNormalUrl, colorSpace: 'linear' },
+      roughness: { url: romanRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: romanAoUrl, colorSpace: 'linear' },
+    },
+  },
 }
 
 // ── ArchPlanLab ────────────────────────────────────────────────────────────────
@@ -260,19 +381,46 @@ export class ArchPlanLab extends BaseWorld {
   private readonly _gatePickGroup = new THREE.Group()
   private _gatePickGeos: THREE.BufferGeometry[] = []
   private _gateDrag: { fenceIdx: number; axis: 'x' | 'z'; plane: THREE.Plane } | null = null
+  // 🟫 Phiên kéo 1 TẦNG ground (G1+) bằng Move tool: idx + mesh đang dời + offset gốc + điểm neo (mặt-phẳng
+  // ngang). Kéo = dời mesh.position (0 rebuild); buông = gập vào offsetX/Z + _applySite. G0 base KHÔNG kéo.
+  private _layerDrag: {
+    idx: number
+    mesh: THREE.Mesh
+    startOffX: number
+    startOffZ: number
+    startPt: THREE.Vector3
+  } | null = null
   private _liveRebuild = false // true trong rAF live-drag (kéo nhà/hồ/slider) → hoãn rải-lại-cỏ vì exclude
   // Chữ ký SITE (nền/nước/rào, BỎ grass3d — cỏ quản riêng). Kéo NHÀ đổi `state` chứ KHÔNG đổi `site` →
   // sig giữ nguyên → KHÔNG dựng lại reflector RTT mỗi frame (trị leak/tụt-fps lúc kéo nhà). '' = chưa dựng.
   private _siteSig = ''
-  // 🌱 Ground texture (PhotoGround) — load ASYNC 1 lần, cache lab-lifetime (rebuild tái dùng, không re-load).
-  // Texture do LAB sở hữu (PhotoGround.dispose không đụng) → disposeSurfaceTextureSet ở onDispose.
-  private _groundTex: PhotoGroundMaps | null = null
-  private _groundTexLoading = false
+  // 🌱🏜️ Ground texture (PhotoGround) — load ASYNC 1 lần MỖI KEY (grass-tex/sand/gravel/asphalt độc lập),
+  // cache lab-lifetime. Texture do LAB sở hữu (PhotoGround.dispose không đụng) → disposeSurfaceTextureSet ở onDispose.
+  private _groundTex: Partial<Record<GroundMaterialKey, PhotoGroundMaps>> = {}
+  private _groundTexLoading: Partial<Record<GroundMaterialKey, boolean>> = {}
+  // 🌱 Material PhotoGround CACHE 1 lần MỖI KEY (sống lab-lifetime) → bơm ctx.groundMatByKey: nhiều ground
+  // (base + layer) cùng key DÙNG CHUNG → KHÔNG recompile NodeMaterial mỗi rebuild. Lab sở hữu → dispose onDispose.
+  private _groundMat: Partial<Record<GroundMaterialKey, PhotoGround>> = {}
   // 🪵 Slab walnut: texture-maps + PhotoGround (material CACHE 1 lần → KHÔNG recompile mỗi build/frame kéo;
   // slab dựng lại mỗi edit). Lab sở hữu cả maps lẫn PhotoGround → dispose ở onDispose. Bơm ctx.slabTexMat.
   private _slabTexMaps: PhotoGroundMaps | null = null
   private _slabTex: PhotoGround | null = null
   private _slabTexLoading = false
+  // 🪵 Gỗ DECK móng 'wood-tex' + slab 'planks-tex' = Wooden Planks (TexturedSurface triplanar — móng có mặt 3D
+  // trụ/xà/chống; sàn dùng chung). Cache 1 lần. Lab sở hữu maps + TexturedSurface → dispose. Bơm ctx.foundWoodMat.
+  private _foundWoodMaps: TexturedSurfaceMaps | null = null
+  private _foundWoodTex: TexturedSurface | null = null
+  private _foundWoodLoading = false
+  // 🪵 Gỗ KHUNG-DƯỚI stone-pillar (understructMaterial='wood-tex') = Old Plywood — texture RIÊNG deck (vân khác).
+  // Cache 1 lần. Lab sở hữu maps + TexturedSurface → dispose ở onDispose. Bơm ctx.underWoodMat.
+  private _underWoodMaps: TexturedSurfaceMaps | null = null
+  private _underWoodTex: TexturedSurface | null = null
+  private _underWoodLoading = false
+  // 🌳 Vỏ cây KHUNG-DƯỚI stone-pillar (understructMaterial='bark-tex') = Tree Bark — tuỳ chọn thứ 2. Cache 1 lần.
+  // Lab sở hữu maps + TexturedSurface → dispose ở onDispose. Bơm ctx.underBarkMat.
+  private _underBarkMaps: TexturedSurfaceMaps | null = null
+  private _underBarkTex: TexturedSurface | null = null
+  private _underBarkLoading = false
   // 🧱 Fence wall: maps + TexturedSurface CACHE 1 lần MỖI KIND (cinder/stone độc lập — đa-lớp rào có thể trộn
   // 2 texture khác nhau, mỗi kind cache riêng → KHÔNG thrash recompile). Material cache (KHÔNG tạo mới mỗi rebuild
   // → KHÔNG recompile shader khi kéo cổng = trị tụt fps). Bơm opts.fenceWallMat per-fence (_syncFence). Lab sở hữu.
@@ -284,7 +432,7 @@ export class ArchPlanLab extends BaseWorld {
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
   private _activeWater: WaterConfig | null = null
-  private preview: GrassPreview | null = null // 🔎 bảng preview 1 lá (mini WebGPU riêng — Lab, độc lập scene)
+  private roofLab: { dispose: () => void } | null = null // 🔎 thí nghiệm MÁI trong Lab (preview WebGL + slider)
   // 🧪 Lab = PHẦN RIÊNG (float persistent, NGOÀI drawer) — bàn thí nghiệm vật thể MỚI trước khi đưa vào GUI
   // chung; Factory phát triển chung. Tạo 1 LẦN (không churn theo _rebuildGUI) → preview KHÔNG dispose/tạo-lại mỗi rebuild.
   private labFloat: HTMLElement | null = null
@@ -340,8 +488,9 @@ export class ArchPlanLab extends BaseWorld {
   private readonly _onKeyDown = (e: KeyboardEvent): void => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
     if (e.code === 'Backquote' && !e.repeat) this.devHud?.toggle() // ` → bật/tắt HUD perf
-    // Z = bật/tắt Move tool 🤚 (_setMoveMode tự đồng bộ nút float góc trái). Guard tách ra _isPlainZ.
-    if (this._isPlainZ(e)) {
+    // F = bật/tắt Move tool 🤚 (_setMoveMode tự đồng bộ nút float góc trái). Guard tách ra _isPlainF.
+    // (Z/C để trống → rơi vào _keysDown → _applyRotate xoay camera trái/phải khi GIỮ.)
+    if (this._isPlainF(e)) {
       e.preventDefault()
       this._setMoveMode(!this.moveMode)
       return
@@ -352,14 +501,24 @@ export class ArchPlanLab extends BaseWorld {
       this.palette?.togglePanel()
       return
     }
+    // R trơn = bật/tắt 🧪 Lab (né Ctrl+R / Cmd+R reload trang). Guard tách ra _isPlainR cho gọn complexity.
+    if (this._isPlainR(e)) {
+      e.preventDefault()
+      this._toggleLab()
+      return
+    }
     this._keysDown.add(e.code)
   }
-  // Z/X trơn (không Ctrl/Meta/Alt, không auto-repeat) = phím tắt. Né Ctrl+Z/Alt+Z (undo), Ctrl+X (cut)…
-  private _isPlainZ(e: KeyboardEvent): boolean {
-    return e.code === 'KeyZ' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey
+  // F/X/R trơn (không Ctrl/Meta/Alt, không auto-repeat) = phím tắt. Né tổ hợp Ctrl/Cmd (vd Ctrl+F tìm, Ctrl+X cut).
+  private _isPlainF(e: KeyboardEvent): boolean {
+    return e.code === 'KeyF' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey
   }
   private _isPlainX(e: KeyboardEvent): boolean {
     return e.code === 'KeyX' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey
+  }
+  // R trơn = phím tắt 🧪 Lab. Né Ctrl+R/Cmd+R (reload trang), Alt+R.
+  private _isPlainR(e: KeyboardEvent): boolean {
+    return e.code === 'KeyR' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey
   }
   private readonly _onKeyUp = (e: KeyboardEvent): void => {
     this._keysDown.delete(e.code)
@@ -398,7 +557,9 @@ export class ArchPlanLab extends BaseWorld {
   private _pointerDownMove(e: PointerEvent): void {
     if (this.waterTool?.tryStartDrag(e)) return // 💧 trúng mặt hồ (gần hơn pick-box) → kéo hồ
     if (this._tryStartGateDrag(e)) return // 🚪 trúng cổng → trượt dọc cạnh rào
-    this.manipulate?.dragStart(e) // Move tool: nhấn-giữ element → kéo (focus GUI ngay khi nhấn)
+    this.manipulate?.dragStart(e) // Move tool: nhấn-giữ element building → kéo (focus GUI ngay khi nhấn)
+    if (this.manipulate?.isDragging()) return // trúng building → manipulate lo
+    this._tryStartLayerDrag(e) // 🟫 không trúng building → thử kéo TẦNG ground (G1+)
   }
   private readonly _onPointerMove = (e: PointerEvent): void => {
     if (this.sunGizmo?.isDragging()) {
@@ -417,6 +578,55 @@ export class ArchPlanLab extends BaseWorld {
     if (this.waterTool?.isDragging()) this.waterTool.dragMove(e)
     else if (this._gateDrag) this._gateDragMove(e)
     else if (this.manipulate?.isDragging()) this.manipulate.dragMove(e)
+    else if (this._layerDrag) this._layerDragMove(e) // 🟫 kéo tầng ground
+  }
+
+  // 🟫 Move trúng 1 TẦNG ground (G1+, mesh có userData.groundLayerIdx) → bắt đầu kéo dời XZ. G0 base KHÔNG có
+  // tag → bỏ qua (cố định). Trả false (không trúng tầng nào). Lưu offset gốc + điểm neo cho _layerDragMove.
+  private _tryStartLayerDrag(e: PointerEvent): boolean {
+    if (!this.site.show || !this.site.groundLayers?.length) return false
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const hits = this._ray.intersectObjects(this.siteGroup.children, true)
+    const hit = hits.find((h) => typeof h.object.userData.groundLayerIdx === 'number')
+    if (!hit) return false
+    const idx = hit.object.userData.groundLayerIdx as number
+    const layer = this.site.groundLayers[idx]
+    if (!layer) return false
+    this.canvas.setPointerCapture(e.pointerId)
+    this._layerDrag = {
+      idx,
+      mesh: hit.object as THREE.Mesh,
+      startOffX: layer.offsetX,
+      startOffZ: layer.offsetZ,
+      startPt: hit.point.clone(),
+    }
+    return true
+  }
+
+  // 🟫 Kéo tầng ground LIVE: CHỈ dời mesh.position theo Δ chiếu mặt-phẳng-ngang @điểm-neo — KHÔNG rebuild site
+  // (né reflector RTT + recompile NodeMaterial mỗi frame; PERFORMANCE.md). Commit (rebuild) để _commitLayerDrag.
+  private _layerDragMove(e: PointerEvent): void {
+    const d = this._layerDrag
+    if (!d) return
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -d.startPt.y)
+    const pt = new THREE.Vector3()
+    if (!this._ray.ray.intersectPlane(plane, pt)) return
+    d.mesh.position.set(pt.x - d.startPt.x, 0, pt.z - d.startPt.z) // 0 rebuild — chỉ transform
+  }
+
+  // 🟫 Buông: gập Δ mesh.position vào offsetX/Z state → _applySite(true) rebuild site 1 LẦN (bake offset mới) +
+  // autosave. mesh.position về 0 sau rebuild. Site (không undo) → chỉ autosave như cổng/hồ.
+  private _commitLayerDrag(): void {
+    const d = this._layerDrag
+    this._layerDrag = null
+    if (!d) return
+    const layer = this.site.groundLayers?.[d.idx]
+    if (layer) {
+      layer.offsetX = Math.round(d.startOffX + d.mesh.position.x * 1000)
+      layer.offsetZ = Math.round(d.startOffZ + d.mesh.position.z * 1000)
+    }
+    this._applySite(true)
   }
 
   // Buông cổng: commit (nuốt rAF live → _syncFence stone thật + gate box trở lại + autosave). Tách khỏi
@@ -449,6 +659,11 @@ export class ArchPlanLab extends BaseWorld {
     }
     if (this.manipulate?.isDragging()) {
       this.manipulate?.dragEnd()
+      this._downPos = null
+      return
+    }
+    if (this._layerDrag) {
+      this._commitLayerDrag() // 🟫 buông tầng ground → bake offset + rebuild + autosave
       this._downPos = null
       return
     }
@@ -518,6 +733,7 @@ export class ArchPlanLab extends BaseWorld {
     this.manipulate?.cancelDrag()
     this.waterTool?.cancelDrag() // huỷ kéo hồ đang dở + ẩn viền (đổi mode / thoát chuột phải)
     this._gateDrag = null // huỷ kéo cổng đang dở
+    this._layerDrag = null // 🟫 huỷ kéo tầng ground đang dở
     if (on) {
       this._setPaintMode(false)
       this.palette?.markSwatch(null)
@@ -723,6 +939,7 @@ export class ArchPlanLab extends BaseWorld {
 
   protected onUpdate(time: number, deltaTime: number): void {
     this._applyWASD()
+    this._applyRotate()
     this.controls?.update()
     for (const s of this.siteShaders) s.setTime?.(time) // 🌿 gió lùa cỏ (GrassGround) chạy theo elapsed
     this.css2dRenderer?.render(this.scene, this.camera)
@@ -755,6 +972,24 @@ export class ArchPlanLab extends BaseWorld {
     if (move.lengthSq() < 0.0001) return
     this.camera.position.add(move)
     this.controls.target.add(move)
+  }
+
+  // ⟲/⟳ GIỮ Z = xoay camera trái · C = xoay phải (quanh tâm orbit, mặt phẳng ngang/azimuth). Rơi vào _keysDown
+  // như WASD → giữ phím là xoay liên tục; controls.update() (onUpdate) orient camera lại về target.
+  private _applyRotate(): void {
+    if (!this.controls) return
+    let dir = 0
+    if (this._keysDown.has('KeyZ')) dir -= 1 // trái
+    if (this._keysDown.has('KeyC')) dir += 1 // phải
+    if (dir === 0) return
+    const angle = dir * 0.03 // rad mỗi frame (~1.7°)
+    const t = this.controls.target
+    const ox = this.camera.position.x - t.x
+    const oz = this.camera.position.z - t.z
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    this.camera.position.x = t.x + ox * cos - oz * sin
+    this.camera.position.z = t.z + ox * sin + oz * cos
   }
 
   protected onDispose(): void {
@@ -1200,27 +1435,32 @@ export class ArchPlanLab extends BaseWorld {
     wrap.className = 'ap-lab-float ap-lab-hidden' // ẩn mặc định — bấm 🧪 để hiện
     this.canvas.parentElement?.appendChild(wrap)
     this.labFloat = wrap
-    const bench = setupLabBench(wrap) // 🧪 title + note + previewHost
-    this.preview = new GrassPreview(bench.previewHost)
-    void this.preview.init().then(() => this._previewRebuild()) // 1 LẦN khởi tạo mẫu (sau đó KHÔNG sync scene)
+    const bench = setupLabBench(wrap) // 🧪 title + note + 2 khung trái (param/doc) + previewHost
+    // 🧪 Lab giờ host thí nghiệm MÁI: slider vào khung 🎛️ trái, preview WebGL ở cột phải. (Cỏ đã tốt nghiệp
+    // sang Garden ▸ Grass; muốn soi lại cỏ thì re-wire GrassPreview — grass-preview.ts vẫn còn.)
+    this.roofLab = setupRoofLab(bench.previewHost, bench.paramHost)
     const title = wrap.querySelector<HTMLElement>('.ap-scan-title')
     if (title) this._makeDraggable(wrap, title) // kéo panel theo title
     const btn = document.createElement('button')
     btn.className = 'ap-lab-toggle'
     btn.textContent = '🧪'
-    btn.title = 'Lab — bàn thí nghiệm vật thể mới (Factory, độc lập scene). Bật/tắt.'
-    btn.addEventListener('click', () => {
-      const hidden = wrap.classList.toggle('ap-lab-hidden')
-      btn.classList.toggle('ap-lab-toggle-on', !hidden)
-    })
+    btn.title = 'Lab — bàn thí nghiệm vật thể mới (Factory, độc lập scene). Bật/tắt (phím R).'
+    btn.addEventListener('click', () => this._toggleLab())
     this.canvas.parentElement?.appendChild(btn)
     this.labToggle = btn
   }
 
+  // 🧪 Bật/tắt Lab float (nút 🧪 hoặc phím R). Đồng bộ viền vàng nút theo trạng thái.
+  private _toggleLab(): void {
+    if (!this.labFloat || !this.labToggle) return
+    const hidden = this.labFloat.classList.toggle('ap-lab-hidden')
+    this.labToggle.classList.toggle('ap-lab-toggle-on', !hidden)
+  }
+
   // Teardown Lab float persistent (chỉ ở dispose CUỐI — KHÔNG mỗi _rebuildGUI).
   private _disposeLabFloat(): void {
-    this.preview?.dispose() // 🔎 mini WebGPU preview
-    this.preview = null
+    this.roofLab?.dispose() // 🔎 preview MÁI WebGL + slider
+    this.roofLab = null
     this.labFloat?.remove()
     this.labFloat = null
     this.labToggle?.remove()
@@ -1411,6 +1651,9 @@ export class ArchPlanLab extends BaseWorld {
         wood: this.woodWalls,
         strip: this.stripWalls,
         slabTexMat: this._slabTexMatForBuild(), // 🪵 sàn walnut (chưa load → undefined = bê tông tạm)
+        foundWoodMat: this._foundWoodMatForBuild(), // 🪵 gỗ deck móng + slab planks (Wooden Planks)
+        underWoodMat: this._underWoodMatForBuild(), // 🪵 gỗ khung-dưới (Old Plywood, tách deck)
+        underBarkMat: this._underBarkMatForBuild(), // 🌳 vỏ cây khung-dưới (Tree Bark, tuỳ chọn 2)
       },
       true, // plainWalls: LOD tường phẳng (rẻ + tintable)
       this._hiddenFloors,
@@ -1445,6 +1688,9 @@ export class ArchPlanLab extends BaseWorld {
         wood: [],
         strip: [],
         slabTexMat: this._slabTexMatForBuild(), // 🪵 sàn walnut cho shape đang kéo
+        foundWoodMat: this._foundWoodMatForBuild(), // 🪵 gỗ deck móng + slab planks cho shape đang kéo
+        underWoodMat: this._underWoodMatForBuild(), // 🪵 gỗ khung-dưới (Old Plywood) cho shape đang kéo
+        underBarkMat: this._underBarkMatForBuild(), // 🌳 vỏ cây khung-dưới (Tree Bark) cho shape đang kéo
       },
       true,
       this._hiddenFloors,
@@ -1753,6 +1999,9 @@ export class ArchPlanLab extends BaseWorld {
         wood: this.woodWalls,
         strip: this.stripWalls,
         slabTexMat: this._slabTexMatForBuild(), // 🪵 sàn walnut (chưa load → undefined = bê tông tạm)
+        foundWoodMat: this._foundWoodMatForBuild(), // 🪵 gỗ deck móng + slab planks (Wooden Planks)
+        underWoodMat: this._underWoodMatForBuild(), // 🪵 gỗ khung-dưới (Old Plywood, tách deck)
+        underBarkMat: this._underBarkMatForBuild(), // 🌳 vỏ cây khung-dưới (Tree Bark, tuỳ chọn 2)
       },
       this.moveMode, // LOD tường phẳng KHI ở Move mode → tintable + rẻ khi kéo (brick là thủ phạm CPU); tắt = gạch
       this._hiddenFloors // 🙈 tầng ẩn → bỏ dựng mesh/pick (giữ chiều cao stacking)
@@ -1843,39 +2092,58 @@ export class ArchPlanLab extends BaseWorld {
   // rơi màu phẳng (load xong tự re-render). Tách khỏi _rebuildSite cho gọn (complexity).
   private _siteTexOpts(): SiteRenderOpts {
     const opts: SiteRenderOpts = { skipGrass: true, skipFence: true } // cỏ + rào do _syncGrass/_syncFence quản riêng
-    if (this.site.ground === 'grass-tex') {
-      if (this._groundTex) {
-        opts.groundTextures = this._groundTex
-        opts.groundTileMeters = grassManifest.tileSizeMeters
-      } else {
-        this._ensureGroundTex()
-      }
+    const byKey: NonNullable<SiteRenderOpts['groundMatByKey']> = {}
+    for (const key of this._usedGroundTexKeys()) {
+      const photo = this._groundMatFor(key) // material cache (build từ maps đã load) hoặc null (đang load)
+      if (photo) byKey[key] = photo.getMaterial()
     }
+    if (Object.keys(byKey).length > 0) opts.groundMatByKey = byKey
     // Fence material KHÔNG resolve ở đây nữa (đa-lớp → mỗi lớp 1 kind riêng) — _syncFence bơm per-fence.
     return opts
   }
 
-  // 🌱 Load texture set ground 'grass-tex' (Uncut Grass) 1 lần, ASYNC. colorSpace theo PROTOCOL
-  // (baseColor=srgb, normal/rough/ao=linear). Xong → cache + invalidate siteSig + re-render (nền hiện
-  // texture thay màu phẳng tạm). Guard _groundTexLoading né load chồng. Lỗi → giữ fallback màu phẳng.
-  private _ensureGroundTex(): void {
-    if (this._groundTex || this._groundTexLoading) return
-    this._groundTexLoading = true
-    const spec: SurfaceTextureSpec = {
-      baseColor: { url: grassBaseColorUrl, colorSpace: 'srgb' },
-      normal: { url: grassNormalUrl, colorSpace: 'linear' },
-      roughness: { url: grassRoughnessUrl, colorSpace: 'linear' },
-      ao: { url: grassAoUrl, colorSpace: 'linear' },
+  // PhotoGround cached cho 1 key: có sẵn → trả; có MAPS (đã load) → build PhotoGround (tile theo GROUND_TEX_SPEC)
+  // + cache; chưa load maps → kick-off ASYNC + null (ground rơi màu phẳng tạm, load xong re-render). Sống lab-lifetime.
+  private _groundMatFor(key: GroundMaterialKey): PhotoGround | null {
+    const existing = this._groundMat[key]
+    if (existing) return existing
+    const maps = this._groundTex[key]
+    if (!maps) {
+      this._ensureGroundTex(key) // kick-off load maps → xong: _siteSig='' + re-render
+      return null
     }
-    loadSurfaceTextureSet(spec, this.renderer)
+    const photo = new PhotoGround({ maps, tileSizeMeters: GROUND_TEX_SPEC[key]?.tile ?? 2 })
+    this._groundMat[key] = photo
+    return photo
+  }
+
+  // Tập key ground dùng TEXTURE (unique) = base ground + mọi TẦNG layer chồng (lọc isGroundTexKey).
+  private _usedGroundTexKeys(): GroundMaterialKey[] {
+    const keys = new Set<GroundMaterialKey>()
+    if (isGroundTexKey(this.site.ground)) keys.add(this.site.ground)
+    for (const l of this.site.groundLayers ?? []) {
+      if (isGroundTexKey(l.material)) keys.add(l.material)
+    }
+    return [...keys]
+  }
+
+  // 🌱🏜️ Load texture set ground theo KEY (GROUND_TEX_SPEC) 1 lần/key, ASYNC. colorSpace theo PROTOCOL
+  // (baseColor=srgb, normal/rough/ao=linear). Xong → cache[key] + invalidate siteSig + re-render (nền hiện
+  // texture thay màu phẳng tạm). Guard _groundTexLoading[key] né load chồng. Lỗi → giữ fallback màu phẳng.
+  private _ensureGroundTex(key: GroundMaterialKey): void {
+    if (this._groundTex[key] || this._groundTexLoading[key]) return
+    const entry = GROUND_TEX_SPEC[key]
+    if (!entry) return
+    this._groundTexLoading[key] = true
+    loadSurfaceTextureSet(entry.spec, this.renderer)
       .then((maps) => {
-        this._groundTex = maps
-        this._groundTexLoading = false
+        this._groundTex[key] = maps
+        this._groundTexLoading[key] = false
         this._siteSig = '' // ép _rebuildSite chạy lại với texture đã có
         this._renderSite()
       })
       .catch((e: unknown) => {
-        this._groundTexLoading = false
+        this._groundTexLoading[key] = false
         console.warn('[ArchPlanLab] load ground texture lỗi — giữ màu phẳng:', e)
       })
   }
@@ -1919,6 +2187,134 @@ export class ArchPlanLab extends BaseWorld {
       })
   }
 
+  // 🪵 Material gỗ móng 'wood-tex' (Wooden Planks, TexturedSurface triplanar) bơm ctx.foundWoodMat. Không nhà
+  // nào dùng → undefined (khỏi load). Dùng nhưng CHƯA load → kick-off + tạm undefined (MeshToon tạm). Cache 1 lần.
+  private _foundWoodMatForBuild(): THREE.Material | undefined {
+    if (!this._usesFoundWoodTex()) return undefined
+    if (this._foundWoodTex) return this._foundWoodTex.getMaterial()
+    this._ensureFoundWoodTex()
+    return undefined
+  }
+
+  // Wooden Planks dùng cho DECK móng ('wood-tex') HOẶC slab ('planks-tex') — gom chung 1 material instance.
+  private _usesFoundWoodTex(): boolean {
+    return this.state.floors.some((f) =>
+      f.instances.some(
+        (i) => i.structure.foundMaterial === 'wood-tex' || i.structure.slabMaterial === 'planks-tex'
+      )
+    )
+  }
+
+  // 🪵 Load Wooden Planks 1 lần → TexturedSurface (triplanar, tile theo manifest). Xong → _renderScene (móng
+  // gỗ hiện texture thay MeshToon tạm). Guard _foundWoodLoading né load chồng. Lỗi → giữ MeshToon phẳng.
+  private _ensureFoundWoodTex(): void {
+    if (this._foundWoodTex || this._foundWoodLoading) return
+    this._foundWoodLoading = true
+    const spec: SurfaceTextureSpec = {
+      baseColor: { url: planksBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: planksNormalUrl, colorSpace: 'linear' },
+      roughness: { url: planksRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: planksAoUrl, colorSpace: 'linear' },
+    }
+    loadSurfaceTextureSet(spec, this.renderer)
+      .then((maps) => {
+        this._foundWoodMaps = maps
+        this._foundWoodTex = new TexturedSurface({
+          maps,
+          tileSizeMeters: planksManifest.tileSizeMeters,
+        })
+        this._foundWoodLoading = false
+        this._renderScene() // rebuild với material gỗ móng đã có
+      })
+      .catch((e: unknown) => {
+        this._foundWoodLoading = false
+        console.warn('[ArchPlanLab] load foundation wood texture lỗi — giữ MeshToon:', e)
+      })
+  }
+
+  // 🪵 Material gỗ KHUNG-DƯỚI 'wood-tex' (Old Plywood, TexturedSurface triplanar) bơm ctx.underWoodMat. Tách hẳn
+  // deck (Wooden Planks). Không nhà nào dùng → undefined (khỏi load). Dùng nhưng CHƯA load → kick-off + undefined.
+  private _underWoodMatForBuild(): THREE.Material | undefined {
+    if (!this._usesUnderWoodTex()) return undefined
+    if (this._underWoodTex) return this._underWoodTex.getMaterial()
+    this._ensureUnderWoodTex()
+    return undefined
+  }
+
+  private _usesUnderWoodTex(): boolean {
+    return this.state.floors.some((f) =>
+      f.instances.some((i) => i.structure.understructMaterial === 'wood-tex')
+    )
+  }
+
+  // 🪵 Load Old Plywood 1 lần → TexturedSurface (triplanar). Xong → _renderScene (khung-dưới hiện texture thay
+  // MeshToon tạm). Guard _underWoodLoading né load chồng. Lỗi → giữ MeshToon phẳng.
+  private _ensureUnderWoodTex(): void {
+    if (this._underWoodTex || this._underWoodLoading) return
+    this._underWoodLoading = true
+    const spec: SurfaceTextureSpec = {
+      baseColor: { url: oldplyBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: oldplyNormalUrl, colorSpace: 'linear' },
+      roughness: { url: oldplyRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: oldplyAoUrl, colorSpace: 'linear' },
+    }
+    loadSurfaceTextureSet(spec, this.renderer)
+      .then((maps) => {
+        this._underWoodMaps = maps
+        this._underWoodTex = new TexturedSurface({
+          maps,
+          tileSizeMeters: oldplyManifest.tileSizeMeters,
+        })
+        this._underWoodLoading = false
+        this._renderScene() // rebuild với material khung-dưới đã có
+      })
+      .catch((e: unknown) => {
+        this._underWoodLoading = false
+        console.warn('[ArchPlanLab] load understructure wood texture lỗi — giữ MeshToon:', e)
+      })
+  }
+
+  // 🌳 Material VỎ CÂY khung-dưới 'bark-tex' (Tree Bark, TexturedSurface triplanar) bơm ctx.underBarkMat. Tuỳ chọn
+  // thứ 2 (≠ Old Plywood). Không nhà nào dùng → undefined. Dùng nhưng CHƯA load → kick-off + undefined.
+  private _underBarkMatForBuild(): THREE.Material | undefined {
+    if (!this._usesUnderBarkTex()) return undefined
+    if (this._underBarkTex) return this._underBarkTex.getMaterial()
+    this._ensureUnderBarkTex()
+    return undefined
+  }
+
+  private _usesUnderBarkTex(): boolean {
+    return this.state.floors.some((f) =>
+      f.instances.some((i) => i.structure.understructMaterial === 'bark-tex')
+    )
+  }
+
+  // 🌳 Load Tree Bark 1 lần → TexturedSurface (triplanar, tile mịn 1.5m). Xong → _renderScene. Guard né load chồng.
+  private _ensureUnderBarkTex(): void {
+    if (this._underBarkTex || this._underBarkLoading) return
+    this._underBarkLoading = true
+    const spec: SurfaceTextureSpec = {
+      baseColor: { url: barkBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: barkNormalUrl, colorSpace: 'linear' },
+      roughness: { url: barkRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: barkAoUrl, colorSpace: 'linear' },
+    }
+    loadSurfaceTextureSet(spec, this.renderer)
+      .then((maps) => {
+        this._underBarkMaps = maps
+        this._underBarkTex = new TexturedSurface({
+          maps,
+          tileSizeMeters: barkManifest.tileSizeMeters,
+        })
+        this._underBarkLoading = false
+        this._renderScene() // rebuild với material vỏ cây đã có
+      })
+      .catch((e: unknown) => {
+        this._underBarkLoading = false
+        console.warn('[ArchPlanLab] load understructure bark texture lỗi — giữ MeshToon:', e)
+      })
+  }
+
   // 🧱 Load texture set tường rào theo kind (cinder/stone) 1 lần. Đổi kind → dispose bộ cũ. Xong → invalidate
   // siteSig + _renderSite (tường rào hiện texture thay màu phẳng tạm). Material do site-kit tạo (ctx.shaders).
   private _ensureFenceTex(kind: 'cinder' | 'stone'): void {
@@ -1958,17 +2354,41 @@ export class ArchPlanLab extends BaseWorld {
   // dispose là CALLER-side (PhotoGround/TexturedSurface.dispose KHÔNG đụng texture). Material fence do site-kit
   // tự dispose qua siteShaders ở _clearSite — ở đây chỉ free texture maps. Gọi từ _disposeSceneResources.
   private _disposeSurfaceTextures(): void {
-    disposeSurfaceTextureSet(this._groundTex)
-    this._groundTex = null
+    for (const k of Object.keys(this._groundMat) as GroundMaterialKey[]) {
+      this._groundMat[k]?.dispose() // 🌱 PhotoGround material MỖI key (cache lab-lifetime; KHÔNG đụng maps)
+    }
+    this._groundMat = {}
+    for (const k of Object.keys(this._groundTex) as GroundMaterialKey[]) {
+      disposeSurfaceTextureSet(this._groundTex[k] ?? null) // 🌱🏜️ ground texture-set MỖI key (lab sở hữu)
+    }
+    this._groundTex = {}
     this._slabTex?.dispose() // PhotoGround material sàn (cache lab-lifetime)
     this._slabTex = null
     disposeSurfaceTextureSet(this._slabTexMaps)
     this._slabTexMaps = null
+    this._disposeFoundWoodTextures() // 🪵🌳 gỗ deck + khung-dưới (Wooden Planks/Old Plywood/Tree Bark)
     for (const k of ['cinder', 'stone'] as const) {
       this._fenceTex[k]?.surf.dispose() // TexturedSurface material (cache lab-lifetime) MỖI kind
       disposeSurfaceTextureSet(this._fenceTex[k]?.maps ?? null)
     }
     this._fenceTex = {}
+  }
+
+  // 🪵🌳 Teardown gỗ móng: deck (Wooden Planks) + khung-dưới (Old Plywood + Tree Bark). TexturedSurface.dispose
+  // chỉ material; maps free riêng (caller-side). Tách khỏi _disposeSurfaceTextures để giữ complexity ≤10.
+  private _disposeFoundWoodTextures(): void {
+    this._foundWoodTex?.dispose()
+    this._foundWoodTex = null
+    disposeSurfaceTextureSet(this._foundWoodMaps)
+    this._foundWoodMaps = null
+    this._underWoodTex?.dispose()
+    this._underWoodTex = null
+    disposeSurfaceTextureSet(this._underWoodMaps)
+    this._underWoodMaps = null
+    this._underBarkTex?.dispose()
+    this._underBarkTex = null
+    disposeSurfaceTextureSet(this._underBarkMaps)
+    this._underBarkMaps = null
   }
 
   // 🌿 Dựng/GIỮ bãi cỏ theo chữ ký structural (grassBuildSig). Sig GIỐNG lần trước → giữ nguyên mesh,
@@ -2138,11 +2558,6 @@ export class ArchPlanLab extends BaseWorld {
     const surf = this._siteWaters.find((x) => x.cfg === cfg)?.surf
     if (surf) apply(surf)
     if (persist) this.store.autosave(this.state, this.site)
-  }
-
-  // 🔎 Dựng lá mẫu trong preview (gọi 1 LẦN lúc init Lab float). Preview độc lập scene → không sync sau đó.
-  private _previewRebuild(): void {
-    this.preview?.rebuild(this.site.grass3d)
   }
 
   private _clearSite(): void {

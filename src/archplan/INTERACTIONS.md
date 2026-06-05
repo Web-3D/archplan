@@ -88,6 +88,18 @@ Hồ (`WaterSurface`) là **site element rời** (ở `siteGroup`, không có `i
 > ⚠ Slider Pos X/Z trong tab Pl▸Pool edge KHÔNG tự cập nhật số sau khi kéo hồ trong 3D (state đúng + đã lưu, chỉ phần hiển
 > thị slider chờ panel dựng lại). Nâng cấp: registerWaterReadout nếu cần đồng bộ tức thì.
 
+### 5b. SITE element — TẦNG ground chồng (G1+) 🟫
+
+Tầng layer (`groundLayers[]`, mesh `userData.groundLayerIdx` trong `siteGroup`) = site element rời như hồ. **G0 base KHÔNG kéo** (không tag).
+
+| Tương tác | Tầng ground làm sao |
+|---|---|
+| **🤚 Move** | Raycast `siteGroup` tìm mesh có `groundLayerIdx` (`_tryStartLayerDrag`, gọi SAU khi nhường building element). Kéo mặt-phẳng-ngang @điểm-neo → **dời `mesh.position`** (0 rebuild — né recompile NodeMaterial / reflector RTT mỗi frame; `PERFORMANCE.md`). Thả → gập Δ vào `offsetX/Z` + `_applySite(true)` (re-carve lỗ nước + autosave). Anchor: `_tryStartLayerDrag` / `_layerDragMove` / `_commitLayerDrag`; clear ở `_setMoveMode`. |
+| **👆 Focus** | click tầng 3D → trỏ GUI Ground▸Gn (đang thêm). |
+| **🎨 Paint / P Pick** | KHÔNG — chỉnh qua GUI Ground ▸ G1/G2… (Surface / Length / Width / Thickness / ✕). |
+
+> Lỗ né nước (pool/pond/puddle + dải edge) carve ở **lõi** `site/render/fromState.ts` (`buildGroundLayers`→`layerGeometry` clip Sutherland-Hodgman). Kéo live: lỗ đi theo tạm, re-carve khi thả.
+
 ---
 
 ## Phím tắt
