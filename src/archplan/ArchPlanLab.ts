@@ -101,6 +101,7 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js'
 import { PMREMGenerator } from 'three/webgpu'
 import type { GrassBlades, GrassExcludeRect } from 'threejs-modules/components/GrassBlades'
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
+import { SkyGradient } from 'threejs-modules/components/SkyGradient' // 🌅 bầu trời gradient ngày↔đêm
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
@@ -302,6 +303,7 @@ export class ArchPlanLab extends BaseWorld {
 
   // Đèn mặt trời + tham số (điều khiển qua panel ☀ Sun). Default ≈ vị trí cũ (10,18,10).
   private sun: THREE.DirectionalLight | null = null
+  private sky: SkyGradient | null = null // 🌅 bầu trời gradient ngày↔đêm (theo độ-cao sun)
   private readonly sunOpts: SunOpts = {
     azimuth: 45,
     elevation: 52,
@@ -407,6 +409,11 @@ export class ArchPlanLab extends BaseWorld {
   private _slabTexMaps: PhotoGroundMaps | null = null
   private _slabTex: PhotoGround | null = null
   private _slabTexLoading = false
+  // 🏖️ Nền-editor 'sand' = rippled_sand (PhotoGround photo, world-XZ UV) áp lên groundMesh 80×80. Load 1 lần
+  // ASYNC, Lab sở hữu maps + PhotoGround → dispose onDispose. Chờ load = fallback màu cát (makeSurfaceMaterial).
+  private _editorSandMaps: PhotoGroundMaps | null = null
+  private _editorSandTex: PhotoGround | null = null
+  private _editorSandLoading = false
   // 🪵 Gỗ DECK móng 'wood-tex' + slab 'planks-tex' = Wooden Planks (TexturedSurface triplanar — móng có mặt 3D
   // trụ/xà/chống; sàn dùng chung). Cache 1 lần. Lab sở hữu maps + TexturedSurface → dispose. Bơm ctx.foundWoodMat.
   private _foundWoodMaps: TexturedSurfaceMaps | null = null
@@ -1123,6 +1130,9 @@ export class ArchPlanLab extends BaseWorld {
     this.sunGizmo = null
     this.sun?.dispose() // dispose shadow map render target
     this.sun = null
+    this.scene.backgroundNode = null // 🌅 gỡ sky node nền
+    this.sky?.dispose()
+    this.sky = null
     this.guard?.dispose()
     this.guard = null
     this.devHud?.dispose()
@@ -1162,7 +1172,7 @@ export class ArchPlanLab extends BaseWorld {
   }
 
   private _setupScene(): void {
-    this.scene.background = new THREE.Color(0x07080d)
+    this.scene.background = new THREE.Color(0x0a0e1a) // fallback; SkyGradient dome phủ tầm nhìn (đặt cuối hàm)
     // pixelRatio: kế thừa min(dpr,2) của BaseWorld (full chất lượng). KHÔNG hạ riêng ở đây —
     // band-aid 1.5 trước kia là để vá lag do Chrome render bằng CPU (software), không phải shader.
     this.renderer.shadowMap.enabled = true
@@ -1176,7 +1186,7 @@ export class ArchPlanLab extends BaseWorld {
     sun.castShadow = true
     sun.shadow.mapSize.set(2048, 2048) // mịn hơn (~19mm/texel) để bắt bóng relief wood/overhang
     sun.shadow.camera.near = 0.5
-    sun.shadow.camera.far = 60
+    sun.shadow.camera.far = 90 // sun radius 48 (xa gấp đôi) → bump far kẻo light ra ngoài frustum, clip bóng
     sun.shadow.camera.left = -20
     sun.shadow.camera.right = 20
     sun.shadow.camera.top = 20
@@ -1195,6 +1205,8 @@ export class ArchPlanLab extends BaseWorld {
 
     this.gridMat = new THREE.LineBasicMaterial({ color: 0x1a2240 })
     this.gridHelper = new THREE.LineSegments(this._buildGridGeo([]), this.gridMat) // tự dựng → khoét được
+    this.sky = new SkyGradient() // 🌅 sky qua scene.backgroundNode (KHÔNG mesh — luôn phủ, tự theo camera)
+    this.scene.backgroundNode = this.sky.getBackgroundNode()
     this.scene.add(hemi, sun, ground, this.gridHelper)
     this._applySun()
   }
@@ -1233,9 +1245,49 @@ export class ArchPlanLab extends BaseWorld {
       const a = new AsphaltGround({ scale: 1.0 })
       return { mat: a.getMaterial(), shader: a, bounce: 0x2a2a2e } // nhựa hấp thụ sáng → bounce yếu tối
     }
+    if (t === 'sand') return this._sandGroundMaterial() // 🏖️ rippled_sand photo (PhotoGround async + fallback)
     // mặc định 'stone' (đá lát hoa cương — slab grid). Đất/cỏ tự nhiên sẽ từ Megascans/Gaea sau.
     const e = makeSurfaceMaterial('concrete', 0x9a9890, 1.0)
     return { mat: e.mat, shader: e.shader, bounce: 0x8a8880 }
+  }
+
+  // 🏖️ Material nền-editor cát: PhotoGround rippled_sand nếu đã load (Lab-owned → shader null, KHÔNG để
+  // _setGroundType dispose vật liệu chia sẻ); chưa load → kick async + tạm màu cát (shader fallback disposable).
+  private _sandGroundMaterial(): {
+    mat: THREE.Material
+    shader: { dispose(): void } | null
+    bounce: number
+  } {
+    if (this._editorSandTex) {
+      return { mat: this._editorSandTex.getMaterial(), shader: null, bounce: 0xc2a878 }
+    }
+    this._ensureEditorSandTex()
+    const f = makeSurfaceMaterial('concrete', 0xc2a878, 1.0) // tạm màu cát chờ load
+    return { mat: f.mat, shader: f.shader, bounce: 0xc2a878 }
+  }
+
+  // 🏖️ Load rippled_sand 1 lần → PhotoGround (world-XZ UV, tile theo manifest 3m). Xong → re-apply nền nếu
+  // đang chọn 'sand' (đổi material groundMesh từ fallback → texture). Lab sở hữu maps + PhotoGround → dispose.
+  private _ensureEditorSandTex(): void {
+    if (this._editorSandTex || this._editorSandLoading) return
+    this._editorSandLoading = true
+    const spec: SurfaceTextureSpec = {
+      baseColor: { url: sandBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: sandNormalUrl, colorSpace: 'linear' },
+      roughness: { url: sandRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: sandAoUrl, colorSpace: 'linear' },
+    }
+    loadSurfaceTextureSet(spec, this.renderer)
+      .then((maps) => {
+        this._editorSandMaps = maps
+        this._editorSandTex = new PhotoGround({ maps, tileSizeMeters: sandManifest.tileSizeMeters })
+        this._editorSandLoading = false
+        if (this.groundType === 'sand') this._setGroundType('sand') // re-apply với texture đã có
+      })
+      .catch((e: unknown) => {
+        this._editorSandLoading = false
+        console.warn('[ArchPlanLab] load editor sand texture lỗi — giữ màu cát:', e)
+      })
   }
 
   // Đặt vị trí (cầu az/el, bán kính 24m trong tầm shadow camera) + intensity/màu/on-off của sun từ
@@ -1244,16 +1296,28 @@ export class ArchPlanLab extends BaseWorld {
     if (!this.sun) return
     const az = (this.sunOpts.azimuth * Math.PI) / 180
     const el = (this.sunOpts.elevation * Math.PI) / 180
-    const r = 24
+    const r = 48 // bán kính vòm sun (khớp SunGizmo DOME_R) — gấp đôi để sun không sát mặt đất
     const cosEl = Math.cos(el)
     this.sun.position.set(r * cosEl * Math.cos(az), r * Math.sin(el), r * cosEl * Math.sin(az))
-    this.sun.intensity = this.sunOpts.intensity
+    // Tắt sun = intensity 0 (KHÔNG đổi sun.visible). Đổi tập đèn active (visible on/off) → WebGPU recompile
+    // MỌI NodeMaterial (lag 1–3s mỗi toggle). Giữ visible=true + intensity 0 → chỉ ghi uniform, toggle tức thì.
+    this.sun.intensity = this.sunOpts.enabled ? this.sunOpts.intensity : 0
     this.sun.color.set(this.sunOpts.color)
-    this.sun.visible = this.sunOpts.enabled // tắt → chỉ còn hemisphere fill, không đổ bóng
-    this.sun.shadow.needsUpdate = true // sun dời → shadow map cần vẽ lại (autoUpdate đang off)
+    this.sun.shadow.needsUpdate = this.sunOpts.enabled // tắt → khỏi vẽ lại shadow map (đỡ depth-pass thừa)
     this._applySunToGrass() // vệt tiếp đất cỏ đổi hướng/độ dài theo sun (live, không dựng lại)
     this._applySunToWater() // đốm nắng glint trên mặt hồ đổi theo sun (live)
+    this._applySunToSky() // 🌅 sky ngày↔đêm + mờ đèn fill/env theo độ-cao sun (live)
     this.sunGizmo?.sync()
+  }
+
+  // 🌅 Sun đổi → sky lerp ngày↔đêm + mờ HemisphereLight & environment lúc đêm (fill/IBL tối dần). LIVE
+  // (uniform sky + scalar đèn, KHÔNG dựng lại/recompile) → kéo quả sun mượt.
+  private _applySunToSky(): void {
+    if (!this.sun || !this.sky) return
+    const p = this.sun.position
+    const day = this.sky.setSun(p.x, p.y, p.z) // [0..1]: 1=trưa, 0=đêm
+    if (this.hemiLight) this.hemiLight.intensity = 0.06 + 0.29 * day
+    this.scene.environmentIntensity = 0.05 + 0.25 * day
   }
 
   // Hướng + độ dài vệt tiếp đất của bãi cỏ theo sun (live). Gọi khi sun đổi + sau mỗi lần dựng lại _siteGrass.
@@ -1502,7 +1566,12 @@ export class ArchPlanLab extends BaseWorld {
     const bench = setupLabBench(wrap) // 🧪 title + note + 2 khung trái (param/doc) + previewHost
     // 🧪 Lab giờ host thí nghiệm MÁI: slider vào khung 🎛️ trái, preview WebGL ở cột phải. (Cỏ đã tốt nghiệp
     // sang Garden ▸ Grass; muốn soi lại cỏ thì re-wire GrassPreview — grass-preview.ts vẫn còn.)
-    this.roofLab = setupRoofLab(bench.previewHost, bench.paramHost)
+    this.roofLab = setupRoofLab(
+      bench.previewHost,
+      bench.paramHost,
+      bench.docHost,
+      bench.settingsHost
+    )
     const title = wrap.querySelector<HTMLElement>('.ap-scan-title')
     if (title) this._makeDraggable(wrap, title) // kéo panel theo title
     const btn = document.createElement('button')
@@ -1519,6 +1588,12 @@ export class ArchPlanLab extends BaseWorld {
     if (!this.labFloat || !this.labToggle) return
     const hidden = this.labFloat.classList.toggle('ap-lab-hidden')
     this.labToggle.classList.toggle('ap-lab-toggle-on', !hidden)
+    if (!hidden) {
+      // Bật lên → luôn snap SÁT MÉP TRÁI (xóa offset đã kéo trước đó).
+      this.labFloat.style.left = '8px'
+      this.labFloat.style.top = '8px'
+      this.labFloat.style.right = 'auto'
+    }
   }
 
   // Teardown Lab float persistent (chỉ ở dispose CUỐI — KHÔNG mỗi _rebuildGUI).
@@ -2440,6 +2515,7 @@ export class ArchPlanLab extends BaseWorld {
     this._slabTex = null
     disposeSurfaceTextureSet(this._slabTexMaps)
     this._slabTexMaps = null
+    this._disposeEditorSandTex() // 🏖️ PhotoGround nền cát editor (tách helper — giữ complexity ≤10)
     this._disposeFoundWoodTextures() // 🪵🌳 gỗ deck + khung-dưới (Wooden Planks/Old Plywood/Tree Bark)
     for (const k of ['cinder', 'stone'] as const) {
       this._fenceTex[k]?.surf.dispose() // TexturedSurface material (cache lab-lifetime) MỖI kind
@@ -2449,6 +2525,14 @@ export class ArchPlanLab extends BaseWorld {
   }
 
   // 🪵🌳 Teardown gỗ móng: deck (Wooden Planks) + khung-dưới (Old Plywood + Tree Bark). TexturedSurface.dispose
+  // 🏖️ Dispose PhotoGround nền cát editor + maps (Lab sở hữu). Tách khỏi _disposeSurfaceTextures (complexity ≤10).
+  private _disposeEditorSandTex(): void {
+    this._editorSandTex?.dispose()
+    this._editorSandTex = null
+    disposeSurfaceTextureSet(this._editorSandMaps)
+    this._editorSandMaps = null
+  }
+
   // chỉ material; maps free riêng (caller-side). Tách khỏi _disposeSurfaceTextures để giữ complexity ≤10.
   private _disposeFoundWoodTextures(): void {
     this._foundWoodTex?.dispose()

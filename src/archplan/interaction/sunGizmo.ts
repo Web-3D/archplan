@@ -15,7 +15,7 @@ import * as THREE from 'three'
 
 import type { SunOpts } from '../scene/scene'
 
-const DOME_R = 24 // m — bán kính vòm sun (khớp _applySun)
+const DOME_R = 48 // m — bán kính vòm sun (khớp _applySun r) — gấp đôi để sun không sát mặt đất
 const EL_MIN = 5 // ° — kẹp ban ngày: mặt trời luôn trên cao
 const EL_MAX = 89
 

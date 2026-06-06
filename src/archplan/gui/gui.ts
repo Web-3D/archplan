@@ -113,6 +113,7 @@ function mkSurfaceRow(ctx: APGuiCtx): HTMLElement {
     ['🔲', 'none'], // Grid (nền editor)
     ['🧱', 'stone'], // Stone paving
     ['🛣️', 'asphalt'], // Asphalt
+    ['🏖️', 'sand'], // Rippled sand (photo PBR texture)
   ]
   const btns: { val: GroundType; el: HTMLButtonElement }[] = []
   const sync = (): void => {
