@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ArchPlan — Showcase</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #aac4d8;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      #app {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      /* nhãn tên công trình góc dưới — portfolio caption */
+      #caption {
+        position: absolute;
+        left: 22px;
+        bottom: 20px;
+        color: #163;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        text-shadow: 0 1px 3px rgba(255, 255, 255, 0.6);
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="app"></canvas>
+    <div id="caption">ArchPlan — procedural showcase</div>
+    <script type="module" src="./viewer.ts"></script>
+  </body>
+</html>

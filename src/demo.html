@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ArchPlan — Thử nghịch (demo)</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #aac4d8;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      #app {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #hint {
+        position: absolute;
+        left: 22px;
+        top: 18px;
+        color: #163;
+        font-size: 13px;
+        font-weight: 600;
+        text-shadow: 0 1px 3px rgba(255, 255, 255, 0.6);
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="app"></canvas>
+    <div id="hint">Kéo chuột để xoay · kéo thanh ☀️ bên dưới để đổi giờ nắng</div>
+    <script type="module" src="./demo.ts"></script>
+  </body>
+</html>
