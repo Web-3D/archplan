@@ -346,6 +346,32 @@ function layerSlider(
   )
 }
 
+// Form (hình mảng: rect/circle/ellipse — free-bezier chờ editor ground) + Mode (add = mảng phủ / cut = khoét lộ
+// base). Tách khỏi buildGroundLayerPane giữ Rule-50.
+function appendLayerShapeMode(pane: HTMLElement, ctx: APGuiCtx, layer: GroundLayer): void {
+  const formOpts: [string, 'rect' | 'circle' | 'ellipse'][] = [
+    ['Rect', 'rect'],
+    ['Tròn', 'circle'],
+    ['Ellipse', 'ellipse'],
+  ]
+  pane.appendChild(
+    selectRow('Form', formOpts, (layer.shape ?? 'rect') as 'rect' | 'circle' | 'ellipse', (v) => {
+      layer.shape = v
+      ctx.applySite(true)
+    })
+  )
+  const opOpts: [string, 'add' | 'cut'][] = [
+    ['Mảng (add)', 'add'],
+    ['Khoét (cut)', 'cut'],
+  ]
+  pane.appendChild(
+    selectRow('Mode', opOpts, layer.op ?? 'add', (v) => {
+      layer.op = v
+      ctx.applySite(true)
+    })
+  )
+}
+
 function buildGroundLayerPane(
   ctx: APGuiCtx,
   layer: GroundLayer,
@@ -365,8 +391,9 @@ function buildGroundLayerPane(
       () => ctx.prefetchGroundTextures?.()
     )
   )
-  pane.appendChild(layerSlider(ctx, layer, 'length', 'Length m', 0.5, 40, 0.1, 1000))
-  pane.appendChild(layerSlider(ctx, layer, 'width', 'Width m', 0.5, 40, 0.1, 1000))
+  appendLayerShapeMode(pane, ctx, layer) // Form (rect/circle/ellipse) + Mode (add/cut)
+  pane.appendChild(layerSlider(ctx, layer, 'length', 'Length m', 0.5, 40, 0.1, 1000)) // circle=đường kính, ellipse=trục X
+  pane.appendChild(layerSlider(ctx, layer, 'width', 'Width m', 0.5, 40, 0.1, 1000)) // ellipse=trục Z
   pane.appendChild(layerSlider(ctx, layer, 'thickness', 'Thickness cm', 1, 10, 0.5, 10))
   pane.appendChild(
     removeRow('✕ Remove layer', () => {
