@@ -91,6 +91,7 @@ import pavementBaseColorUrl from 'assets/textures/worn_pavement/production/basec
 import pavementNormalUrl from 'assets/textures/worn_pavement/production/normal.ktx2?url'
 import pavementRoughnessUrl from 'assets/textures/worn_pavement/production/roughness.ktx2?url'
 import { computeLocalBbox } from 'building-kit/build' // footprint nhà (m²) cho bảng số liệu lô
+import type { GroundDrop } from 'building-kit/parts/Structure' // vùng nền tụt (lòng hồ) → cột chống đâm đáy
 import { renderBuildingState } from 'building-kit/render/fromState' // renderer chung lõi (Phase 1b)
 import { makeSurfaceMaterial, WallMaterialCache } from 'building-kit/wallMaterials' // material engine
 import type GUI from 'lil-gui'
@@ -116,6 +117,7 @@ import {
   buildSiteGrass,
   gateWorldSpec,
   grassBuildSig,
+  pondWorldXZ,
   renderSiteState,
   siteGrassExclude,
   type SiteRenderCtx,
@@ -328,6 +330,9 @@ export class ArchPlanLab extends BaseWorld {
   private _dragGeos: THREE.BufferGeometry[] = []
   private _dragMats: THREE.Material[] = []
   private _dragInstId: string | null = null // shape đang kéo (split) — rebuild riêng khi kéo element (cột/cửa/cầu thang)
+  // Shape đang kéo có GIỮ cột móng không: true = kéo NGUYÊN nhà (translate, 0 rebuild → cột hiện, định vị trên hồ);
+  // false = kéo ELEMENT (rebuild/frame → ép concrete cho rẻ). Set true ở begin, _rebuildDragShapeLive hạ false.
+  private _dragShowFound = true
   // SPIKE palette brush — lớp pick vô hình (1 box/tường, visible=false → 0 render, vẫn raycast vì
   // Raycaster bỏ qua .visible) để click tường trong 3D xác định đúng tường kể cả khi render đã merge.
   private readonly pickGroup = new THREE.Group()
@@ -1794,13 +1799,16 @@ export class ArchPlanLab extends BaseWorld {
         foundWoodMat: this._foundWoodMatForBuild(), // 🪵 gỗ deck móng + slab planks (Wooden Planks)
         underWoodMat: this._underWoodMatForBuild(), // 🪵 gỗ khung-dưới (Old Plywood, tách deck)
         underBarkMat: this._underBarkMatForBuild(), // 🌳 vỏ cây khung-dưới (Tree Bark, tuỳ chọn 2)
+        groundDrops: this._groundDropsForBuild(), // 🌊 nhà static giữ cột-tụt-hồ khi kéo nhà khác
       },
       true, // plainWalls: LOD tường phẳng (rẻ + tintable)
       this._hiddenFloors,
-      (id) => id !== instId
+      (id) => id !== instId,
+      false // 🪵 nhà static GIỮ cột (dựng 1 lần, rẻ) → mốc định vị khi kéo nhà khác trên hồ
     )
     for (const p of others) this._addPick(p.cx, p.cy, p.cz, p.sx, p.sy, p.sz, p.rotDeg, p.ud)
     this._dragInstId = instId
+    this._dragShowFound = true // bắt đầu = kéo NGUYÊN nhà (translate) → giữ cột; element-drag sẽ hạ false
     this._renderDragShape() // dragged shape → _dragGroup (kéo element = rebuild lại cái này, KHÔNG đụng shape khác)
     this._setBuildingTint(this.moveMode) // nhuốm xanh CẢ static (shape kéo giữ màu gốc → nổi bật, dễ canh)
     this._renderSite() // nền/cỏ + đôn buildingGroup lên mặt nền (set buildingGroup.position = (0,lift,0))
@@ -1831,17 +1839,21 @@ export class ArchPlanLab extends BaseWorld {
         foundWoodMat: this._foundWoodMatForBuild(), // 🪵 gỗ deck móng + slab planks cho shape đang kéo
         underWoodMat: this._underWoodMatForBuild(), // 🪵 gỗ khung-dưới (Old Plywood) cho shape đang kéo
         underBarkMat: this._underBarkMatForBuild(), // 🌳 vỏ cây khung-dưới (Tree Bark) cho shape đang kéo
+        groundDrops: this._groundDropsForBuild(), // 🌊 cột-tụt-hồ cho shape đang kéo (khi giữ cột)
       },
       true,
       this._hiddenFloors,
-      (i) => i === id
+      (i) => i === id,
+      !this._dragShowFound // kéo NGUYÊN nhà → giữ cột (false); element-drag (rebuild/frame) → concrete (true)
     )
     if (this.sun) this.sun.shadow.needsUpdate = true // bóng theo shape đang kéo (element rebuild)
   }
 
   // Kéo ELEMENT: rebuild shape đang kéo THROTTLE ≤1/frame (rAF) — né rebuild 120+/giây theo poll chuột.
-  // Reuse _rafBuild (split-drag KHÔNG gọi _buildSceneLive; dragEnd→_buildScene cancel raf này).
+  // Reuse _rafBuild (split-drag KHÔNG gọi _buildSceneLive; dragEnd→_buildScene cancel raf này). Đây là tín hiệu
+  // element-drag (≠ kéo nguyên nhà) → ép móng concrete cho rẻ (lưới cột rebuild/frame rất nặng).
   private _rebuildDragShapeLive(): void {
+    this._dragShowFound = false // element-drag: rebuild/frame → bỏ cột deck/trụ (LOD), buông tay _renderScene hiện lại
     if (this._rafBuild) return
     this._rafBuild = requestAnimationFrame(() => {
       this._rafBuild = 0
@@ -2143,9 +2155,12 @@ export class ArchPlanLab extends BaseWorld {
         foundWoodMat: this._foundWoodMatForBuild(), // 🪵 gỗ deck móng + slab planks (Wooden Planks)
         underWoodMat: this._underWoodMatForBuild(), // 🪵 gỗ khung-dưới (Old Plywood, tách deck)
         underBarkMat: this._underBarkMatForBuild(), // 🌳 vỏ cây khung-dưới (Tree Bark, tuỳ chọn 2)
+        groundDrops: this._groundDropsForBuild(), // 🌊 lòng hồ → cột chống móng đâm sâu tới đáy
       },
       this.moveMode, // LOD tường phẳng KHI ở Move mode → tintable + rẻ khi kéo (brick là thủ phạm CPU); tắt = gạch
-      this._hiddenFloors // 🙈 tầng ẩn → bỏ dựng mesh/pick (giữ chiều cao stacking)
+      this._hiddenFloors, // 🙈 tầng ẩn → bỏ dựng mesh/pick (giữ chiều cao stacking)
+      undefined, // filter: dựng tất cả
+      false // 🪵 GIỮ cột móng dù Move mode (xem tĩnh → định vị nhà trên hồ); chỉ element-drag mới ép concrete
     )
     for (const p of placements) this._addPick(p.cx, p.cy, p.cz, p.sx, p.sy, p.sz, p.rotDeg, p.ud)
     this._setBuildingTint(this.moveMode) // bật Move → nhuốm xanh CẢ NHÀ ngay (nghệ); tắt Move → màu gốc
@@ -2334,6 +2349,18 @@ export class ArchPlanLab extends BaseWorld {
         this._slabTexLoading = false
         console.warn('[ArchPlanLab] load slab texture (walnut) lỗi — giữ bê tông:', e)
       })
+  }
+
+  // 🌊 Lòng hồ pool/pond (có basin) → GroundDrop[] cho building-kit: cột chống móng (wood-deck post /
+  // stone-pillar trụ giữa) nằm trên đâm sâu tới đáy hồ. World mét. CHỈ khi site.show (building được đôn lên
+  // rim; tắt → không basin → không tụt). dropY = depthY/1000 + 2cm cắm XUYÊN đáy basin (né z-fight mặt đáy
+  // coplanar). pondWorldXZ lo cả rect lẫn free.
+  private _groundDropsForBuild(): GroundDrop[] {
+    if (!this.site.show) return []
+    return renderWaters(this.site).map((w) => ({
+      poly: pondWorldXZ(w),
+      dropY: w.depthY / 1000 + 0.02,
+    }))
   }
 
   // 🪵 Material gỗ móng 'wood-tex' (Wooden Planks, TexturedSurface triplanar) bơm ctx.foundWoodMat. Không nhà

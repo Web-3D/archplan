@@ -390,20 +390,37 @@ function buildFoundationSubfolder(parent: GUI, s: StructureState, ctx: APGuiCtx)
     })
   const foundHMax = s.foundType === 'stone-pillar' ? 4000 : 2000 // trụ đá cao tới 4m (cột chống cao)
   live(f.add(s, 'foundH', 100, foundHMax, 50).name('Height'), ctx)
-  if (s.foundType === 'wood-deck') {
-    s.foundMaterial ??= 'none' // gỗ deck: None (MeshToon) | Wood planks (texture)
-    f.add(s, 'foundMaterial', { None: 'none', 'Wood (planks)': 'wood-tex' })
-      .name('Wood mat')
-      .onChange(ctx.build)
-    s.deckPostSpacing ??= 1500
-    live(f.add(s, 'deckPostSpacing', 600, 4000, 100).name('Post spacing mm'), ctx) // #10 mật độ lưới cột
-  }
+  if (s.foundType === 'wood-deck') buildWoodDeckControls(f, s, ctx) // deck + cột chống (2 vân riêng)
   if (s.foundType === 'stone-pillar') buildStonePillarFolders(f, s, ctx) // 3 tab con: Deck | Khung dưới | Trụ đá
   live(f.add(s.foundOh, 'n', 0, 2, 0.05).name('Expand N m'), ctx)
   live(f.add(s.foundOh, 'e', 0, 2, 0.05).name('Expand E m'), ctx)
   live(f.add(s.foundOh, 's', 0, 2, 0.05).name('Expand S m'), ctx)
   live(f.add(s.foundOh, 'w', 0, 2, 0.05).name('Expand W m'), ctx)
   return f
+}
+
+// Móng 'wood-deck' (sàn gỗ Nhật): deck (sàn) + cột chống = 2 vân RIÊNG. 'Wood mat' = vân deck; 'Post mat' =
+// vân cột (None | Old plywood | Tree bark, dùng chung field understructMaterial với stone-pillar). 'Post inset'
+// = cột lùi vào từ mép deck (mm). Backfill ??= né gui.add(undefined). NgQuan 2026-06-06.
+function buildWoodDeckControls(f: GUI, s: StructureState, ctx: APGuiCtx): void {
+  s.foundMaterial ??= 'none' // gỗ deck: None (MeshToon) | Wood planks (texture)
+  f.add(s, 'foundMaterial', { None: 'none', 'Wood (planks)': 'wood-tex' })
+    .name('Wood mat')
+    .onChange(ctx.build)
+  s.understructMaterial ??= 'none' // vân cột chống — tách hẳn deck
+  f.add(s, 'understructMaterial', {
+    None: 'none',
+    'Old plywood': 'wood-tex',
+    'Tree bark': 'bark-tex',
+  })
+    .name('Post mat')
+    .onChange(ctx.build)
+  s.deckPostSpacing ??= 1500
+  live(f.add(s, 'deckPostSpacing', 600, 4000, 100).name('Post spacing mm'), ctx) // #10 mật độ lưới cột
+  s.deckPostInset ??= 50
+  live(f.add(s, 'deckPostInset', 0, 500, 10).name('Post inset mm'), ctx) // cột lùi vào từ mép deck
+  s.deckPostSize ??= 120
+  live(f.add(s, 'deckPostSize', 40, 600, 10).name('Post size mm'), ctx) // tiết diện cột chống (cạnh vuông)
 }
 
 // Móng 'stone-pillar' chia 3 TAB CON (folder lồng) cho dễ chỉnh: Deck (sàn gỗ) | Khung dưới (xà/trụ/chống) |
