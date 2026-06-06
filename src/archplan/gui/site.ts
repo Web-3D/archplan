@@ -269,53 +269,126 @@ function buildLotSliders(body: HTMLElement, ctx: APGuiCtx, refresh: () => void):
 // Sub-tab "Ground" → hàng tab INSTANCE tầng surface (G0 base | G1/G2… layer chồng + ＋). G0 = nền lô gốc
 // (Show/Surface/Thickness/Lot). G1+ = tầng phủ lên (Surface + Thickness 1–10cm + ✕), stack chồng Y → top che
 // dưới (khoét lộ lớp dưới = phase sau). Tabs động → rebuild mỗi thêm/xoá + applySite. Trả { panel, dispose }.
+// Class Tabs dùng chung MỌI cấp hệ Ground (reuse fence instance-tab style; tô XÁM qua ensureGroundGrayCss).
+const GROUND_TAB_CLASSES = {
+  bar: 'ap-tab-bar ap-fence-itabs',
+  tab: 'ap-tab-btn',
+  panel: 'ap-fence-isub',
+  active: 'ap-tab-active',
+}
+
+// Tô XÁM CHỈ tab "Khoét cut" (nút .ap-cut-tabbtn) + nội dung của nó (.ap-cut-pane: instance C-tabs + zone panes).
+// G0/G1/G2 tab + "Mảng add" GIỮ màu nâu fence. SCOPED .ap-ground-domain → không đụng Fence/Water. Inject 1 lần
+// (id guard) — KHÔNG sửa archplan-lab.css (Factory-owned).
+function ensureCutGrayCss(): void {
+  if (document.getElementById('ap-cut-gray')) return
+  const s = document.createElement('style')
+  s.id = 'ap-cut-gray'
+  const btn = 'background:rgba(78,78,78,.5);border-color:rgba(150,150,150,.35);color:#cfcfcf'
+  const act =
+    'background:#585858;border-color:rgba(170,170,170,.6);border-bottom-color:transparent;color:#f2f2f2'
+  s.textContent =
+    `.ap-ground-domain .ap-cut-tabbtn{${btn}}` + // nút tab "Khoét cut"
+    `.ap-ground-domain .ap-cut-tabbtn.ap-tab-active{${act}}` +
+    '.ap-ground-domain .ap-cut-pane{background:#585858}' + // nội dung cut (panel)
+    `.ap-ground-domain .ap-cut-pane .ap-fence-itabs>.ap-tab-btn{${btn}}` + // instance C1|C2|＋
+    `.ap-ground-domain .ap-cut-pane .ap-fence-itabs>.ap-tab-btn.ap-tab-active{${act}}` +
+    '.ap-ground-domain .ap-cut-pane .ap-fence-isub{background:#585858}'
+  document.head.appendChild(s)
+}
+
+// Registry Tabs hệ Ground: tabs[] (dispose) + mid (level→Tabs add/cut) + inst (`lv:op`→Tabs Z/C) cho navigate
+// (code1 Focus: click 3D → chọn ĐÚNG G-level + add/cut + Z/C). Clear toàn bộ mỗi rebuild.
+interface GReg {
+  tabs: Tabs[]
+  mid: Map<number, Tabs>
+  inst: Map<string, Tabs>
+}
+
+// Dựng lại tab top (G0|G1|G2…|＋) vào host — dispose+clear reg rồi gom mọi Tabs cấp dưới vào reg. ＋G-level →
+// push zone mới ở level kế + rebuild focus zone đó. Tách khỏi buildGroundDomain giữ Rule-50. Trả topTabs.
+function rebuildGroundTabs(
+  ctx: APGuiCtx,
+  host: HTMLElement,
+  refresh: () => void,
+  reg: GReg,
+  rebuild: (focusLayer?: number) => void
+): Tabs {
+  for (const t of reg.tabs) t.dispose()
+  reg.tabs.length = 0
+  reg.mid.clear()
+  reg.inst.clear()
+  host.replaceChildren()
+  const base = document.createElement('div')
+  buildGroundControls(base, ctx, refresh)
+  host.appendChild(base)
+  const items: TabItem[] = [{ label: 'G0', panel: base, title: 'Base ground (nền lô, mặc định)' }]
+  const layers = (ctx.site.groundLayers ??= [])
+  const levels = groundLevelNums(layers)
+  levels.forEach((lv) => {
+    const pane = buildLevelPane(ctx, lv, rebuild, reg)
+    host.appendChild(pane)
+    items.push({ label: `G${lv}`, panel: pane, title: `Ground level ${lv}` })
+  })
+  const addBtn = addInstanceButton('G-level', () => {
+    layers.push(
+      makeGroundLayer({
+        level: (levels[levels.length - 1] ?? 0) + 1,
+        op: 'add',
+        length: NEW_ZONE_SIZE,
+        width: NEW_ZONE_SIZE,
+      })
+    )
+    rebuild(layers.length - 1) // focus zone của G-level mới
+    ctx.applySite(true)
+  })
+  const tabs = new Tabs(host, items, {
+    classes: GROUND_TAB_CLASSES,
+    injectCss: false,
+    addEl: addBtn,
+  })
+  reg.tabs.push(tabs)
+  return tabs
+}
+
+// Hệ tab LỒNG: G0 (base) | G1 (chỉ zones) | G2+ ([Mảng add|Khoét cut] → Z/C instances +＋) | ＋(thêm G-level).
+// navTo(flatIdx) = code1 Focus: chọn ĐÚNG G-level + add/cut + Z/C của layer đó (click 3D zone/cut overlay, hoặc
+// focus sau khi ＋ thêm). groundLayers PHẲNG, nhóm theo level+op.
 function buildGroundDomain(
   ctx: APGuiCtx,
   refresh: () => void
 ): { panel: HTMLElement; dispose: () => void; navigateToLayer: (idx: number) => void } {
   const host = document.createElement('div')
   host.classList.add('ap-ground-domain')
-  let tabs: Tabs | null = null
-  const rebuild = (focus = 0): void => {
-    tabs?.dispose()
-    host.replaceChildren()
-    const base = document.createElement('div')
-    buildGroundControls(base, ctx, refresh)
-    host.appendChild(base)
-    const items: TabItem[] = [{ label: 'G0', panel: base, title: 'Base ground (nền lô)' }]
-    const layers = (ctx.site.groundLayers ??= [])
-    layers.forEach((layer, i) => {
-      const pane = buildGroundLayerPane(ctx, layer, i, rebuild)
-      host.appendChild(pane)
-      items.push({ label: `G${i + 1}`, panel: pane, title: `Surface layer ${i + 1}` })
-    })
-    const addBtn = addInstanceButton('layer', () => {
-      layers.push(makeGroundLayer())
-      rebuild(layers.length) // focus tầng mới
-      ctx.applySite(true)
-    })
-    tabs = new Tabs(host, items, {
-      classes: {
-        bar: 'ap-tab-bar ap-fence-itabs',
-        tab: 'ap-tab-btn',
-        panel: 'ap-fence-isub',
-        active: 'ap-tab-active',
-      },
-      injectCss: false,
-      addEl: addBtn,
-      initial: focus,
-    })
+  ensureCutGrayCss() // tô xám CHỈ tab "Khoét cut" + nội dung của nó (scoped) — G/Mảng add giữ nâu
+  const reg: GReg = { tabs: [], mid: new Map(), inst: new Map() }
+  let topTabs: Tabs | null = null
+  const navTo = (idx: number): void => {
+    const layers = ctx.site.groundLayers ?? []
+    const layer = layers[idx]
+    if (!layer) return
+    const lv = layer.level ?? 1
+    const op = layer.op ?? 'add'
+    const top = groundLevelNums(layers).indexOf(lv)
+    if (top < 0) return
+    topTabs?.select(top + 1, { trusted: false }) // +1: G0 base = tab 0
+    reg.mid.get(lv)?.select(Number(op === 'cut'), { trusted: false }) // G2+ add/cut (cut=1, add=0)
+    const sibs = layers.filter((l) => (l.level ?? 1) === lv && (l.op ?? 'add') === op)
+    reg.inst.get(`${lv}:${op}`)?.select(Math.max(0, sibs.indexOf(layer)), { trusted: false })
+    ctx.setActiveGroundLayer?.(idx) // 🟫 báo Lab layer active → cut hiện XÁM trên editor (add → ẩn cut)
+  }
+  const rebuild = (focusLayer = -1): void => {
+    topTabs = rebuildGroundTabs(ctx, host, refresh, reg, rebuild)
+    if (focusLayer >= 0) navTo(focusLayer)
   }
   rebuild()
   return {
     panel: host,
-    dispose: (): void => tabs?.dispose(),
-    // Click tầng 3D → chọn tab Gn (idx 0-based → tab idx+1 vì G0 base = tab 0).
-    navigateToLayer: (idx: number): void => {
-      const n = ctx.site.groundLayers?.length ?? 0
-      if (n === 0) return
-      tabs?.select(Math.max(0, Math.min(idx, n - 1)) + 1, { trusted: false })
+    dispose: (): void => {
+      for (const t of reg.tabs) t.dispose()
+      reg.tabs.length = 0
     },
+    navigateToLayer: navTo,
   }
 }
 
@@ -325,7 +398,7 @@ function buildGroundDomain(
 function layerSlider(
   ctx: APGuiCtx,
   layer: GroundLayer,
-  key: 'length' | 'width' | 'thickness',
+  key: 'length' | 'width' | 'thickness' | 'offsetX' | 'offsetZ',
   label: string,
   min: number,
   max: number,
@@ -346,63 +419,150 @@ function layerSlider(
   )
 }
 
-// Form (hình mảng: rect/circle/ellipse — free-bezier chờ editor ground) + Mode (add = mảng phủ / cut = khoét lộ
-// base). Tách khỏi buildGroundLayerPane giữ Rule-50.
-function appendLayerShapeMode(pane: HTMLElement, ctx: APGuiCtx, layer: GroundLayer): void {
-  const formOpts: [string, 'rect' | 'circle' | 'ellipse'][] = [
+// Hàng Form hình mảng (rect/circle/ellipse — free-bezier chờ editor ground). Op (add/cut) KHÔNG còn dropdown —
+// xác định bởi tab "Mảng add"/"Khoét cut" chứa zone/cut.
+function groundFormRow(ctx: APGuiCtx, layer: GroundLayer): HTMLElement {
+  const opts: [string, 'rect' | 'circle' | 'ellipse'][] = [
     ['Rect', 'rect'],
     ['Tròn', 'circle'],
     ['Ellipse', 'ellipse'],
   ]
-  pane.appendChild(
-    selectRow('Form', formOpts, (layer.shape ?? 'rect') as 'rect' | 'circle' | 'ellipse', (v) => {
-      layer.shape = v
-      ctx.applySite(true)
-    })
-  )
-  const opOpts: [string, 'add' | 'cut'][] = [
-    ['Mảng (add)', 'add'],
-    ['Khoét (cut)', 'cut'],
-  ]
-  pane.appendChild(
-    selectRow('Mode', opOpts, layer.op ?? 'add', (v) => {
-      layer.op = v
-      ctx.applySite(true)
-    })
-  )
+  return selectRow('Form', opts, (layer.shape ?? 'rect') as 'rect' | 'circle' | 'ellipse', (v) => {
+    layer.shape = v
+    ctx.applySite(true)
+  })
 }
 
-function buildGroundLayerPane(
+// Pane 1 ZONE (op='add': +Surface +Thickness) hoặc CUT (op='cut': chỉ hình+vị trí — khoét không có vật liệu/bề
+// dày riêng). Form + Length/Width + Pos X/Z (cut định vị bằng slider vì không có mesh để Move-drag) + ✕ xoá.
+function buildZonePane(
   ctx: APGuiCtx,
   layer: GroundLayer,
-  i: number,
+  flatIdx: number,
+  op: 'add' | 'cut',
   rebuild: (focus?: number) => void
 ): HTMLElement {
   const pane = document.createElement('div')
-  pane.appendChild(
-    selectRow(
-      'Surface',
-      GROUND_OPTS,
-      layer.material,
-      (v) => {
-        layer.material = v
-        ctx.applySite(true)
-      },
-      () => ctx.prefetchGroundTextures?.()
+  if (op === 'add') {
+    pane.appendChild(
+      selectRow(
+        'Surface',
+        GROUND_OPTS,
+        layer.material,
+        (v) => {
+          layer.material = v
+          ctx.applySite(true)
+        },
+        () => ctx.prefetchGroundTextures?.()
+      )
     )
-  )
-  appendLayerShapeMode(pane, ctx, layer) // Form (rect/circle/ellipse) + Mode (add/cut)
-  pane.appendChild(layerSlider(ctx, layer, 'length', 'Length m', 0.5, 40, 0.1, 1000)) // circle=đường kính, ellipse=trục X
-  pane.appendChild(layerSlider(ctx, layer, 'width', 'Width m', 0.5, 40, 0.1, 1000)) // ellipse=trục Z
-  pane.appendChild(layerSlider(ctx, layer, 'thickness', 'Thickness cm', 1, 10, 0.5, 10))
+  }
+  pane.appendChild(groundFormRow(ctx, layer)) // circle=đường kính, ellipse=trục X
+  pane.appendChild(layerSlider(ctx, layer, 'length', 'Length m', 0.5, 40, 0.1, 1000))
+  pane.appendChild(layerSlider(ctx, layer, 'width', 'Width m', 0.5, 40, 0.1, 1000))
+  if (op === 'add')
+    pane.appendChild(layerSlider(ctx, layer, 'thickness', 'Thickness cm', 1, 10, 0.5, 10))
+  pane.appendChild(layerSlider(ctx, layer, 'offsetX', 'Pos X m', -20, 20, 0.1, 1000))
+  pane.appendChild(layerSlider(ctx, layer, 'offsetZ', 'Pos Z m', -20, 20, 0.1, 1000))
   pane.appendChild(
-    removeRow('✕ Remove layer', () => {
-      ctx.site.groundLayers?.splice(i, 1)
-      rebuild(Math.max(0, i))
+    removeRow(op === 'add' ? '✕ Remove zone' : '✕ Remove cut', () => {
+      const layers = ctx.site.groundLayers
+      layers?.splice(flatIdx, 1)
+      const n = layers?.length ?? 0
+      rebuild(n === 0 ? -1 : Math.min(Math.max(0, flatIdx - 1), n - 1)) // focus tab TRƯỚC (né nhảy về G0)
       ctx.applySite(true)
     })
   )
   return pane
+}
+
+// Kích thước zone/cut MỚI = 3000×3000mm (3×3m). Offset X cho cái mới: bên PHẢI sibling cuối + nửa-rộng nó +
+// nửa-zone-mới (1.5m) + 0.5m gap → KHÔNG chồng lên (đẩy sang bên). Sibling đầu → 0.
+const NEW_ZONE_SIZE = 3000
+function nextZoneOffset(layers: GroundLayer[], lv: number, op: 'add' | 'cut'): number {
+  const sibs = layers.filter((l) => (l.level ?? 1) === lv && (l.op ?? 'add') === op)
+  const last = sibs[sibs.length - 1]
+  return last ? last.offsetX + last.length / 2 + NEW_ZONE_SIZE / 2 + 500 : 0
+}
+
+// Tabs instance zone/cut của 1 (level, op): Z1|Z2|＋ (add) hoặc C1|C2|＋ (cut). flatIdx = vị trí trong
+// site.groundLayers (splice/groundLayerIdx). ＋ → push layer mới (offset né chồng) + focus nó. reg.inst[lv:op]=Tabs.
+function buildInstanceTabs(
+  ctx: APGuiCtx,
+  lv: number,
+  op: 'add' | 'cut',
+  rebuild: (focusLayer?: number) => void,
+  reg: GReg
+): HTMLElement {
+  const host = document.createElement('div')
+  const layers = ctx.site.groundLayers ?? []
+  const items: TabItem[] = []
+  const flatIdxs: number[] = [] // tab-index → flatIdx (site.groundLayers) cho onChange → setActiveGroundLayer
+  layers.forEach((layer, idx) => {
+    if ((layer.level ?? 1) !== lv || (layer.op ?? 'add') !== op) return
+    const n = items.length + 1
+    const pane = buildZonePane(ctx, layer, idx, op, rebuild)
+    host.appendChild(pane)
+    items.push({ label: `${op === 'add' ? 'Z' : 'C'}${n}`, panel: pane, title: `${op} ${n}` })
+    flatIdxs.push(idx)
+  })
+  const addBtn = addInstanceButton(op === 'add' ? 'zone' : 'cut', () => {
+    layers.push(
+      makeGroundLayer({
+        level: lv,
+        op,
+        offsetX: nextZoneOffset(layers, lv, op),
+        length: NEW_ZONE_SIZE,
+        width: NEW_ZONE_SIZE,
+      })
+    )
+    rebuild(layers.length - 1) // focus zone/cut MỚI (né nhảy về G0)
+    ctx.applySite(true)
+  })
+  const tabs = new Tabs(host, items, {
+    classes: GROUND_TAB_CLASSES,
+    injectCss: false,
+    addEl: addBtn,
+    // 🟫 USER click tab (trusted) → báo Lab layer active: cut → mảng xám hiện trên scene; add → ẩn cut. Bỏ qua
+    // trusted=false (dựng ban đầu / navTo tự gọi setActiveGroundLayer) → tránh tự-bật xám lúc rebuild.
+    onChange: (i, ev) => {
+      if (ev.trusted) ctx.setActiveGroundLayer?.(flatIdxs[i])
+    },
+  })
+  reg.tabs.push(tabs)
+  reg.inst.set(`${lv}:${op}`, tabs) // navigate → instance
+  return host
+}
+
+// Pane 1 G-level = [Mảng add | Khoét cut] (2 tab), mỗi tab = instance tabs zone/cut. MỌI level (kể cả G1) đều có
+// cut (cut khoét zones CÙNG level → G1 cut lộ G0 base). reg.mid[lv]=Tabs add/cut cho navigate.
+function buildLevelPane(
+  ctx: APGuiCtx,
+  lv: number,
+  rebuild: (focusLayer?: number) => void,
+  reg: GReg
+): HTMLElement {
+  const host = document.createElement('div')
+  const addPane = buildInstanceTabs(ctx, lv, 'add', rebuild, reg)
+  const cutPane = buildInstanceTabs(ctx, lv, 'cut', rebuild, reg)
+  cutPane.classList.add('ap-cut-pane') // tô xám nội dung tab Khoét (C-tabs + zone panes)
+  host.append(addPane, cutPane)
+  const items: TabItem[] = [
+    { label: 'Mảng add', panel: addPane, title: 'Mảng phủ material' },
+    { label: 'Khoét cut', panel: cutPane, title: 'Khoét lộ level dưới' },
+  ]
+  const tabs = new Tabs(host, items, { classes: GROUND_TAB_CLASSES, injectCss: false })
+  ;(tabs.getTablist().children[1] as HTMLElement | undefined)?.classList.add('ap-cut-tabbtn') // nút "Khoét cut" → xám
+  reg.tabs.push(tabs)
+  reg.mid.set(lv, tabs) // navigate → tab add/cut
+  return host
+}
+
+// Danh sách G-level (1-based) phân biệt, tăng dần. Rỗng = chưa có layer nào (chỉ G0 base).
+function groundLevelNums(layers: GroundLayer[]): number[] {
+  const set = new Set<number>()
+  for (const l of layers) set.add(l.level ?? 1)
+  return [...set].sort((a, b) => a - b)
 }
 
 // Cỏ 3D nhú lên (tier B — GrassBlades): LỚP THỰC VẬT độc lập surface — mọc trên nền BẤT KỲ (grass/soil/

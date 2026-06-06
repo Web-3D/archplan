@@ -33,6 +33,9 @@ export interface APGuiCtx {
   // 🌳 Sân vườn (site/lô): SiteState sống ở Lab; panel sửa trực tiếp rồi gọi applySite.
   site: SiteState
   applySite(persist: boolean): void // re-render lô + đôn nhà; persist=true → autosave (false = live drag)
+  // 🟫 Báo Lab layer ground nào đang active (focus tab / click 3D). Cut → hiện mảng XÁM trên editor; add/-1 →
+  // ẩn mọi cut. Lab toggle mesh.visible (raycaster vẫn pick). Optional — GUI builder không cần thì bỏ qua.
+  setActiveGroundLayer?(idx: number): void
   applySiteLive(): void // re-render lô THROTTLE ≤1/frame (rAF), không persist — cho kéo slider Tinh chỉnh
   applyFenceLive(): void // CHỈ dựng lại RÀO (throttle, LOD box) — kéo slider rào/cổng: rebuild tối thiểu, KHÔNG grass/preview/readout/nước
   siteStats(): CoverageStats // đối chiếu nhà/lô (lotArea/coveragePct/gardenArea) cho bảng số liệu

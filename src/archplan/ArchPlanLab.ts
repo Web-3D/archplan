@@ -295,6 +295,7 @@ export class ArchPlanLab extends BaseWorld {
   private _siteNavigate: ((cfg: WaterConfig) => boolean) | null = null // click hồ 3D → nhảy GUI tới tab hồ đó
   private _siteNavigateFence: ((idx: number) => void) | null = null // 🧱 click rào 3D → nhảy GUI tới lớp rào idx
   private _siteNavigateLayer: ((idx: number) => void) | null = null // 🟫 click tầng ground 3D → nhảy GUI Ground▸Gn
+  private _activeCutIdx = -1 // 🟫 layer cut đang active (focus tab / click / kéo) → mảng cut HIỆN XÁM; -1 = ẩn hết
   private drawerPanels: HTMLElement[] = [] // panel non-gui trong drawer (Ground + Lab) — gỡ khi teardown
   private _drawerTab = 0 // tab drawer đang mở — nhớ qua _rebuildGUI
   private lDrawer: HTMLElement | null = null // drawer TRÁI: bảng Tools (Surface+tọa độ) — ẩn mặc định
@@ -610,6 +611,7 @@ export class ArchPlanLab extends BaseWorld {
     const idx = hit.object.userData.groundLayerIdx as number
     const layer = this.site.groundLayers[idx]
     if (!layer) return false
+    this._setActiveCut(idx) // 🟫 kéo cut → hiện mảng xám lúc Move (add → ẩn cut); raycaster pick được dù đang ẩn
     this.canvas.setPointerCapture(e.pointerId)
     this._layerDrag = {
       idx,
@@ -697,6 +699,7 @@ export class ArchPlanLab extends BaseWorld {
     const dx = e.clientX - this._downPos.x
     const dy = e.clientY - this._downPos.y
     if (dx * dx + dy * dy >= 25) return // kéo/orbit, không phải click
+    this._setActiveCut(-1) // 🟫 click = deselect cut (ẩn xám); _tryClickLayer→navTo bật lại nếu trúng cut
     if (this.waterTool?.tryClick(e)) return // 💧 click trúng hồ → trỏ GUI hồ
     if (this._tryClickFence(e)) return // 🧱 click trúng rào → trỏ GUI Fence
     if (this._tryClickLayer(e)) return // 🟫 click trúng tầng ground → trỏ GUI Ground▸Gn
@@ -828,6 +831,22 @@ export class ArchPlanLab extends BaseWorld {
   private _navigateToLayer(idx: number): void {
     this.drawerTabs?.select(1, { trusted: false }) // Building|Ground|Lab → Ground
     this._siteNavigateLayer?.(idx)
+  }
+
+  // 🟫 Đặt layer cut active (idx = layer cut → mảng đó HIỆN XÁM trên editor; -1 hoặc layer add → ẩn hết cut).
+  // Gọi từ: GUI focus (setActiveGroundLayer qua navTo: click 3D / ＋ thêm / xoá) + bắt đầu Move-drag cut.
+  private _setActiveCut(idx: number): void {
+    const layer = this.site.groundLayers?.[idx]
+    this._activeCutIdx = layer?.op === 'cut' ? idx : -1
+    this._applyCutVisibility()
+  }
+
+  // 🟫 Toggle .visible mọi mảng cut (userData.isCutPatch): chỉ mảng của _activeCutIdx hiện (xám). Raycaster
+  // vẫn pick mọi mảng dù ẩn (THREE bỏ qua .visible) → click/kéo trúng vùng cut được kể cả khi không xám.
+  private _applyCutVisibility(): void {
+    for (const o of this.siteGroup.children) {
+      if (o.userData.isCutPatch) o.visible = o.userData.groundLayerIdx === this._activeCutIdx
+    }
   }
 
   // 🚪 Nhấn Move trúng pick-box CỔNG → bắt đầu kéo trượt cổng dọc cạnh rào. Trả false (không trúng / building
@@ -1430,6 +1449,19 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
+  // 4 callback tinh-chỉnh LIVE cỏ/hồ — tách spread để _makeGuiCtx gọn (rule-50).
+  private _siteTuneGuiCtx(): Pick<
+    APGuiCtx,
+    'tuneGrass' | 'tuneWater' | 'setActiveWater' | 'previewWater'
+  > {
+    return {
+      tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
+      tuneWater: (cfg, apply, persist) => this._tuneWater(cfg, apply, persist),
+      setActiveWater: (cfg) => this.waterTool?.setActiveCfg(cfg),
+      previewWater: (cfg) => this.waterTool?.showOutline(cfg),
+    }
+  }
+
   private _makeGuiCtx(): APGuiCtx {
     return {
       state: this.state,
@@ -1440,14 +1472,12 @@ export class ArchPlanLab extends BaseWorld {
       setGround: (t) => this._setGroundType(t),
       site: this.site,
       applySite: (persist) => this._applySite(persist),
+      setActiveGroundLayer: (idx) => this._setActiveCut(idx), // 🟫 focus layer (navTo) → cut hiện xám / add ẩn cut
       applySiteLive: () => this._applySiteLive(),
       applyFenceLive: () => this._applyFenceLive(),
       siteStats: () => this._siteStats(),
       registerSiteReadout: (fn) => (this._refreshSiteReadout = fn),
-      tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
-      tuneWater: (cfg, apply, persist) => this._tuneWater(cfg, apply, persist),
-      setActiveWater: (cfg) => this.waterTool?.setActiveCfg(cfg),
-      previewWater: (cfg) => this.waterTool?.showOutline(cfg),
+      ...this._siteTuneGuiCtx(),
       prefetchGroundTextures: () => this._prefetchGroundTextures(),
       applySun: () => this._applySun(),
       ...this._gridGroupCtx(),
@@ -2208,6 +2238,7 @@ export class ArchPlanLab extends BaseWorld {
     this.waterTool?.rebuildHandles() // 💧 handle đỉnh theo hồ active mới (free + moveMode)
     this._rebuildEditorGround() // 🕳️ khoét lỗ hồ vào nền backdrop editor → không che đáy basin
     this._rebuildGrid() // 🕳️ khoét lưới y=0 theo bbox hồ → hết sọc lưới đè lên lòng hồ
+    this._applyCutVisibility() // 🟫 cut mới dựng = ẩn; hiện lại mảng của layer đang active (giữ qua rebuild)
   }
 
   // Gom opts texture cho renderSiteState: ground 'grass-tex' (PhotoGround) + fence wall 'cinder'/'stone'
