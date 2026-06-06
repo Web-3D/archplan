@@ -104,35 +104,22 @@ export function setupToolsPanel(ctx: APGuiCtx, container: Element | null): HTMLE
   return p
 }
 
-// Surface (trên cùng): mỗi nền = 1 symbol (no ô tick). Click → setGround + symbol đó VIỀN SÁNG (active).
+// "BỘ NỀN": nhóm surface đổi bằng PHÍM SỐ 1..N — KHÔNG hiển thị gì (user chỉ bấm phím). 1=none 2=stone 3=asphalt
+// 4=sand; thêm texture nền MỚI sau → push CUỐI `opts` → tự nhận phím kế (vd vị trí 5). Keydown trên window (bỏ
+// qua khi gõ trong input + ctrl/meta/alt); tự gỡ listener khi panel rời DOM. Trả div RỖNG ẩn (neo lifecycle).
 function mkSurfaceRow(ctx: APGuiCtx): HTMLElement {
   const row = document.createElement('div')
-  row.className = 'ap-surface-row'
-  let active: GroundType = ctx.groundType
-  const opts: [string, GroundType][] = [
-    ['🔲', 'none'], // Grid (nền editor)
-    ['🧱', 'stone'], // Stone paving
-    ['🛣️', 'asphalt'], // Asphalt
-    ['🏖️', 'sand'], // Rippled sand (photo PBR texture)
-  ]
-  const btns: { val: GroundType; el: HTMLButtonElement }[] = []
-  const sync = (): void => {
-    for (const b of btns) b.el.classList.toggle('ap-surface-on', active === b.val)
+  row.style.display = 'none' // bộ nền không hiển thị — chỉ phím tắt
+  const opts: GroundType[] = ['none', 'stone', 'asphalt', 'sand'] // ← thứ tự = phím 1..N (push cuối khi thêm)
+  const onKey = (e: KeyboardEvent): void => {
+    if (!document.contains(row)) return void window.removeEventListener('keydown', onKey) // panel rời DOM → tự gỡ
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+    const n = Number(e.key)
+    if (!Number.isInteger(n) || n < 1 || n > opts.length) return
+    ctx.setGround(opts[n - 1])
   }
-  for (const [sym, val] of opts) {
-    const b = document.createElement('button')
-    b.className = 'ap-surface-opt'
-    b.title = val
-    b.textContent = sym
-    b.addEventListener('click', () => {
-      active = val
-      ctx.setGround(val)
-      sync()
-    })
-    row.appendChild(b)
-    btns.push({ val, el: b })
-  }
-  sync()
+  window.addEventListener('keydown', onKey)
   return row
 }
 
