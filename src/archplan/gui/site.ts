@@ -438,16 +438,30 @@ function buildGardenDomain(ctx: APGuiCtx): {
   }
 }
 
-// Seed 4 góc polygon từ chữ nhật width×depth (mm, local) khi chuyển Rect → Free (để kéo đỉnh tiếp).
+// Seed polygon free từ chữ nhật width×depth (mm, local) khi chuyển → Free: 8 ĐIỂM quanh chu vi (4 góc + 4 trung
+// điểm cạnh) + tay-cầm bezier MIRROR theo Catmull-Rom (tangent = (P_next − P_prev)/6) → ra ngay BLOB MƯỢT bo
+// tròn, 8 anchor + tay-cầm hiện sẵn để kéo nắn (nhiều điểm = cong phức tạp hơn).
 function seedWaterRectPoints(w: WaterConfig): void {
   const hw = w.width / 2
   const hd = w.depth / 2
-  w.points = [
+  const c = [
     { x: -hw, z: -hd },
+    { x: 0, z: -hd },
     { x: hw, z: -hd },
+    { x: hw, z: 0 },
     { x: hw, z: hd },
+    { x: 0, z: hd },
     { x: -hw, z: hd },
+    { x: -hw, z: 0 },
   ]
+  const n = c.length
+  w.points = c.map((p, i) => {
+    const prev = c[(i + n - 1) % n]
+    const next = c[(i + 1) % n]
+    const tx = Math.round((next.x - prev.x) / 6) // Catmull-Rom → bezier handle (mirror smooth)
+    const tz = Math.round((next.z - prev.z) / 6)
+    return { ...p, outX: tx, outZ: tz, inX: -tx, inZ: -tz }
+  })
 }
 
 // Slider structural hồ (field mm) — áp khi BUÔNG (KHÔNG live: né tạo lại reflector/RTT mỗi frame).
@@ -501,9 +515,11 @@ function materialRow(
 // BẬC 4 "Pool edge"/"Shape": đường bao (Form) + kích thước + vị trí, (+ với hồ lõm) DẢI COPING (edgeWidth +
 // chất liệu) = ĐỊNH NGHĨA MÉP hồ. withEdge=false (PUDDLE: vũng phẳng, không mép/coping) → bỏ 2 hàng edge.
 function buildEdgeTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig, withEdge = true): void {
-  const formOpts: [string, 'rect' | 'free'][] = [
+  const formOpts: [string, 'rect' | 'circle' | 'ellipse' | 'free'][] = [
     ['Rect', 'rect'],
-    ['Free (drag)', 'free'],
+    ['Tròn', 'circle'],
+    ['Ellipse', 'ellipse'],
+    ['Free (bezier)', 'free'],
   ]
   host.appendChild(
     selectRow('Form', formOpts, w.shape, (v) => {
@@ -512,8 +528,8 @@ function buildEdgeTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig, withEdge
       ctx.applySite(true)
     })
   )
-  waterSlider(host, ctx, w, 'Width m', 1, 15, 'width')
-  waterSlider(host, ctx, w, 'Depth m', 1, 15, 'depth')
+  waterSlider(host, ctx, w, 'Width m', 1, 15, 'width') // circle = đường kính (min W,D); ellipse = trục X
+  waterSlider(host, ctx, w, 'Depth m', 1, 15, 'depth') // ellipse = trục Z (circle bỏ qua)
   waterSlider(host, ctx, w, 'Pos X m', -10, 10, 'offsetX')
   waterSlider(host, ctx, w, 'Pos Z m', -10, 10, 'offsetZ')
   if (withEdge) {

@@ -21,9 +21,11 @@
 import * as THREE from 'three'
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import { pondWorldXZ } from 'threejs-modules/site/render/fromState'
-import type { SiteState, WaterConfig } from 'threejs-modules/site/state'
+import { shapeToLocalPolygon } from 'threejs-modules/site/shapes'
+import type { SiteState, WaterConfig, WaterPoint } from 'threejs-modules/site/state'
 
-// 1 phiên kéo hồ: body = dời cả hồ (offset); vertex = nắn 1 đỉnh polygon (shape='free').
+// 1 phiên kéo hồ: body = dời cả hồ (offset); vertex = nắn 1 ĐỈNH polygon; handle = nắn 1 TAY-CẦM bezier (in/out)
+// của đỉnh idx → cong cạnh kề. (chỉ shape='free'.)
 type WaterDragSession =
   | {
       kind: 'body'
@@ -36,6 +38,14 @@ type WaterDragSession =
       oz0: number
     }
   | { kind: 'vertex'; cfg: WaterConfig; surf: WaterSurface; plane: THREE.Plane; idx: number }
+  | {
+      kind: 'handle'
+      cfg: WaterConfig
+      surf: WaterSurface
+      plane: THREE.Plane
+      idx: number
+      which: 'in' | 'out'
+    }
 
 // Host: ArchPlanLab cấp scene refs + state hồ + callback điều hướng/commit. Lab giữ mode + render _siteWaters.
 export interface WaterToolHost {
@@ -56,8 +66,12 @@ export interface WaterToolHost {
 export class WaterTool {
   private _drag: WaterDragSession | null = null
   private readonly _handles: THREE.Group // overlay handle đỉnh polygon (free + moveMode)
-  private _handleGeo: THREE.SphereGeometry | null = null // dùng chung mọi handle
-  private _handleMat: THREE.MeshBasicMaterial | null = null
+  private _handleGeo: THREE.SphereGeometry | null = null // sphere ĐỈNH (anchor) — dùng chung
+  private _handleMat: THREE.MeshBasicMaterial | null = null // màu vàng (anchor)
+  private _tanGeo: THREE.SphereGeometry | null = null // sphere TAY-CẦM bezier (nhỏ hơn)
+  private _tanMat: THREE.MeshBasicMaterial | null = null // màu cyan (tay-cầm)
+  private _lineMat: THREE.LineBasicMaterial | null = null // đường nối anchor↔tay-cầm (dùng chung)
+  private _lineGeo: THREE.BufferGeometry | null = null // geo nối — DỰNG LẠI mỗi rebuildHandles (dispose ref cũ)
   private _outline: THREE.Mesh | null = null // viền form ở mặt nền (FILL mờ vẽ-trên-cùng) — định vị lúc kéo
   private _outlineMat: THREE.MeshBasicMaterial | null = null
 
@@ -180,20 +194,28 @@ export class WaterTool {
     return true
   }
 
-  // Trúng 1 handle đỉnh (hồ active) → phiên kéo đỉnh (ray đã set ở caller). Mặt chiếu = ngang tại mặt nước.
+  // Trúng 1 handle (hồ active) → phiên kéo ĐỈNH (anchor, userData.vi) hoặc TAY-CẦM bezier (userData.hi+which). Ray
+  // đã set ở caller. Mặt chiếu = ngang tại mặt nước. Chỉ raycast SPHERE (Mesh) — bỏ LineSegments nối.
   private _tryStartVertex(entry: { cfg: WaterConfig; surf: WaterSurface }): boolean {
-    const handles = this._handles
-    if (handles.children.length === 0) return false
-    const hit = this._ray.intersectObjects(handles.children, false)[0]
-    const idx = hit ? (hit.object.userData as { vi?: number }).vi : undefined
-    if (typeof idx !== 'number') return false
-    this._drag = {
-      kind: 'vertex',
-      cfg: entry.cfg,
-      surf: entry.surf,
-      plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -entry.surf.getMesh().position.y),
-      idx,
+    const spheres = this._handles.children.filter((c) => c instanceof THREE.Mesh)
+    if (spheres.length === 0) return false
+    const hit = this._ray.intersectObjects(spheres, false)[0]
+    if (!hit) return false
+    const ud = hit.object.userData as { vi?: number; hi?: number; which?: 'in' | 'out' }
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -entry.surf.getMesh().position.y)
+    if (typeof ud.hi === 'number' && ud.which) {
+      this._drag = {
+        kind: 'handle',
+        cfg: entry.cfg,
+        surf: entry.surf,
+        plane,
+        idx: ud.hi,
+        which: ud.which,
+      }
+      return true
     }
+    if (typeof ud.vi !== 'number') return false
+    this._drag = { kind: 'vertex', cfg: entry.cfg, surf: entry.surf, plane, idx: ud.vi }
     return true // pointer capture do caller tryStartDrag lo
   }
 
@@ -205,7 +227,13 @@ export class WaterTool {
     const cur = new THREE.Vector3()
     if (!this._ray.ray.intersectPlane(d.plane, cur)) return
     if (d.kind === 'body') this._dragBody(d, cur)
+    else if (d.kind === 'handle') this._dragHandle(d, cur)
     else this._dragVertex(d, cur)
+  }
+
+  // Tessellate shape hiện tại (mọi loại) → mặt nước live. Dùng chung cho kéo đỉnh/tay-cầm (KHÔNG tái tạo reflector).
+  private _liveShape(surf: WaterSurface, cfg: WaterConfig): void {
+    surf.setShape(shapeToLocalPolygon(cfg))
   }
 
   // Dời cả hồ: ghi offset (mm) vào cfg + DỜI MESH LIVE (reflector.target con → theo cùng) + handle theo. Đáy/
@@ -222,8 +250,8 @@ export class WaterTool {
     this.showOutline(d.cfg) // viền form ở mặt nền → định vị (mặt nước chui dưới đất khi lỗ chưa theo)
   }
 
-  // Nắn 1 đỉnh hồ active: world → local (trừ tâm hồ) → ghi points[idx] (mm) + dựng lại GEOMETRY mặt nước live
-  // (setShape, KHÔNG tái tạo reflector) + dời handle. Đáy/viền theo sau khi buông.
+  // Nắn 1 ĐỈNH (anchor) hồ active: world → local (trừ tâm hồ) → ghi points[idx] (mm) + tessellate mặt nước live.
+  // Tay-cầm (offset so anchor) DI THEO anchor → chỉ cần rebuildHandles vẽ lại đúng vị trí. Đáy/viền theo sau khi buông.
   private _dragVertex(
     d: { cfg: WaterConfig; surf: WaterSurface; idx: number },
     cur: THREE.Vector3
@@ -233,10 +261,32 @@ export class WaterTool {
     if (!p) return
     p.x = Math.round((cur.x - mesh.position.x) * 1000)
     p.z = Math.round((cur.z - mesh.position.z) * 1000)
-    d.surf.setShape(d.cfg.points.map((q) => ({ x: q.x / 1000, z: q.z / 1000 })))
-    const handle = this._handles.children[d.idx]
-    if (handle) handle.position.set(p.x / 1000, 0, p.z / 1000)
-    this.showOutline(d.cfg) // viền form theo hình mới (định vị khi đáy/lỗ chưa theo)
+    this._liveShape(d.surf, d.cfg)
+    this.rebuildHandles()
+    this.showOutline(d.cfg)
+  }
+
+  // Nắn 1 TAY-CẦM bezier (in/out) của đỉnh idx: offset (mm so anchor) = (điểm world − anchor world). 2 tay-cầm
+  // ĐỘC LẬP (kéo out KHÔNG đụng in → trộn góc/cong). Tessellate lại → cạnh kề cong theo live.
+  private _dragHandle(
+    d: { cfg: WaterConfig; surf: WaterSurface; idx: number; which: 'in' | 'out' },
+    cur: THREE.Vector3
+  ): void {
+    const mesh = d.surf.getMesh()
+    const p = d.cfg.points[d.idx]
+    if (!p) return
+    const ox = Math.round((cur.x - mesh.position.x) * 1000 - p.x)
+    const oz = Math.round((cur.z - mesh.position.z) * 1000 - p.z)
+    if (d.which === 'out') {
+      p.outX = ox
+      p.outZ = oz
+    } else {
+      p.inX = ox
+      p.inZ = oz
+    }
+    this._liveShape(d.surf, d.cfg)
+    this.rebuildHandles()
+    this.showOutline(d.cfg)
   }
 
   // 💧 Mảng mờ form hồ ở MẶT NỀN (rim) — ShapeGeometry FILL vẽ-trên-cùng (depthTest/depthWrite=false,
@@ -276,24 +326,90 @@ export class WaterTool {
     if (this._outline) this._outline.visible = false
   }
 
-  // Dựng lại handle đỉnh hồ ACTIVE: group tại tâm hồ (world), mỗi handle = sphere tại đỉnh (local). Chỉ khi
-  // hồ active ĐANG render + shape='free' + moveMode (≥3 đỉnh). Geo/mat dùng chung → clear chỉ gỡ mesh.
+  // Dựng lại handle hồ ACTIVE: group tại tâm hồ (world); mỗi ĐỈNH = sphere vàng (vi) + 2 TAY-CẦM bezier sphere
+  // cyan (hi+which) + 2 đường nối anchor↔tay-cầm. Chỉ khi hồ active ĐANG render + shape='free' + moveMode (≥3 đỉnh).
   rebuildHandles(): void {
     const g = this._handles
-    g.clear()
+    this._clearHandles(g)
     const entry = this._activeEntry()
     const w = entry?.cfg
     if (!entry || !w || w.shape !== 'free' || !this.moveMode || w.points.length < 3) return
     const mesh = entry.surf.getMesh()
     g.position.set(mesh.position.x, mesh.position.y + 0.05, mesh.position.z)
-    const geo = (this._handleGeo ??= new THREE.SphereGeometry(0.12, 12, 8))
-    const mat = (this._handleMat ??= new THREE.MeshBasicMaterial({ color: 0xffcc33 }))
-    w.points.forEach((p, i) => {
-      const h = new THREE.Mesh(geo, mat)
-      h.position.set(p.x / 1000, 0, p.z / 1000)
-      h.userData = { vi: i }
-      g.add(h)
-    })
+    const a = this._handleAssets()
+    const lines: number[] = []
+    w.points.forEach((p, i) => this._addAnchor(g, p, i, a, lines))
+    this._addConnectorLines(g, lines)
+  }
+
+  // Geo/mat sphere anchor + tay-cầm (lazy, dùng chung mọi rebuild). Tách khỏi rebuildHandles giữ complexity ≤10.
+  private _handleAssets(): {
+    aGeo: THREE.SphereGeometry
+    aMat: THREE.Material
+    tGeo: THREE.SphereGeometry
+    tMat: THREE.Material
+  } {
+    const aGeo = (this._handleGeo ??= new THREE.SphereGeometry(0.12, 12, 8))
+    const aMat = (this._handleMat ??= new THREE.MeshBasicMaterial({ color: 0xffcc33 }))
+    const tGeo = (this._tanGeo ??= new THREE.SphereGeometry(0.08, 10, 6))
+    const tMat = (this._tanMat ??= new THREE.MeshBasicMaterial({ color: 0x4cd9ff }))
+    return { aGeo, aMat, tGeo, tMat }
+  }
+
+  // 1 đỉnh: sphere anchor (vi) + tay-cầm out/in (hi+which) nếu offset có; đẩy cặp điểm anchor↔tay-cầm vào `lines`.
+  private _addAnchor(
+    g: THREE.Group,
+    p: WaterPoint,
+    i: number,
+    a: {
+      aGeo: THREE.SphereGeometry
+      aMat: THREE.Material
+      tGeo: THREE.SphereGeometry
+      tMat: THREE.Material
+    },
+    lines: number[]
+  ): void {
+    const ax = p.x / 1000
+    const az = p.z / 1000
+    const anchor = new THREE.Mesh(a.aGeo, a.aMat)
+    anchor.position.set(ax, 0, az)
+    anchor.userData = { vi: i }
+    g.add(anchor)
+    const tans: ['out' | 'in', number | undefined, number | undefined][] = [
+      ['out', p.outX, p.outZ],
+      ['in', p.inX, p.inZ],
+    ]
+    for (const [which, hx, hz] of tans) {
+      if (hx === undefined && hz === undefined) continue
+      const wx = ax + (hx ?? 0) / 1000
+      const wz = az + (hz ?? 0) / 1000
+      const t = new THREE.Mesh(a.tGeo, a.tMat)
+      t.position.set(wx, 0, wz)
+      t.userData = { hi: i, which }
+      g.add(t)
+      lines.push(ax, 0, az, wx, 0, wz)
+    }
+  }
+
+  // 1 LineSegments nối anchor↔tay-cầm (group-local, y=0). Geo dựng lại mỗi rebuild → dispose ở _clearHandles.
+  private _addConnectorLines(g: THREE.Group, lines: number[]): void {
+    if (lines.length === 0) return
+    const mat = (this._lineMat ??= new THREE.LineBasicMaterial({
+      color: 0x4cd9ff,
+      transparent: true,
+      opacity: 0.6,
+    }))
+    const geo = new THREE.BufferGeometry() // perf-ok: LineSegments + LineBasicMaterial (không NodeMaterial → UV vô nghĩa)
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3))
+    this._lineGeo = geo
+    g.add(new THREE.LineSegments(geo, mat))
+  }
+
+  // Gỡ mọi child (sphere + line) + dispose geo line cũ (sphere geo/mat dùng chung → giữ).
+  private _clearHandles(g: THREE.Group): void {
+    g.clear()
+    this._lineGeo?.dispose()
+    this._lineGeo = null
   }
 
   dispose(): void {
@@ -301,6 +417,14 @@ export class WaterTool {
     this._handleMat?.dispose()
     this._handleGeo = null
     this._handleMat = null
+    this._tanGeo?.dispose() // tay-cầm bezier
+    this._tanMat?.dispose()
+    this._lineMat?.dispose() // đường nối anchor↔tay-cầm
+    this._lineGeo?.dispose()
+    this._tanGeo = null
+    this._tanMat = null
+    this._lineMat = null
+    this._lineGeo = null
     this._outline?.removeFromParent() // 💧 mảng định vị
     this._outline?.geometry.dispose()
     this._outlineMat?.dispose()
