@@ -141,7 +141,7 @@ import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
 
 import { DevHud } from './gui/devhud' // perf HUD dev (fps/budget/leak) — tách monolith
 import { type APGuiCtx, setupGUI, setupToolsPanel } from './gui/gui'
-import { setupRoofLab } from './gui/roof-lab' // 🔎 thí nghiệm MÁI trong Lab (preview + slider) — vật thể đang dựng
+import { setupLabExperiments } from './gui/lab-experiments' // 🔀 switcher thí nghiệm Lab (🏛 Mái | ✨ Particles)
 import { setupSitePanel } from './gui/site' // 🌳 panel sân vườn (site/lô + Garden ▸ Grass = slider cỏ 3D)
 import { setupLabBench } from './gui/tweak' // 🎛️ Lab = bàn thí nghiệm: 2 khung trái + preview cột phải
 import { type HighlightHost, HighlightOverlay } from './interaction/highlight' // flash viền phần đang chỉnh — tách monolith
@@ -450,7 +450,7 @@ export class ArchPlanLab extends BaseWorld {
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
   private _activeWater: WaterConfig | null = null
-  private roofLab: { dispose: () => void } | null = null // 🔎 thí nghiệm MÁI trong Lab (preview WebGL + slider)
+  private labExp: { dispose: () => void } | null = null // 🔀 thí nghiệm Lab đang active (Mái / Particles)
   // 🧪 Lab = PHẦN RIÊNG (float persistent, NGOÀI drawer) — bàn thí nghiệm vật thể MỚI trước khi đưa vào GUI
   // chung; Factory phát triển chung. Tạo 1 LẦN (không churn theo _rebuildGUI) → preview KHÔNG dispose/tạo-lại mỗi rebuild.
   private labFloat: HTMLElement | null = null
@@ -1562,23 +1562,16 @@ export class ArchPlanLab extends BaseWorld {
 
   // 🧪 Lab = PHẦN RIÊNG (float persistent, NGOÀI drawer + GUI chung): bàn thí nghiệm vật thể MỚI, Factory phát
   // triển. Tạo 1 LẦN (không churn _rebuildGUI). Preview ĐỘC LẬP scene (KHÔNG sync _previewRebuild theo edit →
-  // né lag): chỉ dựng 1 lần lúc init làm mẫu; xong sandbox → chuyển code sang GUI chung thủ công. Kéo theo title.
+  // né lag): chỉ dựng 1 lần lúc init làm mẫu; xong sandbox → chuyển code sang GUI chung thủ công. Full màn, pin 0/0.
   private _setupLabFloat(): void {
     const wrap = document.createElement('div')
     wrap.className = 'ap-lab-float ap-lab-hidden' // ẩn mặc định — bấm 🧪 để hiện
     this.canvas.parentElement?.appendChild(wrap)
     this.labFloat = wrap
-    const bench = setupLabBench(wrap) // 🧪 title + note + 2 khung trái (param/doc) + previewHost
-    // 🧪 Lab giờ host thí nghiệm MÁI: slider vào khung 🎛️ trái, preview WebGL ở cột phải. (Cỏ đã tốt nghiệp
-    // sang Garden ▸ Grass; muốn soi lại cỏ thì re-wire GrassPreview — grass-preview.ts vẫn còn.)
-    this.roofLab = setupRoofLab(
-      bench.previewHost,
-      bench.paramHost,
-      bench.docHost,
-      bench.settingsHost
-    )
-    const title = wrap.querySelector<HTMLElement>('.ap-scan-title')
-    if (title) this._makeDraggable(wrap, title) // kéo panel theo title
+    const bench = setupLabBench(wrap) // 🧪 ⚙ + selector + 2 khung trái (param/doc) + previewHost
+    // 🧪 Lab host NHIỀU thí nghiệm qua switcher: 🏛 Mái (slider + SDF) | ✨ Particles (3 mức). Đổi chip →
+    // dispose cái cũ, mount cái mới vào cùng khung. (Cỏ đã tốt nghiệp sang Garden ▸ Grass; grass-preview.ts vẫn còn.)
+    this.labExp = setupLabExperiments(bench)
     const btn = document.createElement('button')
     btn.className = 'ap-lab-toggle'
     btn.textContent = '🧪'
@@ -1594,47 +1587,21 @@ export class ArchPlanLab extends BaseWorld {
     const hidden = this.labFloat.classList.toggle('ap-lab-hidden')
     this.labToggle.classList.toggle('ap-lab-toggle-on', !hidden)
     if (!hidden) {
-      // Bật lên → luôn snap SÁT MÉP TRÁI (xóa offset đã kéo trước đó).
-      this.labFloat.style.left = '8px'
-      this.labFloat.style.top = '8px'
+      // Bật lên → luôn snap FULL MÀN HÌNH góc trên-trái (xóa offset đã kéo trước đó).
+      this.labFloat.style.left = '0'
+      this.labFloat.style.top = '0'
       this.labFloat.style.right = 'auto'
     }
   }
 
   // Teardown Lab float persistent (chỉ ở dispose CUỐI — KHÔNG mỗi _rebuildGUI).
   private _disposeLabFloat(): void {
-    this.roofLab?.dispose() // 🔎 preview MÁI WebGL + slider
-    this.roofLab = null
+    this.labExp?.dispose() // 🔀 dispose thí nghiệm Lab đang active (preview WebGL + slider)
+    this.labExp = null
     this.labFloat?.remove()
     this.labFloat = null
     this.labToggle?.remove()
     this.labToggle = null
-  }
-
-  // Kéo `el` bằng `handle` (pointer capture). Vị trí absolute trong offsetParent. Dùng cho Lab float.
-  private _makeDraggable(el: HTMLElement, handle: HTMLElement): void {
-    handle.style.cursor = 'grab'
-    handle.addEventListener('pointerdown', (e: PointerEvent) => {
-      e.preventDefault()
-      const sx = e.clientX
-      const sy = e.clientY
-      const r = el.getBoundingClientRect()
-      const pr = (el.offsetParent as HTMLElement | null)?.getBoundingClientRect()
-      const ox = r.left - (pr?.left ?? 0)
-      const oy = r.top - (pr?.top ?? 0)
-      handle.setPointerCapture(e.pointerId)
-      const move = (ev: PointerEvent): void => {
-        el.style.left = `${ox + ev.clientX - sx}px`
-        el.style.top = `${oy + ev.clientY - sy}px`
-        el.style.right = 'auto'
-      }
-      const up = (): void => {
-        handle.removeEventListener('pointermove', move)
-        handle.removeEventListener('pointerup', up)
-      }
-      handle.addEventListener('pointermove', move)
-      handle.addEventListener('pointerup', up)
-    })
   }
 
   // TRONG drawer: 3 panel (Building=gui nhà · Ground=lô+cỏ-cây+nước · Lab=bàn thí nghiệm/preview) là CON

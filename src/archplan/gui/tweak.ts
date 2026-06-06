@@ -322,61 +322,84 @@ export function buildGrassTweak(ctx: APGuiCtx, host: HTMLElement): Tabs[] {
   return [innerTabs, outerTabs]
 }
 
-// Panel "🎛️ Lab" — BÀN THÍ NGHIỆM. Bố cục: cột TRÁI = 2 khung BẰNG NHAU (trên `paramHost`: slider chỉnh thông
-// số · dưới `docHost`: thư mục/tài liệu để chọn cho dễ); cột PHẢI = 🔎 preview WebGPU render ĐÚNG 1 vật thể
-// đang dựng (giờ: cỏ). Quy trình: thêm slider + soi preview → xong CHUYỂN control sang panel dùng (vd Garden ▸
-// Grass), preview Ở LẠI Lab cho vật thể kế. Trả handle 2 khung + previewHost cho ArchPlanLab gắn nội dung.
+// 1 khung Lab = header (nhãn) + body (chỗ gắn nội dung). 2 khung flex:1 → CAO BẰNG NHAU. Tách module-level
+// để setupLabBench gọn (room cho header). Trả { frame, body }.
+function mkLabFrame(
+  cls: string,
+  label: string,
+  hint: string
+): { frame: HTMLElement; body: HTMLElement } {
+  const frame = document.createElement('div')
+  frame.className = `ap-lab-frame ${cls}`
+  const head = document.createElement('div')
+  head.className = 'ap-lab-frame-head'
+  head.textContent = label
+  const body = document.createElement('div')
+  body.className = 'ap-lab-frame-body'
+  const ph = document.createElement('div')
+  ph.className = 'ap-lab-placeholder' // gợi ý tạm — thay bằng nội dung thật ở bước sau
+  ph.textContent = hint
+  body.appendChild(ph)
+  frame.append(head, body)
+  return { frame, body }
+}
+
+// Panel Lab — BÀN THÍ NGHIỆM. Cột TRÁI: header (tiêu đề "Lab" kéo-được + nút ⚙ settings) · note · 2 khung BẰNG
+// NHAU (`paramHost`: slider · `docHost`: tọa độ/tài liệu) · `settingsHost` (popover ⚙, ẩn). Cột PHẢI: 🔎 preview.
+// Trả handle 2 khung + settings + previewHost cho ArchPlanLab/setupRoofLab gắn nội dung.
+// Header Lab: CHỈ nút ⚙ → toggle settings popover. (Bỏ tiêu đề "Lab" + kéo panel — full màn nên vô nghĩa.)
+function buildLabHead(): { head: HTMLElement; settings: HTMLElement } {
+  const head = document.createElement('div')
+  head.className = 'ap-lab-head'
+  const gear = document.createElement('button')
+  gear.className = 'ap-lab-settings-btn'
+  gear.textContent = '⚙'
+  gear.title = 'Cài đặt preview — lưới, độ sáng, đèn'
+  head.append(gear)
+  const settings = document.createElement('div')
+  settings.className = 'ap-lab-settings ap-lab-settings-hidden'
+  gear.addEventListener('click', () => settings.classList.toggle('ap-lab-settings-hidden'))
+  return { head, settings }
+}
+
 export function setupLabBench(container: Element | null): {
   panel: HTMLElement
+  experimentHost: HTMLElement // 🔀 selector thí nghiệm (Mái | Particles) — persistent
   previewHost: HTMLElement
-  paramHost: HTMLElement // khung TRÊN — nơi gắn slider thông số
-  docHost: HTMLElement // khung DƯỚI — nơi gắn list thư mục/tài liệu
+  paramHost: HTMLElement // khung TRÊN — slider thông số
+  docHost: HTMLElement // khung DƯỚI — tọa độ / tài liệu
+  settingsHost: HTMLElement // popover ⚙ — cài đặt preview (lưới/sáng/đèn)
 } {
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-tweak-panel ap-lab-panel'
 
-  // ── Cột trái: title + note + 2 khung (params / docs) ──
   const left = document.createElement('div')
   left.className = 'ap-lab-left'
-  const ttl = document.createElement('div')
-  ttl.className = 'ap-scan-title'
-  ttl.textContent = '🧪 Lab — bàn thí nghiệm'
-  const note = document.createElement('div')
-  note.className = 'ap-lab-note'
-  note.textContent =
-    'Sandbox ĐỘC LẬP scene (Factory). Thử nghiệm vật thể mới ở đây; xong → chuyển code sang GUI chung.'
 
-  // 1 khung = header (nhãn) + body (chỗ gắn nội dung). 2 khung flex:1 → CAO BẰNG NHAU.
-  const mkFrame = (
-    cls: string,
-    label: string,
-    hint: string
-  ): { frame: HTMLElement; body: HTMLElement } => {
-    const frame = document.createElement('div')
-    frame.className = `ap-lab-frame ${cls}`
-    const head = document.createElement('div')
-    head.className = 'ap-lab-frame-head'
-    head.textContent = label
-    const body = document.createElement('div')
-    body.className = 'ap-lab-frame-body'
-    const ph = document.createElement('div')
-    ph.className = 'ap-lab-placeholder' // gợi ý tạm — thay bằng nội dung thật ở bước sau
-    ph.textContent = hint
-    body.appendChild(ph)
-    frame.append(head, body)
-    return { frame, body }
-  }
-  const params = mkFrame('ap-lab-frame-params', '🎛️ Thông số', 'Slider thông số sẽ thêm ở đây.')
-  const docs = mkFrame(
+  const { head, settings } = buildLabHead() // ⚙ settings popover
+
+  // 🔀 Selector thí nghiệm (Mái | Particles…) — sống NGOÀI 2 khung → KHÔNG bị xóa khi đổi experiment.
+  const exp = document.createElement('div')
+  exp.className = 'ap-lab-exp'
+
+  const params = mkLabFrame('ap-lab-frame-params', '🎛️ Thông số', 'Slider thông số sẽ thêm ở đây.')
+  const docs = mkLabFrame(
     'ap-lab-frame-docs',
     '📁 Thư mục · tài liệu',
     'Danh sách thư mục / tài liệu để chọn.'
   )
-  left.append(ttl, note, params.frame, docs.frame)
+  left.append(head, exp, params.frame, docs.frame, settings)
 
   const previewHost = document.createElement('div')
-  previewHost.className = 'ap-preview-host' // 🔎 preview WebGPU — luôn hiện trong Lab
+  previewHost.className = 'ap-preview-host' // 🔎 preview — luôn hiện trong Lab
   p.append(left, previewHost)
   container?.appendChild(p)
-  return { panel: p, previewHost, paramHost: params.body, docHost: docs.body }
+  return {
+    panel: p,
+    experimentHost: exp,
+    previewHost,
+    paramHost: params.body,
+    docHost: docs.body,
+    settingsHost: settings,
+  }
 }

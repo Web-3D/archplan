@@ -77,10 +77,13 @@ ArchPlanLab (extends BaseWorld)
   │     │                            Surface=Water color/Mirror/Wave/Ripple/Murk · Floor=Floor color+Floor mat · Walls=Wall depth+Wall mat (mat=placeholder 'None').
   │     │                            Pond=render Y NHƯ Pool (renderWaters; đổi param sau) · Puddle=placeholder. Coping = rect-frame quanh hồ (buildPoolEdge).
   │     │                            (bg-1→bg-4 lồng cấp, l5 về bg-3 cho chữ/track trắng đọc được). bảng Lot/House/Coverage/Garden ĐÁY tab Ground.
-  │     ├── 🧪 Lab (FLOAT)          ← BÀN THÍ NGHIỆM riêng (float 2/3 màn × full cao, nền trắng α0.5; nút 🧪 góc trái-dưới + phím R).
-  │     │                            Cột trái 2 khung BẰNG NHAU (🎛️ thông số/slider · 📁 thư mục/tài liệu); cột phải 🔎 preview (xoay/pan/zoom).
-  │     │                            Đang dựng: MÁI hip cắt nóc (roof-lab.ts + roof-preview.ts WebGL · 4 slider Ngang/Sâu/Cao/Nóc). Cỏ đã tốt nghiệp→Garden▸Grass.
-  │     │                            Quy trình: slider + soi preview → xong chuyển code sang building-kit. (setupLabBench 2 khung; sliderRow export. 2026-06-05)
+  │     ├── 🧪 Lab (FLOAT)          ← BÀN THÍ NGHIỆM riêng (FULL màn × full cao, nền trắng α0.5; nút 🧪 góc trái-dưới + phím R, đóng cũng R/🧪).
+  │     │                            Cột trái controls hẹp ~25% (2 khung dọc bằng nhau: 🎛️ thông số · 📁 tài liệu) · cột phải 🔎 preview ~75% (xoay/pan/zoom).
+  │     │                            Switcher thí nghiệm (lab-experiments.ts/setupLabExperiments): 🏛 Mái | ✨ Particles — đổi chip = dispose cũ + mount mới vào cùng khung.
+  │     │                            • 🏛 Mái: hip cắt nóc (roof-lab + roof-preview WebGL) · 4 slider Ngang/Sâu/Cao/Nóc + ô số tọa độ A–F (sửa từng đỉnh) +
+  │     │                              🔪 lưỡi dao cắt qua SHADER SDF (discard; bladeSDF hot-swap = chỗ cắm iq) + mini raymarch preview bề mặt dao (sdf-preview.ts).
+  │     │                            • ✨ Particles (particle-lab + particle-preview): 3 MỨC tùy chọn — Mức 1 CPU Points (đài phun, CHẠY) · Mức 2 Shader · Mức 3 GPGPU (đang dựng).
+  │     │                            ⚙ settings: lưới/đèn (Particles thêm màu hạt). Cỏ đã tốt nghiệp→Garden▸Grass. (setupLabBench: ⚙+selector+2 khung; sliderRow export. 2026-06-06)
   │     └── ⬇ Footer DÙNG CHUNG    ← `_buildDrawerFooter` (ngoài body cuộn, MỌI tab thấy): undo/redo + Build/Reset/Save/Load/JSON
   │                                  (trước nằm trong panel Building → đã lôi ra drawer vì là dòng chung; wire thẳng method, bền qua _rebuildGUI)
   │
