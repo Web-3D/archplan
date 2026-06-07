@@ -16,6 +16,7 @@ import type {
   GroundLayer,
   GroundMaterialKey,
   TerrainConfig,
+  TerrainMound,
   WaterConfig,
   WaterKind,
   WaterMaterialKey,
@@ -251,12 +252,12 @@ function buildGroundControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => vo
     )
   )
   buildLotSliders(body, ctx, refresh)
-  buildTerrainControls(body, ctx)
+  buildTerrainControls(body, ctx, refresh)
 }
 
 // 🏔️ Section Terrain (nền gò sân vườn) trong tab Ground — bộ thông số noise ĐẦY ĐỦ. Mọi param STRUCTURAL →
 // ctx.applySite(c) (kéo = live-rebuild, buông = commit) như slider Thickness. Data-driven 10 slider (rule-50).
-function buildTerrainControls(body: HTMLElement, ctx: APGuiCtx): void {
+function buildTerrainControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => void): void {
   const site = ctx.site
   const t = site.terrain ?? defaultTerrain()
   site.terrain = t // đảm bảo state cũ (thiếu terrain) có field
@@ -281,6 +282,111 @@ function buildTerrainControls(body: HTMLElement, ctx: APGuiCtx): void {
         mf
       )
     )
+  buildMoundControls(body, ctx, t, refresh) // ⛰️ gò nặn tay (Phase 3)
+}
+
+// ⛰️ Gò nặn-tay (Phase 3): list mounds + ＋thêm/✕xoá + slider mỗi gò. Mounds cộng vào heightAt (Σ gò, đã có từ
+// Phase 1) → griddedGroundGeometry sample → live qua applyTerrainLive (kéo) / applySite (buông). Thêm/xoá đổi LIST
+// → refresh() dựng lại GUI. ＋ tự bật terrain (heightAt early-return khi tắt → gò vô hình). Tách rule-50.
+function buildMoundControls(
+  body: HTMLElement,
+  ctx: APGuiCtx,
+  t: TerrainConfig,
+  refresh: () => void
+): void {
+  const halfW = ctx.site.lotWidth / 2000
+  const halfD = ctx.site.lotDepth / 2000
+  const hdr = document.createElement('div')
+  hdr.textContent = '⛰️ Gò nặn tay'
+  hdr.style.cssText = 'margin:8px 0 2px;font-weight:600;opacity:.85'
+  body.appendChild(hdr)
+  t.mounds.forEach((m, i) => buildMoundRow(body, ctx, t, m, i, halfW, halfD, refresh))
+  const addRow = document.createElement('div')
+  addRow.style.cssText = 'margin-top:6px'
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  // inline style (né sửa archplan-lab.css = vùng Factory) — tông xanh "thêm", khớp form nút remove.
+  btn.style.cssText =
+    'font-size:9px;padding:2px 7px;border-radius:4px;cursor:pointer;color:#d0f0d8;' +
+    'background:rgba(96,176,112,.22);border:1px solid rgba(96,176,112,.5)'
+  btn.textContent = '＋ Thêm gò'
+  btn.addEventListener('click', () => {
+    t.enabled = true // gò vô hình nếu terrain tắt → bật luôn cho thấy ngay
+    t.mounds.push({ x: 0, z: 0, radius: 2000, height: 400, falloff: 1 }) // gò mặc định: tâm lô, R2m cao 40cm
+    ctx.applySite(true)
+    refresh()
+  })
+  addRow.appendChild(btn)
+  body.appendChild(addRow)
+}
+
+// 1 gò: nhãn "Gò #i" + 5 slider (Pos X/Z, Radius, Height, Falloff) + ✕ xoá. Slider STRUCTURAL → applyTerrainLive
+// (kéo) / applySite (buông) như slider noise. height ÂM = lõm (bị grid-floor `Math.max(dy,0)` chặn: chỉ hạ vùng
+// đã cao, KHÔNG thủng base trên nền phẳng). Xoá → splice + refresh.
+function buildMoundRow(
+  body: HTMLElement,
+  ctx: APGuiCtx,
+  t: TerrainConfig,
+  m: TerrainMound,
+  i: number,
+  halfW: number,
+  halfD: number,
+  refresh: () => void
+): void {
+  const box = document.createElement('div')
+  box.style.cssText = 'margin:4px 0;padding:3px 6px;border-left:2px solid #8a7a5a;background:#0001'
+  const lbl = document.createElement('div')
+  lbl.textContent = `Gò #${i + 1}`
+  lbl.style.cssText = 'font-size:11px;opacity:.7;margin:2px 0'
+  box.appendChild(lbl)
+  for (const [label, min, max, step, mf, get, set] of moundSliderSpecs(m, halfW, halfD))
+    box.appendChild(
+      sliderRow(
+        label,
+        min,
+        max,
+        step,
+        get(),
+        (v, c) => (set(v), c ? ctx.applySite(true) : ctx.applyTerrainLive()),
+        mf
+      )
+    )
+  box.appendChild(
+    removeRow('✕ Xoá gò', () => {
+      t.mounds.splice(i, 1)
+      ctx.applySite(true)
+      refresh()
+    })
+  )
+  body.appendChild(box)
+}
+
+// Spec 5 slider 1 gò [label, min, max, step, mmFactor, get, set] — reuse TerrainSlider. Pos/Radius/Height đơn vị m
+// (mmFactor 1000); Falloff unitless. Radius max = nửa-cạnh-lô lớn nhất; Height [-1,2]m (âm = lõm, grid-floor chặn).
+function moundSliderSpecs(m: TerrainMound, halfW: number, halfD: number): TerrainSlider[] {
+  return [
+    ['Pos X m', -halfW, halfW, 0.1, 1000, () => m.x / 1000, (v) => (m.x = Math.round(v * 1000))],
+    ['Pos Z m', -halfD, halfD, 0.1, 1000, () => m.z / 1000, (v) => (m.z = Math.round(v * 1000))],
+    [
+      'Radius m',
+      0.3,
+      Math.max(halfW, halfD),
+      0.1,
+      1000,
+      () => m.radius / 1000,
+      (v) => (m.radius = Math.round(v * 1000)),
+    ],
+    [
+      'Height m',
+      -1,
+      2,
+      0.05,
+      1000,
+      () => m.height / 1000,
+      (v) => (m.height = Math.round(v * 1000)),
+    ],
+    ['Falloff', 0, 1, 0.05, 1, () => m.falloff ?? 1, (v) => (m.falloff = v)],
+  ]
 }
 
 // Spec 10 slider noise [label, min, max, step, mmFactor, get, set] — tách khỏi buildTerrainControls (rule-50).
