@@ -78,14 +78,16 @@ ArchPlanLab (extends BaseWorld)
   │     │                            Pond=render Y NHƯ Pool (renderWaters; đổi param sau) · Puddle=placeholder. Coping = rect-frame quanh hồ (buildPoolEdge).
   │     │                            (bg-1→bg-4 lồng cấp, l5 về bg-3 cho chữ/track trắng đọc được). bảng Lot/House/Coverage/Garden ĐÁY tab Ground.
   │     ├── 🧪 Lab (FLOAT)          ← BÀN THÍ NGHIỆM riêng (FULL màn × full cao, nền trắng α0.5; nút 🧪 góc trái-dưới + phím R, đóng cũng R/🧪).
-  │     │                            Cột trái controls hẹp ~25% (2 khung dọc bằng nhau: 🎛️ thông số · 📁 tài liệu) · cột phải 🔎 preview ~75% (xoay/pan/zoom).
+  │     │                            Cột trái controls hẹp ~25%: hàng đầu = ⚙ settings + chip 🏛 Mái | ✨ Particles (CÙNG HÀNG); khung TRÊN headless mặc định FULL · khung DƯỚI 🔪 lưỡi dao/tài liệu GẬP ĐƯỢC (mặc định ẩn, click header mở ½). Cột phải 🔎 preview ~75% (xoay/pan/zoom).
   │     │                            Switcher thí nghiệm (lab-experiments.ts/setupLabExperiments): 🏛 Mái | ✨ Particles — đổi chip = dispose cũ + mount mới vào cùng khung.
-  │     │                            • 🏛 Mái = MÁI CHUẨN frustum chia tọa độ A–V (roof-lab + roof-preview WebGL; gốc bắt đầu mọi dạng mái — memory canonical-roof-base):
-  │     │                              đáy ABCD → nóc EFGH ngang thu giữa (slider Ngang/Sâu/Cao/Nóc ngang/Nóc sâu; sâu=0→hip) → A'B'C'D' trên 4 pháp tuyến (slider Cao) →
-  │     │                              KLMN (chiếu nóc↓đáy) → O–V (KLMN kéo dài cắt biên đáy). Mặt BÁN TRONG SUỐT (slider Độ mờ) + đường khuất NÉT ĐỨT (depthFunc GreaterDepth) kiểu hình-không-gian.
-  │     │                              Ô số tọa độ 8 đỉnh A–H. 🔪 lưỡi dao cắt SHADER SDF (bladeSDF hot-swap=cắm iq) + mini raymarch (sdf-preview.ts). Thanh dạng mái: ↺ Chuẩn · 💾 Lưu (localStorage) · chọn/🗑.
+  │     │                            • 🏛 Mái = MÁI CHUẨN frustum chia tọa độ A–X (roof-lab + roof-preview WebGL; gốc bắt đầu mọi dạng mái — memory canonical-roof-base):
+  │     │                              [QUY ƯỚC TRỤC: Dài=X · Rộng=Z · Cao=Y] 2 KHỐI: BASE (phần dưới = frustum: chân ABCD Dài×Rộng + Cao base + Độ dày solidify) ⊕ PEAK (chóp trên).
+  │     │                              MẶT PHẲNG CHUNG = nóc base EFGH ≡ chân peak (dính liền, Dài/Rộng dùng chung; Nóc rộng=0→hip). PEAK chỉ có Cao riêng → vuốt lên cạnh đỉnh WX; đổi Dài/Rộng chung KHÔNG đổi cao base/peak. A'B'C'D' (4 pháp tuyến) →
+  │     │                              KLMN (chiếu nóc↓đáy) → O–V (KLMN kéo dài cắt biên đáy). Peak xanh dương nhạt, base solidify (lớp trong đẩy pháp tuyến + bo mép hiên; Độ dày=0→mặt mỏng).
+  │     │                              Mặt BÁN TRONG SUỐT (slider Độ mờ, mặc định 0.7 cho cả khối mái + nêm) + đường khuất NÉT ĐỨT (depthFunc GreaterDepth) kiểu hình-không-gian.
+  │     │                              Ô số tọa độ 8 đỉnh A–H. 🔪 lưỡi dao cắt SHADER SDF (bladeSDF hot-swap=cắm iq) + mini raymarch (sdf-preview.ts). Thanh BLUEPRINT (chỉ symbol + title): ↺ chuẩn · [tên+💾] gộp · dropdown "blueprint" · 🗑 (popup confirm) · 📤/📥 JSON (localStorage).
   │     │                            • ✨ Particles (particle-lab + particle-preview): 3 MỨC tùy chọn — Mức 1 CPU Points (đài phun, CHẠY) · Mức 2 Shader · Mức 3 GPGPU (đang dựng).
-  │     │                            ⚙ settings: lưới/đèn (Particles thêm màu hạt). Cỏ đã tốt nghiệp→Garden▸Grass. (setupLabBench: ⚙+selector+2 khung; sliderRow export. 2026-06-06)
+  │     │                            ⚙ settings: lưới/đèn (Particles thêm màu hạt). Cỏ đã tốt nghiệp→Garden▸Grass. (setupLabBench: hàng ⚙+selector, khung TRÊN headless + khung DƯỚI gập mkLabFrame(collapsible/headless); sliderRow export. 2026-06-07)
   │     └── ⬇ Footer DÙNG CHUNG    ← `_buildDrawerFooter` (ngoài body cuộn, MỌI tab thấy): undo/redo + Build/Reset/Save/Load/JSON
   │                                  (trước nằm trong panel Building → đã lôi ra drawer vì là dòng chung; wire thẳng method, bền qua _rebuildGUI)
   │
