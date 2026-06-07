@@ -1677,6 +1677,7 @@ export class ArchPlanLab extends BaseWorld {
       applySiteLive: () => this._applySiteLive(),
       applyFenceLive: () => this._applyFenceLive(),
       applyTerrainLive: () => this._applyTerrainLive(),
+      applyTerrainDetail: () => this._applyTerrainDetail(),
       siteStats: () => this._siteStats(),
       registerSiteReadout: (fn) => (this._refreshSiteReadout = fn),
       ...this._siteTuneGuiCtx(),
@@ -2545,9 +2546,20 @@ export class ArchPlanLab extends BaseWorld {
       this._ensureGroundTex(key) // kick-off load maps → xong: _siteSig='' + re-render
       return null
     }
-    const photo = new PhotoGround({ maps, tileSizeMeters: GROUND_TEX_SPEC[key]?.tile ?? 2 })
+    const photo = new PhotoGround({
+      maps,
+      tileSizeMeters: GROUND_TEX_SPEC[key]?.tile ?? 2,
+      detail: this.site.terrain?.detail ?? 0, // 🏔️ Phase 4 micro-relief (live qua _applyTerrainDetail)
+    })
     this._groundMat[key] = photo
     return photo
+  }
+
+  // 🏔️ Phase 4: đẩy terrain.detail vào MỌI PhotoGround site-ground đã cache (uniform live, KHÔNG recompile/
+  // rebuild — vượt ranh per-key-cache). Gọi từ slider Detail (live) + sau load. Editor-ground share cùng cache.
+  private _applyTerrainDetail(): void {
+    const d = this.site.terrain?.detail ?? 0
+    for (const photo of Object.values(this._groundMat)) photo?.setDetail(d)
   }
 
   // Tập key ground dùng TEXTURE (unique) = base ground + mọi TẦNG layer chồng (lọc isGroundTexKey).

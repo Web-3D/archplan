@@ -282,6 +282,19 @@ function buildTerrainControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => v
         mf
       )
     )
+  // 🏔️ Detail (Phase 4): micro-relief normal — KHÁC slider trên (geometry): chỉ đổi UNIFORM PhotoGround → live
+  // = applyTerrainDetail (KHÔNG rebuild geo/recompile), buông = applySite(true) persist. Chỉ ăn trên ground texture.
+  body.appendChild(
+    sliderRow(
+      'Detail (sần)',
+      0,
+      1,
+      0.05,
+      t.detail,
+      (v, c) => ((t.detail = v), c ? ctx.applySite(true) : ctx.applyTerrainDetail()),
+      1
+    )
+  )
   buildMoundControls(body, ctx, t, refresh) // ⛰️ gò nặn tay (Phase 3)
 }
 
