@@ -59,6 +59,12 @@ export class RoofPreview {
   private extGeo: THREE.BufferGeometry | null = null // 8 đoạn: cạnh KLMN kéo dài cắt biên đáy ABCD
   private extDash: THREE.LineSegments | null = null
   private readonly extLabels: THREE.Sprite[] = [] // nhãn O P Q R S T U V
+  private cutGeo: THREE.BufferGeometry | null = null // WX = giao 2 mặt hồi BFEA × DGHC (apex 2 mái dốc)
+  private cutDash: THREE.LineSegments | null = null
+  private readonly cutLabels: THREE.Sprite[] = [] // nhãn W X
+  private capGeo: THREE.BufferGeometry | null = null // khối GEFHWX = nêm trên nóc (đáy EFGH → đỉnh WX)
+  private capMat: THREE.MeshStandardMaterial | null = null // xanh dương nhạt, opacity dùng chung setOpacity
+  private capMesh: THREE.Mesh | null = null
   private readonly decor: THREE.Object3D[] = [] // trục + lưới + nhãn trục (tĩnh, dispose ở cuối)
   private hemi: THREE.HemisphereLight | null = null // đèn nền — settings đổi độ sáng
   private key: THREE.DirectionalLight | null = null // đèn chiếu chính — settings đổi độ sáng
@@ -104,7 +110,7 @@ export class RoofPreview {
       side: THREE.DoubleSide, // dựng dở chưa kín → thấy cả 2 mặt
       flatShading: true, // facet rõ → soi từng mảng mái khi chỉnh
       transparent: true, // mặt BÁN TRONG SUỐT (kiểu hình học không gian)
-      opacity: 0.28,
+      opacity: 0.7,
       depthWrite: true, // VẪN ghi depth → đường khuất sau mặt mới đứt được
       polygonOffset: true, // đẩy mặt lùi 1 chút → đường dựng trên mặt không z-fight
       polygonOffsetFactor: 1,
@@ -177,6 +183,8 @@ export class RoofPreview {
     this._initApex()
     this._initProjection()
     this._initExtension()
+    this._initCutEdge()
+    this._initCapBlock()
   }
 
   // Geometry rỗng cho LineSegments (vertCount đỉnh) — push vào lineGeos để dispose.
@@ -235,6 +243,48 @@ export class RoofPreview {
     }
   }
 
+  // WX = cạnh giao 2 mặt phẳng hồi BFEA (trước) × DGHC (sau): đường apex nơi 2 mái dốc gặp nhau (kéo dài). 1 đoạn + 2 nhãn.
+  private _initCutEdge(): void {
+    this.cutGeo = this._mkLineGeo(2)
+    this.cutDash = this._mkHiddenLines(this.cutGeo, 0xd6336c)
+    for (const n of ['W', 'X']) {
+      const lbl = this._makeTextSprite(n, '#9c1f4f')
+      lbl.scale.set(0.4, 0.4, 1)
+      this.cutLabels.push(lbl)
+      this.scene.add(lbl)
+    }
+  }
+
+  // PEAK GEFHWX (xanh dương nhạt) — chân = nóc base EFGH, 6 đỉnh E0 F1 G2 H3 W4 X5. Index cố định, vị trí ở setCapBlock.
+  private _initCapBlock(): void {
+    this.capGeo = new THREE.BufferGeometry()
+    this.capGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(18), 3))
+    // prettier-ignore
+    this.capGeo.setIndex([
+      0, 1, 5, 0, 5, 4, // dốc trước: E F X W
+      3, 2, 4, 3, 4, 5, // dốc sau:  H G W X
+      2, 0, 4,          // bịt hồi trái (x=E.x): G E W
+      1, 3, 5,          // bịt hồi phải (x=F.x): F H X
+      0, 1, 3, 0, 3, 2, // đáy nóc EFGH
+    ])
+    this.capMat = new THREE.MeshStandardMaterial({
+      color: 0x9cc4f0, // xanh dương nhạt
+      roughness: 0.8,
+      metalness: 0,
+      side: THREE.DoubleSide,
+      flatShading: true,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: true,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+    })
+    this.capMesh = new THREE.Mesh(this.capGeo, this.capMat)
+    this.capMesh.visible = false // hiện khi setCapBlock có apex hợp lệ
+    this.scene.add(this.capMesh)
+  }
+
   // 4 điểm di động A'B'C'D' (sphere cam) trên pháp tuyến + nhãn — vị trí cập nhật ở setApex.
   private _initApex(): void {
     this.apexGeo = new THREE.SphereGeometry(0.08, 14, 10)
@@ -261,9 +311,10 @@ export class RoofPreview {
   setKey(v: number): void {
     if (this.key) this.key.intensity = v
   }
-  // Độ đục mặt mái (0 = trong suốt hẳn · 1 = đặc). Vẫn ghi depth nên nét khuất vẫn đứt.
+  // Độ đục mặt mái + khối nêm GEFHWX (0 = trong suốt hẳn · 1 = đặc). Vẫn ghi depth nên nét khuất vẫn đứt.
   setOpacity(v: number): void {
     this.mat.opacity = v
+    if (this.capMat) this.capMat.opacity = v
   }
 
   // Tiêm SDF cắt vào shader mái: vWorldPos (vertex) + thư viện iq + bladeSDF(thân hiện tại) + discard ở blade-local.
@@ -505,6 +556,38 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     for (let k = 0; k < 8; k++) this.extLabels[k].position.set(pts[k][0], 0.2, pts[k][1])
   }
 
+  // PEAK GEFHWX: chân = nóc base EFGH (mặt phẳng chung, DÍNH LIỀN — dài/rộng theo nóc) vuốt lên cạnh đỉnh WX cao thêm
+  // capHeight (chỉ chiều cao là RIÊNG). 6 đỉnh E0 F1 G2 H3 + W4 X5. WX dài = chân peak (E.x→F.x), giữa z. Cập nhật LUÔN WX + nhãn.
+  setCapBlock(verts: LabeledPoint[], capHeight: number): void {
+    if (this.isDisposed || !this.capGeo || !this.capMesh || verts.length < 8) return
+    const [, , , , E, F, G, H] = verts
+    const y = E.y + capHeight // cao cạnh đỉnh WX = mức nóc + capHeight
+    const midZ = (E.z + G.z) / 2 // tâm chiều rộng nóc → WX nằm giữa
+    const a = this.capGeo.getAttribute('position') as THREE.BufferAttribute
+    a.setXYZ(0, E.x, E.y, E.z) // E (nóc trước-trái)
+    a.setXYZ(1, F.x, F.y, F.z) // F (nóc trước-phải)
+    a.setXYZ(2, G.x, G.y, G.z) // G (nóc sau-trái)
+    a.setXYZ(3, H.x, H.y, H.z) // H (nóc sau-phải)
+    a.setXYZ(4, E.x, y, midZ) // W
+    a.setXYZ(5, F.x, y, midZ) // X
+    a.needsUpdate = true
+    this.capGeo.computeVertexNormals()
+    this.capMesh.visible = true
+    this._placeCutEdge(E.x, F.x, y, midZ) // cạnh đỉnh WX = ridge của peak (dài theo nóc)
+  }
+
+  // Ghi cạnh đỉnh WX vào buffer + đặt nhãn W/X (cao y, x từ x0→x1, tại z).
+  private _placeCutEdge(x0: number, x1: number, y: number, z: number): void {
+    if (!this.cutGeo) return
+    const attr = this.cutGeo.getAttribute('position') as THREE.BufferAttribute
+    attr.setXYZ(0, x0, y, z)
+    attr.setXYZ(1, x1, y, z)
+    attr.needsUpdate = true
+    this.cutDash?.computeLineDistances()
+    this.cutLabels[0].position.set(x0, y + 0.25, z)
+    this.cutLabels[1].position.set(x1, y + 0.25, z)
+  }
+
   // Khớp buffer render với kích thước HIỂN THỊ canvas (rộng×cao theo CSS) + aspect. Bỏ qua khi ẩn (client = 0).
   private _syncSize(): void {
     const cw = this.canvas.clientWidth
@@ -538,8 +621,9 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     for (const sp of this.apexLabels) this._disposeSprite(sp)
     for (const sp of this.projLabels) this._disposeSprite(sp) // nhãn K L M N
     for (const sp of this.extLabels) this._disposeSprite(sp) // nhãn O–V
-    this.apexGeo?.dispose() // geo CHUNG 4 điểm A'B'C'D'
-    this.apexMat?.dispose()
+    for (const sp of this.cutLabels) this._disposeSprite(sp) // nhãn W X
+    // geo/mat dùng chung: sphere 4 điểm A'B'C'D' + khối nêm GEFHWX (geo+mat)
+    for (const d of [this.apexGeo, this.apexMat, this.capGeo, this.capMat]) d?.dispose()
     for (const g of this.lineGeos) g.dispose() // geo pháp tuyến + KLMN (chung solid/dashed)
     for (const m of this.lineMats) m.dispose()
   }

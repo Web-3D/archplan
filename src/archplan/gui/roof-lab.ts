@@ -1,6 +1,7 @@
 /**
  * VỊ TRÍ   — archplan/src/archplan/gui/roof-lab.ts
  * VAI TRÒ  — Thí nghiệm MÁI trong 🧪 Lab. Mái FRUSTUM 8 góc A–H (đáy ABCD + nóc EFGH thu giữa; ridgeDepth=0 → hip)
+ *            + ĐỘ DÀY solidify (lớp trong đẩy theo pháp tuyến + bo mép hiên; thickness=0 → mặt mỏng)
  *            + 4 pháp tuyến & điểm A'B'C'D' (marker, chưa điều khiển mái) + LƯỠI DAO cắt (shader SDF). 8 ĐỈNH = NGUỒN
  *            SỰ THẬT: slider = dựng lại đối xứng (ghi đè) · ô số = tinh chỉnh TỪNG đỉnh. Editor SDF + mini-preview.
  * LIÊN HỆ  — setupRoofLab gọi từ ArchPlanLab._setupLabFloat. sliderRow của tweak.ts. RoofPreview (mái+pháp tuyến+điểm+
@@ -16,22 +17,29 @@ import { SdfPreview } from './sdf-preview'
 import { sliderRow } from './tweak'
 
 // Thông số mái FRUSTUM (chóp cụt): đáy ABCD + nóc EFGH ngang thu giữa. ridgeDepth=0 → về mái hip. Đơn vị: mét.
+// Quy ước trục: DÀI = X · RỘNG = Z · CAO = Y.
+// BASE (frustum dưới): chân = width×depth, cao = height. Nóc base = MẶT PHẲNG CHUNG (ridge×ridgeDepth) ≡ chân PEAK.
+// PEAK (chóp trên): chân lấy theo mặt phẳng chung; chỉ capHeight riêng. Đổi dài/rộng mặt phẳng chung KHÔNG đổi cao base/peak.
 export interface RoofLabParams {
-  width: number // bề ngang đáy (trục X)
-  depth: number // bề sâu đáy (trục Z)
-  height: number // chiều cao nóc so với đáy (rise, trục Y)
-  ridge: number // bề NGANG nóc EFGH theo X (0 = chóp nhọn · = width → 2 mái/gable)
-  ridgeDepth: number // bề SÂU nóc EFGH theo Z (0 = sống đường thẳng/hip · >0 = nóc chữ nhật/frustum)
+  width: number // chiều DÀI chân base (trục X)
+  depth: number // chiều RỘNG chân base (trục Z)
+  height: number // chiều CAO base (rise nóc so với chân, trục Y)
+  ridge: number // chiều DÀI mặt phẳng chung theo X (nóc base ≡ chân peak; 0 = chóp nhọn · = width → gable)
+  ridgeDepth: number // chiều RỘNG mặt phẳng chung theo Z (0 = sống đường thẳng/hip · >0 = chữ nhật/frustum)
+  thickness: number // độ dày solidify base (m, ⊥ mặt). 0 = mặt mỏng như cũ · >0 = khối đặc có mép hiên
+  capHeight: number // chiều CAO peak (rise đỉnh WX trên mặt phẳng chung, trục Y) — RIÊNG, độc lập cao base
 }
 
 // ⭐ MÁI CHUẨN — hình dáng GỐC (frustum chia tọa độ A–V) để bắt đầu mọi dạng mái. Mở Mái = state này.
 // Đổi bộ số này = đổi "mái chuẩn". (chi tiết: memory canonical-roof-base)
 export const DEFAULT_ROOF: RoofLabParams = {
-  width: 4,
-  depth: 3,
-  height: 1.6,
-  ridge: 1.5,
-  ridgeDepth: 1,
+  width: 5, // Dài chân base
+  depth: 5, // Rộng chân base
+  height: 0.6, // Cao base
+  ridge: 3, // Dài mặt phẳng chung
+  ridgeDepth: 2.5, // Rộng mặt phẳng chung
+  thickness: 0.1, // Độ dày base
+  capHeight: 1, // Cao peak → đỉnh WX ở y=1.6 (cao base 0.6 + 1)
 }
 
 // 🔪 Lưỡi dao = mặt cắt. transform (nghiêng X/Y/Z + vị trí) định vị; hình do bladeSDF (editor) quyết.
@@ -116,24 +124,81 @@ export function roofVertices(p: RoofLabParams): LabeledPoint[] {
   ]
 }
 
-// Geometry FRUSTUM từ 8 ĐỈNH: nóc EFHG + 4 mặt bên hình thang cân. DoubleSide nên winding không tới hạn.
+// Index 5 mặt NGOÀI (nóc EFHG + 4 thang cân). Tách module để lớp TRONG tái dùng (đảo winding) khi solidify.
 // ridgeDepth=0: nóc sụp thành đường → 2 mặt thang + 2 tam giác hồi (đúng mái hip cũ).
-export function buildRoofGeometry(v: LabeledPoint[]): THREE.BufferGeometry {
+// prettier-ignore
+const ROOF_IDX = [
+  4, 5, 7, 4, 7, 6, // nóc EFHG (E=4 F=5 H=7 G=6)
+  0, 1, 5, 0, 5, 4, // trước (-z): thang A-B-F-E
+  1, 2, 7, 1, 7, 5, // phải  (+x): thang B-C-H-F
+  2, 3, 6, 2, 6, 7, // sau   (+z): thang C-D-G-H
+  3, 0, 4, 3, 4, 6, // trái  (-x): thang D-A-E-G
+]
+// Biên HỞ = vành đáy A→B→C→D→A (4 cạnh) — nơi bo mép hiên nối lớp ngoài↔trong khi solidify.
+const RIM: ReadonlyArray<readonly [number, number]> = [
+  [0, 1],
+  [1, 2],
+  [2, 3],
+  [3, 0],
+]
+
+// Pháp tuyến đỉnh QUAY RA NGOÀI (rời tâm khối) cho 8 đỉnh — để solidify đẩy lớp trong vào ĐÚNG phía.
+// Tích có hướng (area-weighted) cộng dồn theo mặt → chuẩn hóa → lật nếu chĩa vào tâm (winding không tin được).
+function outwardNormals(v: LabeledPoint[]): THREE.Vector3[] {
+  const p = v.map((q) => new THREE.Vector3(q.x, q.y, q.z))
+  const c = new THREE.Vector3()
+  for (const q of p) c.add(q)
+  c.multiplyScalar(1 / p.length)
+  const n = p.map(() => new THREE.Vector3())
+  for (let i = 0; i < ROOF_IDX.length; i += 3) {
+    const [a, b, d] = [ROOF_IDX[i], ROOF_IDX[i + 1], ROOF_IDX[i + 2]]
+    const fn = new THREE.Vector3()
+      .subVectors(p[b], p[a])
+      .cross(new THREE.Vector3().subVectors(p[d], p[a]))
+    n[a].add(fn)
+    n[b].add(fn)
+    n[d].add(fn)
+  }
+  for (let i = 0; i < n.length; i++) {
+    n[i].normalize()
+    if (n[i].dot(new THREE.Vector3().subVectors(p[i], c)) < 0) n[i].negate()
+  }
+  return n
+}
+
+// Mái MỎNG (độ dày 0): chỉ 5 mặt ngoài như cũ. DoubleSide nên winding không tới hạn.
+function buildThinShell(v: LabeledPoint[]): THREE.BufferGeometry {
   const pos: number[] = []
   for (const q of v) pos.push(q.x, q.y, q.z)
-  // prettier-ignore
-  const idx = [
-    4, 5, 7, 4, 7, 6, // nóc EFHG (E=4 F=5 H=7 G=6)
-    0, 1, 5, 0, 5, 4, // trước (-z): thang A-B-F-E
-    1, 2, 7, 1, 7, 5, // phải  (+x): thang B-C-H-F
-    2, 3, 6, 2, 6, 7, // sau   (+z): thang C-D-G-H
-    3, 0, 4, 3, 4, 6, // trái  (-x): thang D-A-E-G
-  ]
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  geo.setIndex([...ROOF_IDX])
+  geo.computeVertexNormals()
+  return geo
+}
+
+// Mái DÀY (solidify kiểu Blender): lớp NGOÀI A–H (0..7) giữ nguyên hình chuẩn + lớp TRONG (8..15) đẩy vào dọc
+// pháp tuyến đoạn t (độ dày ⊥ mặt ≈ t) + bo mép hiên (vành đáy) nối 2 lớp → khối đặc. Lớp trong đảo winding.
+function buildSolid(v: LabeledPoint[], t: number): THREE.BufferGeometry {
+  const n = outwardNormals(v)
+  const pos: number[] = []
+  for (const q of v) pos.push(q.x, q.y, q.z)
+  for (let i = 0; i < v.length; i++)
+    pos.push(v[i].x - n[i].x * t, v[i].y - n[i].y * t, v[i].z - n[i].z * t)
+  const idx = [...ROOF_IDX]
+  for (let i = 0; i < ROOF_IDX.length; i += 3)
+    idx.push(ROOF_IDX[i] + 8, ROOF_IDX[i + 2] + 8, ROOF_IDX[i + 1] + 8)
+  for (const [a, b] of RIM) idx.push(a, b, b + 8, a, b + 8, a + 8)
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
   geo.setIndex(idx)
-  geo.computeVertexNormals() // DoubleSide nên hướng pháp tuyến không tới hạn
+  geo.computeVertexNormals()
   return geo
+}
+
+// Geometry mái từ 8 ĐỈNH. thickness>0 → khối đặc (solidify) · =0 → mặt mỏng như cũ. A–H luôn là lớp ngoài chuẩn.
+export function buildRoofGeometry(v: LabeledPoint[], thickness = 0): THREE.BufferGeometry {
+  return thickness > 0 ? buildSolid(v, thickness) : buildThinShell(v)
 }
 
 // Bảng tọa độ EDIT ĐƯỢC (cột phải khung trên): mỗi đỉnh = tên + 3 ô số x/y/z (sửa → onEdit). sync() = nạp lại
@@ -177,7 +242,7 @@ function buildCoordEditor(
   const legend = document.createElement('div')
   legend.className = 'ap-roof-legend'
   legend.textContent =
-    'Hiên: AB BC CD DA · Sống: AE BF CH DG · Nóc: EF FH HG GE · Chiếu↓đáy: KLMN · KLMN kéo dài cắt biên: O–V'
+    'Trục: Dài=X Rộng=Z Cao=Y · Base chân: ABCD · Nóc base ≡ chân peak: EFGH · Sống: AE BF CH DG · Chiếu↓đáy: KLMN · KLMN cắt biên: O–V · Đỉnh peak: WX'
   el.appendChild(legend)
   const sync = (): void => {
     let i = 0
@@ -200,7 +265,15 @@ function buildPreviewSettings(host: Element | null, preview: RoofPreview): void 
   )
 }
 
-// Cột TRÁI khung trên: slider hình MÁI (REGEN) + 4 điểm A'B'C'D' trên pháp tuyến (updateApex).
+// Tiêu đề nhóm slider (tái dùng).
+function mkColTitle(text: string): HTMLElement {
+  const t = document.createElement('div')
+  t.className = 'ap-roof-col-title'
+  t.textContent = text
+  return t
+}
+
+// Cột TRÁI khung trên: Độ mờ + 3 nhóm Base / Mặt phẳng chung / Peak + 4 điểm A'B'C'D'.
 function buildRoofParamCol(
   params: RoofLabParams,
   regen: () => void,
@@ -210,35 +283,70 @@ function buildRoofParamCol(
 ): HTMLElement {
   const col = document.createElement('div')
   col.className = 'ap-roof-col'
-  const title = document.createElement('div')
-  title.className = 'ap-roof-col-title'
-  title.textContent = '🏠 Mái'
   col.append(
-    title,
-    sliderRow('Độ mờ', 0, 1, 0.05, 0.28, (v) => preview.setOpacity(v)), // độ đục mặt mái
-    sliderRow('Ngang (m)', 1, 12, 0.1, params.width, (v) => {
+    mkColTitle('🏠 Mái'),
+    sliderRow('Độ mờ', 0, 1, 0.05, 0.7, (v) => preview.setOpacity(v)), // độ đục base + peak
+    buildBaseRows(params, regen),
+    buildSharedRows(params, regen),
+    buildPeakRows(params, regen),
+    buildApexRows(apex, updateApex)
+  )
+  return col
+}
+
+// BASE (phần dưới = frustum): chân base Dài(X)/Rộng(Z) + Cao(Y) + Độ dày solidify.
+function buildBaseRows(params: RoofLabParams, regen: () => void): HTMLElement {
+  const box = document.createElement('div')
+  box.append(
+    mkColTitle('🟫 Base (phần dưới)'),
+    sliderRow('Dài chân base (m)', 1, 12, 0.1, params.width, (v) => {
       params.width = v
       regen()
     }),
-    sliderRow('Sâu (m)', 1, 12, 0.1, params.depth, (v) => {
+    sliderRow('Rộng chân base (m)', 1, 12, 0.1, params.depth, (v) => {
       params.depth = v
       regen()
     }),
-    sliderRow('Cao (m)', 0.2, 6, 0.1, params.height, (v) => {
+    sliderRow('Cao base (m)', 0.2, 6, 0.1, params.height, (v) => {
       params.height = v
       regen()
     }),
-    sliderRow('Nóc ngang (m)', 0, 12, 0.1, params.ridge, (v) => {
+    sliderRow('Độ dày base (m)', 0, 0.8, 0.02, params.thickness, (v) => {
+      params.thickness = v
+      regen()
+    })
+  )
+  return box
+}
+
+// MẶT PHẲNG CHUNG = nóc base ≡ chân peak (dính liền): Dài(X)=ridge · Rộng(Z)=ridgeDepth. Đổi KHÔNG đụng cao base/peak.
+function buildSharedRows(params: RoofLabParams, regen: () => void): HTMLElement {
+  const box = document.createElement('div')
+  box.append(
+    mkColTitle('▭ Mặt phẳng chung (nóc base ≡ chân peak)'),
+    sliderRow('Dài (m)', 0, 12, 0.1, params.ridge, (v) => {
       params.ridge = v
       regen()
     }),
-    sliderRow('Nóc sâu (m)', 0, 12, 0.1, params.ridgeDepth, (v) => {
+    sliderRow('Rộng (m)', 0, 12, 0.1, params.ridgeDepth, (v) => {
       params.ridgeDepth = v
       regen()
     })
   )
-  col.append(buildApexRows(apex, updateApex)) // 4 điểm A'B'C'D' ngay dưới slider mái
-  return col
+  return box
+}
+
+// PEAK (chóp): dài/rộng chân = mặt phẳng chung; CHỈ Cao(Y) riêng. Đỉnh WX dài = chân peak (= nóc base).
+function buildPeakRows(params: RoofLabParams, regen: () => void): HTMLElement {
+  const box = document.createElement('div')
+  box.append(
+    mkColTitle('🔺 Peak (chóp)'),
+    sliderRow('Cao peak (m)', 0, 6, 0.1, params.capHeight, (v) => {
+      params.capHeight = v
+      regen()
+    })
+  )
+  return box
 }
 
 // 4 điểm di động A'B'C'D' trên pháp tuyến — mỗi cái 1 slider cao [0, NORMAL_LEN]. Chưa điều khiển mái (chỉ marker).
@@ -268,12 +376,89 @@ function loadPresets(): Record<string, SavedShape> {
 function savePresets(p: Record<string, SavedShape>): void {
   localStorage.setItem(PRESET_KEY, JSON.stringify(p))
 }
-function mkBtn(label: string, onClick: () => void): HTMLButtonElement {
+function mkBtn(label: string, onClick: () => void, title?: string): HTMLButtonElement {
   const b = document.createElement('button')
   b.className = 'ap-roof-presetbtn'
   b.textContent = label
+  if (title) b.title = title // nút chỉ còn symbol → title giải nghĩa khi hover
   b.addEventListener('click', onClick)
   return b
+}
+
+// Popup confirm nhỏ treo dưới `anchor` (vd nút 🗑): "msg" + [Hủy][Xóa]. Click ngoài / Hủy → đóng; Xóa → onYes().
+function confirmPopup(anchor: HTMLElement, msg: string, onYes: () => void): void {
+  const pop = document.createElement('div')
+  pop.className = 'ap-roof-confirm'
+  const m = document.createElement('div')
+  m.className = 'ap-roof-confirm-msg'
+  m.textContent = msg
+  const row = document.createElement('div')
+  row.className = 'ap-roof-confirm-row'
+  const no = document.createElement('button')
+  no.className = 'ap-roof-confirm-no'
+  no.textContent = 'Hủy'
+  const yes = document.createElement('button')
+  yes.className = 'ap-roof-confirm-yes'
+  yes.textContent = 'Xóa'
+  row.append(no, yes)
+  pop.append(m, row)
+  document.body.appendChild(pop)
+  const r = anchor.getBoundingClientRect()
+  pop.style.left = `${Math.round(r.left)}px`
+  pop.style.top = `${Math.round(r.bottom + 4)}px`
+  const close = (): void => {
+    pop.remove()
+    document.removeEventListener('mousedown', onOut, true)
+  }
+  function onOut(e: MouseEvent): void {
+    if (!pop.contains(e.target as Node)) close()
+  }
+  no.addEventListener('click', close)
+  yes.addEventListener('click', () => {
+    onYes()
+    close()
+  })
+  setTimeout(() => document.addEventListener('mousedown', onOut, true), 0) // né click mở
+}
+
+// Nháy chữ nút ~1.1s để báo đã làm (vd "✓ Đã lưu") rồi trả lại.
+function flash(btn: HTMLButtonElement, msg: string): void {
+  const old = btn.textContent ?? ''
+  btn.textContent = msg
+  setTimeout(() => (btn.textContent = old), 1100)
+}
+
+// ⬇ Tải toàn bộ dạng đã lưu ra file roof-shapes.json (mang đi / đẩy vào pipeline).
+function exportShapes(): void {
+  const blob = new Blob([JSON.stringify(loadPresets(), null, 2)], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = 'roof-shapes.json'
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+// ⬆ Nạp file .json → MERGE vào dạng đã lưu (localStorage). onDone refresh dropdown.
+function importShapes(onDone: () => void): void {
+  const inp = document.createElement('input')
+  inp.type = 'file'
+  inp.accept = 'application/json,.json'
+  inp.addEventListener('change', () => {
+    const f = inp.files?.[0]
+    if (!f) return
+    const r = new FileReader()
+    r.onload = (): void => {
+      try {
+        const incoming = JSON.parse(String(r.result)) as Record<string, SavedShape>
+        savePresets({ ...loadPresets(), ...incoming })
+        onDone()
+      } catch {
+        /* file json lỗi → bỏ qua */
+      }
+    }
+    r.readAsText(f)
+  })
+  inp.click()
 }
 
 function buildApexRows(apex: ApexState, updateApex: () => void): HTMLElement {
@@ -406,45 +591,82 @@ function buildBladeCol(
   return { el: col, dispose: editor.dispose }
 }
 
-// Thanh quản lý DẠNG MÁI: ↺ Chuẩn (về DEFAULT) · ô tên + 💾 Lưu (lưu dạng đang nặn) · dropdown chọn dạng đã lưu · 🗑.
+// Thanh quản lý BLUEPRINT: ↺ (về chuẩn) · ô tên gộp nút 💾 lưu · dropdown blueprint đã lưu · 🗑 (confirm) · 📤/📥 JSON.
 // current() = chụp state hiện tại · apply(s) = nạp 1 dạng. Lưu localStorage qua loadPresets/savePresets.
+// Cụm "khung tên + 💾" gộp 1: gõ tên (trống → tự đặt) → 💾 lưu blueprint hiện tại, nháy "✓".
+function buildSaveRow(
+  current: () => SavedShape,
+  refresh: () => void,
+  sel: HTMLSelectElement
+): HTMLElement {
+  const nameInp = document.createElement('input')
+  nameInp.className = 'ap-roof-presetname'
+  nameInp.placeholder = 'tên blueprint'
+  const save = mkBtn(
+    '💾',
+    () => {
+      const ps = loadPresets()
+      const name = nameInp.value.trim() || `mái ${Object.keys(ps).length + 1}` // trống → tự đặt tên
+      ps[name] = current()
+      savePresets(ps)
+      refresh()
+      sel.value = name
+      nameInp.value = ''
+      flash(save, '✓')
+    },
+    'Lưu blueprint'
+  )
+  save.classList.add('ap-roof-savebtn')
+  const row = document.createElement('div')
+  row.className = 'ap-roof-saverow'
+  row.append(nameInp, save)
+  return row
+}
+
+// Nút 🗑 — xóa blueprint đang chọn nhưng QUA popup confirm (tránh xóa nhầm).
+function buildDelBtn(sel: HTMLSelectElement, refresh: () => void): HTMLButtonElement {
+  const del = mkBtn(
+    '🗑',
+    () => {
+      if (!sel.value) return
+      confirmPopup(del, `Xóa blueprint "${sel.value}"?`, () => {
+        const ps = loadPresets()
+        delete ps[sel.value]
+        savePresets(ps)
+        refresh()
+      })
+    },
+    'Xóa blueprint đang chọn'
+  )
+  return del
+}
+
 function buildPresetBar(current: () => SavedShape, apply: (s: SavedShape) => void): HTMLElement {
   const bar = document.createElement('div')
   bar.className = 'ap-roof-presetbar'
   const sel = document.createElement('select')
   sel.className = 'ap-roof-presetsel'
   const refresh = (): void => {
-    sel.replaceChildren(new Option('— dạng đã lưu —', ''))
+    sel.replaceChildren(new Option('blueprint', '')) // option đầu = nhãn/placeholder
     for (const name of Object.keys(loadPresets())) sel.appendChild(new Option(name, name))
   }
   sel.addEventListener('change', () => {
     const s = loadPresets()[sel.value]
     if (s) apply(s)
   })
-  const nameInp = document.createElement('input')
-  nameInp.className = 'ap-roof-presetname'
-  nameInp.placeholder = 'tên dạng mái'
-  const std = mkBtn('↺ Chuẩn', () =>
-    apply({ params: { ...DEFAULT_ROOF }, apex: { ...DEFAULT_APEX } })
+  const std = mkBtn(
+    '↺',
+    () => apply({ params: { ...DEFAULT_ROOF }, apex: { ...DEFAULT_APEX } }),
+    'Về mái chuẩn'
   )
-  const save = mkBtn('💾 Lưu', () => {
-    const name = nameInp.value.trim()
-    if (!name) return
-    const ps = loadPresets()
-    ps[name] = current()
-    savePresets(ps)
-    refresh()
-    sel.value = name
-    nameInp.value = ''
-  })
-  const del = mkBtn('🗑', () => {
-    if (!sel.value) return
-    const ps = loadPresets()
-    delete ps[sel.value]
-    savePresets(ps)
-    refresh()
-  })
-  bar.append(std, nameInp, save, sel, del)
+  bar.append(
+    std,
+    buildSaveRow(current, refresh, sel),
+    sel,
+    buildDelBtn(sel, refresh),
+    mkBtn('📤', exportShapes, 'Tải tất cả blueprint ra file .json'),
+    mkBtn('📥', () => importShapes(refresh), 'Nạp blueprint từ file .json')
+  )
   refresh()
   return bar
 }
@@ -493,19 +715,18 @@ export function setupRoofLab(
   buildPreviewSettings(settingsHost, preview) // ⚙ lưới/sáng/đèn
   const updateApex = (): void => preview.setApex(verts, [apex.hA, apex.hB, apex.hC, apex.hD])
 
-  const paramHead = paramHost?.previousElementSibling
-  if (paramHead) paramHead.textContent = '🏠 Mái · 📐 Tọa độ'
-  const docHead = docHost?.previousElementSibling
+  const docHead = docHost?.previousElementSibling // khung trên headless → chỉ đặt nhãn khung dưới
   if (docHead) docHead.textContent = '🔪 Lưỡi dao'
 
   const applyBlade = (): void => preview.setBlade(bladeMatrix(blade), blade.enabled)
   const rebuild = (): void => {
-    preview.setGeometry(buildRoofGeometry(verts))
+    preview.setGeometry(buildRoofGeometry(verts, params.thickness))
     preview.setLabels(verts)
     preview.setNormals(verts) // 4 pháp tuyến dựng từ đỉnh đáy ABCD
     updateApex() // 4 điểm A'B'C'D' bám đỉnh đáy theo cao hiện tại
     preview.setProjection(verts) // KLMN = chiếu nóc EFGH xuống đáy
     preview.setExtension(verts) // O–V = cạnh KLMN kéo dài cắt biên đáy
+    preview.setCapBlock(verts, params.capHeight) // peak GEFHWX (chân = nóc base) + cạnh đỉnh WX
     coordEd.sync() // đồng bộ ô số (không dựng lại DOM)
   }
   const regen = (): void => {
