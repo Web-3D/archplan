@@ -80,8 +80,10 @@ ArchPlanLab (extends BaseWorld)
   │     ├── 🧪 Lab (FLOAT)          ← BÀN THÍ NGHIỆM riêng (FULL màn × full cao, nền trắng α0.5; nút 🧪 góc trái-dưới + phím R, đóng cũng R/🧪).
   │     │                            Cột trái controls hẹp ~25% (2 khung dọc bằng nhau: 🎛️ thông số · 📁 tài liệu) · cột phải 🔎 preview ~75% (xoay/pan/zoom).
   │     │                            Switcher thí nghiệm (lab-experiments.ts/setupLabExperiments): 🏛 Mái | ✨ Particles — đổi chip = dispose cũ + mount mới vào cùng khung.
-  │     │                            • 🏛 Mái: hip cắt nóc (roof-lab + roof-preview WebGL) · 4 slider Ngang/Sâu/Cao/Nóc + ô số tọa độ A–F (sửa từng đỉnh) +
-  │     │                              🔪 lưỡi dao cắt qua SHADER SDF (discard; bladeSDF hot-swap = chỗ cắm iq) + mini raymarch preview bề mặt dao (sdf-preview.ts).
+  │     │                            • 🏛 Mái = MÁI CHUẨN frustum chia tọa độ A–V (roof-lab + roof-preview WebGL; gốc bắt đầu mọi dạng mái — memory canonical-roof-base):
+  │     │                              đáy ABCD → nóc EFGH ngang thu giữa (slider Ngang/Sâu/Cao/Nóc ngang/Nóc sâu; sâu=0→hip) → A'B'C'D' trên 4 pháp tuyến (slider Cao) →
+  │     │                              KLMN (chiếu nóc↓đáy) → O–V (KLMN kéo dài cắt biên đáy). Mặt BÁN TRONG SUỐT (slider Độ mờ) + đường khuất NÉT ĐỨT (depthFunc GreaterDepth) kiểu hình-không-gian.
+  │     │                              Ô số tọa độ 8 đỉnh A–H. 🔪 lưỡi dao cắt SHADER SDF (bladeSDF hot-swap=cắm iq) + mini raymarch (sdf-preview.ts). Thanh dạng mái: ↺ Chuẩn · 💾 Lưu (localStorage) · chọn/🗑.
   │     │                            • ✨ Particles (particle-lab + particle-preview): 3 MỨC tùy chọn — Mức 1 CPU Points (đài phun, CHẠY) · Mức 2 Shader · Mức 3 GPGPU (đang dựng).
   │     │                            ⚙ settings: lưới/đèn (Particles thêm màu hạt). Cỏ đã tốt nghiệp→Garden▸Grass. (setupLabBench: ⚙+selector+2 khung; sliderRow export. 2026-06-06)
   │     └── ⬇ Footer DÙNG CHUNG    ← `_buildDrawerFooter` (ngoài body cuộn, MỌI tab thấy): undo/redo + Build/Reset/Save/Load/JSON

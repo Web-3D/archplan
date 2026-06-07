@@ -13,6 +13,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
 const INIT = 220 // px — cạnh khởi tạo trước khi ResizeObserver đo canvas thật
+export const NORMAL_LEN = 3 // m — chiều dài pháp tuyến dựng từ đỉnh đáy (= max cao điểm di động A'B'C'D')
 
 // Thư viện SDF kiểu iq (Shadertoy) tiêm sẵn vào shader mái → editor/preset gọi trực tiếp trong bladeSDF.
 // Export: SdfPreview (mini raymarch) dùng chung CÙNG thư viện → code/preset chạy giống nhau ở cả 2 nơi.
@@ -42,6 +43,22 @@ export class RoofPreview {
   private readonly mat: THREE.MeshStandardMaterial
   private mesh: THREE.Mesh | null = null
   private readonly labelGroup = new THREE.Group() // nhãn góc A–F — dựng lại mỗi setLabels
+  // Đường dựng = CẶP solid(phần thấy)+dashed(phần khuất sau mặt, depthFunc GREATER). Chung geometry. Dashed giữ ref
+  // để computeLineDistances mỗi khi đổi vị trí. lineGeos/lineMats để dispose.
+  private readonly lineGeos: THREE.BufferGeometry[] = []
+  private readonly lineMats: THREE.Material[] = []
+  private normalsGeo: THREE.BufferGeometry | null = null // 4 pháp tuyến từ đỉnh đáy ABCD
+  private normalsDash: THREE.LineSegments | null = null
+  private readonly apexMarkers: THREE.Mesh[] = [] // 4 điểm di động A'B'C'D' trên pháp tuyến (sphere cam)
+  private readonly apexLabels: THREE.Sprite[] = [] // nhãn A'B'C'D'
+  private apexGeo: THREE.SphereGeometry | null = null // geo CHUNG 4 điểm
+  private apexMat: THREE.MeshBasicMaterial | null = null
+  private projGeo: THREE.BufferGeometry | null = null // KLMN (chiếu EFGH↓đáy) + 4 đường chiếu dọc
+  private projDash: THREE.LineSegments | null = null
+  private readonly projLabels: THREE.Sprite[] = [] // nhãn K L M N
+  private extGeo: THREE.BufferGeometry | null = null // 8 đoạn: cạnh KLMN kéo dài cắt biên đáy ABCD
+  private extDash: THREE.LineSegments | null = null
+  private readonly extLabels: THREE.Sprite[] = [] // nhãn O P Q R S T U V
   private readonly decor: THREE.Object3D[] = [] // trục + lưới + nhãn trục (tĩnh, dispose ở cuối)
   private hemi: THREE.HemisphereLight | null = null // đèn nền — settings đổi độ sáng
   private key: THREE.DirectionalLight | null = null // đèn chiếu chính — settings đổi độ sáng
@@ -86,6 +103,12 @@ export class RoofPreview {
       metalness: 0,
       side: THREE.DoubleSide, // dựng dở chưa kín → thấy cả 2 mặt
       flatShading: true, // facet rõ → soi từng mảng mái khi chỉnh
+      transparent: true, // mặt BÁN TRONG SUỐT (kiểu hình học không gian)
+      opacity: 0.28,
+      depthWrite: true, // VẪN ghi depth → đường khuất sau mặt mới đứt được
+      polygonOffset: true, // đẩy mặt lùi 1 chút → đường dựng trên mặt không z-fight
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
     })
     this.mat.onBeforeCompile = (s) => this._injectBlade(s) // tiêm SDF cắt vào shader mái
 
@@ -147,6 +170,85 @@ export class RoofPreview {
     this._addDecorLabel('Y', 0, 3.3, 0, '#2e9e2e')
     this._addDecorLabel('Z', 0, 0, 3.3, '#3366cc')
     this.scene.add(this.labelGroup)
+
+    // 4 pháp tuyến (buffer 8 đỉnh = 4 đoạn) — cặp solid/dashed; vị trí cập nhật ở setNormals.
+    this.normalsGeo = this._mkLineGeo(8)
+    this.normalsDash = this._mkHiddenLines(this.normalsGeo, 0x55cc77)
+    this._initApex()
+    this._initProjection()
+    this._initExtension()
+  }
+
+  // Geometry rỗng cho LineSegments (vertCount đỉnh) — push vào lineGeos để dispose.
+  private _mkLineGeo(vertCount: number): THREE.BufferGeometry {
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(new Float32Array(vertCount * 3), 3)
+    )
+    this.lineGeos.push(geo)
+    return geo
+  }
+
+  // Cặp đường CHUNG geometry: solid (phần THẤY, depthFunc mặc định) + dashed (phần KHUẤT sau mặt, depthFunc GREATER).
+  // Cả 2 transparent → vẽ ở pass sau mặt (mặt renderOrder 0 ghi depth trước). Trả LineSegments dashed để computeLineDistances.
+  private _mkHiddenLines(geo: THREE.BufferGeometry, color: number): THREE.LineSegments {
+    const solid = new THREE.LineBasicMaterial({ color, transparent: true, depthWrite: false })
+    const dashed = new THREE.LineDashedMaterial({
+      color,
+      dashSize: 0.18,
+      gapSize: 0.12,
+      transparent: true,
+      depthWrite: false,
+    })
+    dashed.depthFunc = THREE.GreaterDepth // chỉ vẽ nơi đường BỊ KHUẤT sau mặt
+    this.lineMats.push(solid, dashed)
+    const ls = new THREE.LineSegments(geo, solid)
+    const ld = new THREE.LineSegments(geo, dashed)
+    ls.renderOrder = 3
+    ld.renderOrder = 3
+    this.scene.add(ls, ld)
+    return ld
+  }
+
+  // KLMN = hình chiếu vuông nóc EFGH xuống đáy: rect KLMN + 4 đường chiếu dọc (cặp solid/dashed, tím) + 4 nhãn.
+  private _initProjection(): void {
+    this.projGeo = this._mkLineGeo(16)
+    this.projDash = this._mkHiddenLines(this.projGeo, 0xc850e0)
+    for (const n of ['K', 'L', 'M', 'N']) {
+      const lbl = this._makeTextSprite(n, '#9b2fb0')
+      lbl.scale.set(0.4, 0.4, 1)
+      this.projLabels.push(lbl)
+      this.scene.add(lbl)
+    }
+  }
+
+  // 8 điểm O–V = cạnh KLMN kéo dài cắt biên đáy ABCD: 8 đoạn (góc KLMN → biên, lục lam) + 8 nhãn.
+  private _initExtension(): void {
+    this.extGeo = this._mkLineGeo(16)
+    this.extDash = this._mkHiddenLines(this.extGeo, 0x1ba39c)
+    for (const n of ['O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V']) {
+      const lbl = this._makeTextSprite(n, '#0f6b65')
+      lbl.scale.set(0.4, 0.4, 1)
+      this.extLabels.push(lbl)
+      this.scene.add(lbl)
+    }
+  }
+
+  // 4 điểm di động A'B'C'D' (sphere cam) trên pháp tuyến + nhãn — vị trí cập nhật ở setApex.
+  private _initApex(): void {
+    this.apexGeo = new THREE.SphereGeometry(0.08, 14, 10)
+    this.apexMat = new THREE.MeshBasicMaterial({ color: 0xff8a3d })
+    const names = ["A'", "B'", "C'", "D'"]
+    for (let i = 0; i < 4; i++) {
+      const m = new THREE.Mesh(this.apexGeo, this.apexMat)
+      this.apexMarkers.push(m)
+      this.scene.add(m)
+      const lbl = this._makeTextSprite(names[i], '#b5541d')
+      lbl.scale.set(0.42, 0.42, 1)
+      this.apexLabels.push(lbl)
+      this.scene.add(lbl)
+    }
   }
 
   // ── Settings preview (gọi từ buildPreviewSettings): độ đậm lưới + độ sáng 2 đèn. ──
@@ -158,6 +260,10 @@ export class RoofPreview {
   }
   setKey(v: number): void {
     if (this.key) this.key.intensity = v
+  }
+  // Độ đục mặt mái (0 = trong suốt hẳn · 1 = đặc). Vẫn ghi depth nên nét khuất vẫn đứt.
+  setOpacity(v: number): void {
+    this.mat.opacity = v
   }
 
   // Tiêm SDF cắt vào shader mái: vWorldPos (vertex) + thư viện iq + bladeSDF(thân hiện tại) + discard ở blade-local.
@@ -301,6 +407,104 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     }
   }
 
+  // Vẽ 4 PHÁP TUYẾN dựng đứng từ 4 đỉnh đáy (A,B,C,D = 4 đỉnh đầu) lên cao NORMAL_LEN — guide cho điểm di động sau.
+  setNormals(base: LabeledPoint[]): void {
+    if (this.isDisposed || !this.normalsGeo) return
+    const attr = this.normalsGeo.getAttribute('position') as THREE.BufferAttribute
+    for (let i = 0; i < 4; i++) {
+      const c = base[i]
+      attr.setXYZ(i * 2, c.x, c.y, c.z)
+      attr.setXYZ(i * 2 + 1, c.x, c.y + NORMAL_LEN, c.z)
+    }
+    attr.needsUpdate = true
+    this.normalsDash?.computeLineDistances() // nét đứt theo vị trí mới
+  }
+
+  // Đặt 4 điểm A'B'C'D' trên pháp tuyến: cao heights[i] dọc +Y từ đỉnh đáy base[i] (i = 0..3 = A,B,C,D).
+  setApex(base: LabeledPoint[], heights: number[]): void {
+    if (this.isDisposed) return
+    for (let i = 0; i < 4; i++) {
+      const c = base[i]
+      const y = c.y + heights[i]
+      this.apexMarkers[i].position.set(c.x, y, c.z)
+      this.apexLabels[i].position.set(c.x, y + 0.25, c.z)
+    }
+  }
+
+  // KLMN = chiếu vuông nóc EFGH (verts[4..7]) xuống đáy y=0: rect KLMN + 4 đường chiếu dọc (E↓K F↓L G↓M H↓N) + nhãn.
+  setProjection(verts: LabeledPoint[]): void {
+    if (this.isDisposed || !this.projGeo || verts.length < 8) return
+    const [E, F, G, H] = [verts[4], verts[5], verts[6], verts[7]]
+    const attr = this.projGeo.getAttribute('position') as THREE.BufferAttribute
+    let i = 0
+    const put = (x: number, y: number, z: number): void => {
+      attr.setXYZ(i++, x, y, z)
+    }
+    // rect KLMN trên đáy: K-L, L-N, N-M, M-K (K↓E L↓F M↓G N↓H)
+    put(E.x, 0, E.z)
+    put(F.x, 0, F.z)
+    put(F.x, 0, F.z)
+    put(H.x, 0, H.z)
+    put(H.x, 0, H.z)
+    put(G.x, 0, G.z)
+    put(G.x, 0, G.z)
+    put(E.x, 0, E.z)
+    // đường chiếu dọc xuống đáy
+    put(E.x, E.y, E.z)
+    put(E.x, 0, E.z)
+    put(F.x, F.y, F.z)
+    put(F.x, 0, F.z)
+    put(G.x, G.y, G.z)
+    put(G.x, 0, G.z)
+    put(H.x, H.y, H.z)
+    put(H.x, 0, H.z)
+    attr.needsUpdate = true
+    this.projDash?.computeLineDistances() // nét đứt theo vị trí mới
+    const top = [E, F, G, H]
+    for (let k = 0; k < 4; k++) this.projLabels[k].position.set(top[k].x, 0.2, top[k].z)
+  }
+
+  // O–V = cạnh KLMN kéo dài cắt biên đáy. Góc KLMN = (E/F/G/H .x,0,.z); biên = A/B/C/D. 8 đoạn nối + 8 nhãn.
+  setExtension(verts: LabeledPoint[]): void {
+    if (this.isDisposed || !this.extGeo || verts.length < 8) return
+    const [A, B, C, D, E, F, G, H] = verts
+    const attr = this.extGeo.getAttribute('position') as THREE.BufferAttribute
+    let i = 0
+    const put = (x: number, z: number): void => {
+      attr.setXYZ(i++, x, 0, z)
+    }
+    put(E.x, E.z) // K→O
+    put(E.x, A.z)
+    put(E.x, E.z) // K→V
+    put(A.x, E.z)
+    put(F.x, F.z) // L→P
+    put(F.x, A.z)
+    put(F.x, F.z) // L→Q
+    put(B.x, F.z)
+    put(G.x, G.z) // M→T
+    put(G.x, D.z)
+    put(G.x, G.z) // M→U
+    put(A.x, G.z)
+    put(H.x, H.z) // N→S
+    put(H.x, C.z)
+    put(H.x, H.z) // N→R
+    put(B.x, H.z)
+    attr.needsUpdate = true
+    this.extDash?.computeLineDistances()
+    // O P Q R S T U V (đi vòng A→B→C→D, mỗi cạnh 2 điểm)
+    const pts: [number, number][] = [
+      [E.x, A.z],
+      [F.x, A.z],
+      [B.x, E.z],
+      [B.x, G.z],
+      [F.x, C.z],
+      [E.x, C.z],
+      [A.x, G.z],
+      [A.x, E.z],
+    ]
+    for (let k = 0; k < 8; k++) this.extLabels[k].position.set(pts[k][0], 0.2, pts[k][1])
+  }
+
   // Khớp buffer render với kích thước HIỂN THỊ canvas (rộng×cao theo CSS) + aspect. Bỏ qua khi ẩn (client = 0).
   private _syncSize(): void {
     const cw = this.canvas.clientWidth
@@ -330,6 +534,16 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     this.scene.add(this.mesh)
   }
 
+  private _disposeApex(): void {
+    for (const sp of this.apexLabels) this._disposeSprite(sp)
+    for (const sp of this.projLabels) this._disposeSprite(sp) // nhãn K L M N
+    for (const sp of this.extLabels) this._disposeSprite(sp) // nhãn O–V
+    this.apexGeo?.dispose() // geo CHUNG 4 điểm A'B'C'D'
+    this.apexMat?.dispose()
+    for (const g of this.lineGeos) g.dispose() // geo pháp tuyến + KLMN (chung solid/dashed)
+    for (const m of this.lineMats) m.dispose()
+  }
+
   dispose(): void {
     if (this.isDisposed) return
     this.isDisposed = true
@@ -352,6 +566,7 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
       this.bladeMesh.geometry.dispose()
       this._disposeMat(this.bladeMesh.material)
     }
+    this._disposeApex()
     if (this.mesh) this.mesh.geometry.dispose()
     this.mat.dispose()
     this.renderer.dispose()
