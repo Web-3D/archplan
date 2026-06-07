@@ -18,6 +18,11 @@
 
 import './archplan-lab.css'
 
+import turfManifest from 'assets/textures/artificial_turf/meta.json'
+import turfAoUrl from 'assets/textures/artificial_turf/production/ao.ktx2?url'
+import turfBaseColorUrl from 'assets/textures/artificial_turf/production/basecolor.ktx2?url'
+import turfNormalUrl from 'assets/textures/artificial_turf/production/normal.ktx2?url'
+import turfRoughnessUrl from 'assets/textures/artificial_turf/production/roughness.ktx2?url'
 import bgravelManifest from 'assets/textures/beach_gravel/meta.json'
 import bgravelAoUrl from 'assets/textures/beach_gravel/production/ao.ktx2?url'
 import bgravelBaseColorUrl from 'assets/textures/beach_gravel/production/basecolor.ktx2?url'
@@ -34,6 +39,11 @@ import cgravelAoUrl from 'assets/textures/construction_grave/production/ao.ktx2?
 import cgravelBaseColorUrl from 'assets/textures/construction_grave/production/basecolor.ktx2?url'
 import cgravelNormalUrl from 'assets/textures/construction_grave/production/normal.ktx2?url'
 import cgravelRoughnessUrl from 'assets/textures/construction_grave/production/roughness.ktx2?url'
+import grassoManifest from 'assets/textures/grass_o/meta.json'
+import grassoAoUrl from 'assets/textures/grass_o/production/ao.ktx2?url'
+import grassoBaseColorUrl from 'assets/textures/grass_o/production/basecolor.ktx2?url'
+import grassoNormalUrl from 'assets/textures/grass_o/production/normal.ktx2?url'
+import grassoRoughnessUrl from 'assets/textures/grass_o/production/roughness.ktx2?url'
 // 🪵 Gỗ KHUNG-DƯỚI stone-pillar (understructMaterial='wood-tex') = Old Plywood — tách hẳn vân deck.
 import oldplyManifest from 'assets/textures/Old-piwood/meta.json'
 import oldplyAoUrl from 'assets/textures/Old-piwood/production/ao.ktx2?url'
@@ -61,6 +71,16 @@ import stoneAoUrl from 'assets/textures/stone-wall/production/ao.ktx2?url'
 import stoneBaseColorUrl from 'assets/textures/stone-wall/production/basecolor.ktx2?url'
 import stoneNormalUrl from 'assets/textures/stone-wall/production/normal.ktx2?url'
 import stoneRoughnessUrl from 'assets/textures/stone-wall/production/roughness.ktx2?url'
+import sand2kManifest from 'assets/textures/thai_beach_sand2k/meta.json'
+import sand2kAoUrl from 'assets/textures/thai_beach_sand2k/production/ao.ktx2?url'
+import sand2kBaseColorUrl from 'assets/textures/thai_beach_sand2k/production/basecolor.ktx2?url'
+import sand2kNormalUrl from 'assets/textures/thai_beach_sand2k/production/normal.ktx2?url'
+import sand2kRoughnessUrl from 'assets/textures/thai_beach_sand2k/production/roughness.ktx2?url'
+import sand4kManifest from 'assets/textures/thai_beach_sand4k/meta.json'
+import sand4kAoUrl from 'assets/textures/thai_beach_sand4k/production/ao.ktx2?url'
+import sand4kBaseColorUrl from 'assets/textures/thai_beach_sand4k/production/basecolor.ktx2?url'
+import sand4kNormalUrl from 'assets/textures/thai_beach_sand4k/production/normal.ktx2?url'
+import sand4kRoughnessUrl from 'assets/textures/thai_beach_sand4k/production/roughness.ktx2?url'
 // 🌳 Vỏ cây KHUNG-DƯỚI stone-pillar (understructMaterial='bark-tex') = Tree Bark — tuỳ chọn thứ 2.
 import barkManifest from 'assets/textures/tree_bark/meta.json'
 import barkAoUrl from 'assets/textures/tree_bark/production/ao.ktx2?url'
@@ -128,6 +148,7 @@ import {
   coverageStats,
   defaultSiteState,
   type FenceConfig,
+  GROUND_PRESETS,
   type GroundMaterialKey,
   isGroundTexKey,
   renderPuddles,
@@ -278,6 +299,42 @@ const GROUND_TEX_SPEC: Partial<
       normal: { url: romanNormalUrl, colorSpace: 'linear' },
       roughness: { url: romanRoughnessUrl, colorSpace: 'linear' },
       ao: { url: romanAoUrl, colorSpace: 'linear' },
+    },
+  },
+  'artificial-turf': {
+    tile: turfManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: turfBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: turfNormalUrl, colorSpace: 'linear' },
+      roughness: { url: turfRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: turfAoUrl, colorSpace: 'linear' },
+    },
+  },
+  'grass-o': {
+    tile: grassoManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: grassoBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: grassoNormalUrl, colorSpace: 'linear' },
+      roughness: { url: grassoRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: grassoAoUrl, colorSpace: 'linear' },
+    },
+  },
+  'thai-beach-sand-2k': {
+    tile: sand2kManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: sand2kBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: sand2kNormalUrl, colorSpace: 'linear' },
+      roughness: { url: sand2kRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: sand2kAoUrl, colorSpace: 'linear' },
+    },
+  },
+  'thai-beach-sand-4k': {
+    tile: sand4kManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: sand4kBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: sand4kNormalUrl, colorSpace: 'linear' },
+      roughness: { url: sand4kRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: sand4kAoUrl, colorSpace: 'linear' },
     },
   },
 }
@@ -1270,9 +1327,25 @@ export class ArchPlanLab extends BaseWorld {
       return { mat: a.getMaterial(), shader: a, bounce: 0x2a2a2e } // nhựa hấp thụ sáng → bounce yếu tối
     }
     if (t === 'sand') return this._sandGroundMaterial() // 🏖️ rippled_sand photo (PhotoGround async + fallback)
+    if (t in GROUND_TEX_SPEC) return this._photoEditorGround(t as GroundMaterialKey) // 🌱🏖️ grass-o/thai sand…
     // mặc định 'stone' (đá lát hoa cương — slab grid). Đất/cỏ tự nhiên sẽ từ Megascans/Gaea sau.
     const e = makeSurfaceMaterial('concrete', 0x9a9890, 1.0)
     return { mat: e.mat, shader: e.shader, bounce: 0x8a8880 }
+  }
+
+  // 🌱🏖️ Material nền-editor texture (grass-o/thai sand…): TÁI DÙNG PhotoGround cache site-ground (_groundMatFor,
+  // world-XZ UV → share được). shader:null → _setGroundType KHÔNG dispose vật liệu chia sẻ. Chưa load → màu fallback
+  // preset, tự re-apply khi _ensureGroundTex xong (groundType khớp key). bounce = màu preset.
+  private _photoEditorGround(key: GroundMaterialKey): {
+    mat: THREE.Material
+    shader: { dispose(): void } | null
+    bounce: number
+  } {
+    const preset = GROUND_PRESETS[key]
+    const photo = this._groundMatFor(key) // cached PhotoGround hoặc null (kick async load)
+    if (photo) return { mat: photo.getMaterial(), shader: null, bounce: preset.color }
+    const f = makeSurfaceMaterial('concrete', preset.color, preset.roughness) // tạm chờ load
+    return { mat: f.mat, shader: f.shader, bounce: preset.color }
   }
 
   // 🏖️ Material nền-editor cát: PhotoGround rippled_sand nếu đã load (Lab-owned → shader null, KHÔNG để
@@ -2278,6 +2351,12 @@ export class ArchPlanLab extends BaseWorld {
     for (const l of this.site.groundLayers ?? []) {
       if (isGroundTexKey(l.material)) keys.add(l.material)
     }
+    // 💧 Texture đáy/tường hồ (floor/wall = GroundMaterialKey) → load để inject groundMatByKey vào basinMaterial.
+    for (const w of renderWaters(this.site)) {
+      for (const m of [w.floorMaterial, w.wallMaterial]) {
+        if (m !== 'none' && m !== 'tile' && isGroundTexKey(m)) keys.add(m)
+      }
+    }
     return [...keys]
   }
 
@@ -2285,6 +2364,7 @@ export class ArchPlanLab extends BaseWorld {
   // user mousedown dropdown Surface → bấm key nào cũng đã sẵn (hoặc đang tải → badge hiện). Bounded: chỉ ground set.
   private _prefetchGroundTextures(): void {
     for (const key of Object.keys(GROUND_TEX_SPEC) as GroundMaterialKey[]) {
+      if (key === 'thai-beach-sand-4k') continue // 4K ~27MB → KHÔNG prefetch (chỉ tải khi CHỌN); né kéo nặng lúc mở dropdown
       this._ensureGroundTex(key)
     }
   }
@@ -2303,6 +2383,7 @@ export class ArchPlanLab extends BaseWorld {
         this._groundTexLoading[key] = false
         this._siteSig = '' // ép _rebuildSite chạy lại với texture đã có
         this._renderSite()
+        if (this.groundType === key) this._setGroundType(this.groundType) // 🌱 nền-editor đang dùng key này → re-apply texture
       })
       .catch((e: unknown) => {
         this._groundTexLoading[key] = false

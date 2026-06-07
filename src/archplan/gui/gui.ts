@@ -110,7 +110,16 @@ export function setupToolsPanel(ctx: APGuiCtx, container: Element | null): HTMLE
 function mkSurfaceRow(ctx: APGuiCtx): HTMLElement {
   const row = document.createElement('div')
   row.style.display = 'none' // bộ nền không hiển thị — chỉ phím tắt
-  const opts: GroundType[] = ['none', 'stone', 'asphalt', 'sand'] // ← thứ tự = phím 1..N (push cuối khi thêm)
+  // ← thứ tự = phím 1..N. 5=grass-o 6=thai-sand-2k 7=thai-sand-4k (texture PhotoGround nền-editor)
+  const opts: GroundType[] = [
+    'none',
+    'stone',
+    'asphalt',
+    'sand',
+    'grass-o',
+    'thai-beach-sand-2k',
+    'thai-beach-sand-4k',
+  ]
   const onKey = (e: KeyboardEvent): void => {
     if (!document.contains(row)) return void window.removeEventListener('keydown', onKey) // panel rời DOM → tự gỡ
     if (e.ctrlKey || e.metaKey || e.altKey) return

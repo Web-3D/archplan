@@ -27,10 +27,13 @@ import {
 } from 'threejs-modules/site/state'
 import { type TabItem, Tabs } from 'threejs-modules/ui/Tabs'
 
-// Chất liệu mặt hồ (floor/wall): None (màu phẳng) | Caro (tile — checker + grout hồ bơi). Thêm stone/concrete… sau.
+// Chất liệu mặt hồ (floor/wall): None (màu phẳng) | Caro (tile) | texture đáy (cát/cỏ — PhotoGround world-XZ).
 const MATERIAL_OPTS: [string, WaterMaterialKey][] = [
   ['None', 'none'],
   ['Caro (tile)', 'tile'],
+  ['Thai beach sand 2K', 'thai-beach-sand-2k'],
+  ['Thai beach sand 4K', 'thai-beach-sand-4k'],
+  ['Uncut grass (O)', 'grass-o'],
 ]
 // Coping/edge chưa lát caro → chỉ 'None' (tách opts để dropdown Edge không hiện lựa chọn no-op).
 const EDGE_MAT_OPTS: [string, WaterMaterialKey][] = [['None', 'none']]
@@ -47,6 +50,10 @@ const GROUND_OPTS: [string, GroundMaterialKey][] = [
   ['Rough asphalt', 'rough-asphalt'],
   ['Worn pavement', 'worn-pavement'],
   ['Roman stone floor', 'roman-stone-floor'],
+  ['Artificial turf', 'artificial-turf'],
+  ['Uncut grass (O)', 'grass-o'],
+  ['Thai beach sand 2K', 'thai-beach-sand-2k'],
+  ['Thai beach sand 4K', 'thai-beach-sand-4k'],
 ]
 
 import type { APGuiCtx } from './ctx'

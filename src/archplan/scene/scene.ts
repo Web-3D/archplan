@@ -32,7 +32,17 @@ export type SunOpts = {
 
 // Loại nền môi trường: 'none' = ground tối + lưới tọa độ (như cũ); còn lại = vật liệu tự nhiên
 // (cung cấp màu bounce qua HemisphereLight.groundColor). sand/dirt-rock thêm sau.
-export type GroundType = 'none' | 'grass' | 'stone' | 'asphalt' | 'sand' | 'dirt-rock'
+// 3 giá trị cuối = texture PhotoGround (TRÙNG tên GroundMaterialKey site → share material world-XZ qua _photoEditorGround).
+export type GroundType =
+  | 'none'
+  | 'grass'
+  | 'stone'
+  | 'asphalt'
+  | 'sand'
+  | 'dirt-rock'
+  | 'grass-o'
+  | 'thai-beach-sand-2k'
+  | 'thai-beach-sand-4k'
 
 const MEASURE_COLOR = 0x00a8ff // cyan — lưới đo kích thước
 const COORD_COLOR = 0xffb454 // hổ phách — lưới tọa độ (phân biệt với measure cyan trong 3D)
