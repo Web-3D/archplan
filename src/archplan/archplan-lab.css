@@ -1649,6 +1649,34 @@
   font-style: italic;
   color: #7d877f; /* gợi ý tạm — thay bằng nội dung thật sau */
 }
+/* ── Khung GẬP ĐƯỢC (lưỡi dao): header = nút toggle (caret ▸/▾), mặc định gập → khung trên full ── */
+.ap-lab-float .ap-lab-frame-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+.ap-lab-float .ap-lab-frame-toggle::before {
+  content: '▾'; /* đang MỞ */
+  font-size: 8px;
+  line-height: 1;
+}
+.ap-lab-float .ap-lab-frame-toggle:hover {
+  background: rgba(255, 255, 255, 0.7);
+}
+.ap-lab-float .ap-lab-frame-collapsed {
+  flex: 0 0 auto; /* gập → chỉ còn thanh header (override flex:1) */
+}
+.ap-lab-float .ap-lab-frame-collapsed .ap-lab-frame-body {
+  display: none; /* ẩn nội dung khi gập */
+}
+.ap-lab-float .ap-lab-frame-collapsed .ap-lab-frame-head {
+  border-bottom: none;
+}
+.ap-lab-float .ap-lab-frame-collapsed .ap-lab-frame-toggle::before {
+  content: '▸'; /* đang GẬP */
+}
 /* 📐 Bảng tọa độ góc mái — mỗi đỉnh: tên + 3 ô số x/y/z (sửa được). */
 .ap-lab-float .ap-roof-coord {
   display: flex;
@@ -1728,6 +1756,61 @@
   background: rgba(255, 255, 255, 0.6);
   color: #2a322c;
   font-size: 10px;
+}
+/* Khung tên + nút 💾 lưu GỘP thành 1 cụm (input liền nút). */
+.ap-lab-float .ap-roof-saverow {
+  display: flex;
+  flex: 1;
+  min-width: 120px;
+}
+.ap-lab-float .ap-roof-saverow .ap-roof-presetname {
+  flex: 1;
+  min-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+.ap-lab-float .ap-roof-saverow .ap-roof-savebtn {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+/* Popup confirm (xóa blueprint) — fixed, treo dưới nút 🗑. */
+.ap-roof-confirm {
+  position: fixed;
+  z-index: 30;
+  min-width: 150px;
+  padding: 8px 9px;
+  background: rgba(245, 247, 245, 0.99);
+  border: 1px solid #c7cdc9;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+  font-size: 11px;
+  color: #2a322c;
+}
+.ap-roof-confirm-msg {
+  margin-bottom: 7px;
+}
+.ap-roof-confirm-row {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.ap-roof-confirm-yes,
+.ap-roof-confirm-no {
+  padding: 3px 10px;
+  border: 1px solid #c7cdc9;
+  border-radius: 5px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.ap-roof-confirm-yes {
+  background: #c0392b;
+  border-color: #c0392b;
+  color: #fff;
+}
+.ap-roof-confirm-no {
+  background: rgba(255, 255, 255, 0.7);
+  color: #2a322c;
 }
 /* 🎛️ Thông số chia DỌC 2 cột: 🔪 lưỡi dao (trái) | 🏠 mái (phải), có vạch ngăn dọc. */
 .ap-lab-float .ap-roof-cols {
@@ -1858,11 +1941,11 @@
   line-height: 1.4;
   color: #6a766c;
 }
-/* 🔀 Switcher thí nghiệm (Mái | Particles) — persistent, trên 2 khung */
+/* 🔀 Switcher thí nghiệm (Mái | Particles) — NẰM CÙNG HÀNG với nút ⚙ (ăn hết chỗ còn lại). */
 .ap-lab-float .ap-lab-exp {
   display: flex;
+  flex: 1;
   gap: 5px;
-  margin-bottom: 6px;
 }
 .ap-lab-float .ap-lab-exp-chip {
   flex: 1;

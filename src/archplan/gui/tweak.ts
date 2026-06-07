@@ -323,29 +323,42 @@ export function buildGrassTweak(ctx: APGuiCtx, host: HTMLElement): Tabs[] {
 }
 
 // 1 khung Lab = header (nhãn) + body (chỗ gắn nội dung). 2 khung flex:1 → CAO BẰNG NHAU. Tách module-level
-// để setupLabBench gọn (room cho header). Trả { frame, body }.
+// để setupLabBench gọn (room cho header). collapsible=true → header thành nút gập (caret CSS), MẶC ĐỊNH gập
+// (body ẩn → khung kia full); click header để mở ra ½. Trả { frame, body }.
 function mkLabFrame(
   cls: string,
   label: string,
-  hint: string
+  hint: string,
+  collapsible = false,
+  headless = false
 ): { frame: HTMLElement; body: HTMLElement } {
   const frame = document.createElement('div')
   frame.className = `ap-lab-frame ${cls}`
-  const head = document.createElement('div')
-  head.className = 'ap-lab-frame-head'
-  head.textContent = label
   const body = document.createElement('div')
   body.className = 'ap-lab-frame-body'
   const ph = document.createElement('div')
   ph.className = 'ap-lab-placeholder' // gợi ý tạm — thay bằng nội dung thật ở bước sau
   ph.textContent = hint
   body.appendChild(ph)
+  if (headless) {
+    frame.appendChild(body) // không có thanh header (vd khung TRÊN — đã có chip Mái/Particles)
+    return { frame, body }
+  }
+  const head = document.createElement('div')
+  head.className = 'ap-lab-frame-head'
+  head.textContent = label
+  if (collapsible) {
+    head.classList.add('ap-lab-frame-toggle') // cursor + caret ▸/▾ (CSS)
+    head.title = 'Bật/ẩn khung'
+    frame.classList.add('ap-lab-frame-collapsed') // mặc định gập → khung trên full từ trên xuống
+    head.addEventListener('click', () => frame.classList.toggle('ap-lab-frame-collapsed'))
+  }
   frame.append(head, body)
   return { frame, body }
 }
 
-// Panel Lab — BÀN THÍ NGHIỆM. Cột TRÁI: header (tiêu đề "Lab" kéo-được + nút ⚙ settings) · note · 2 khung BẰNG
-// NHAU (`paramHost`: slider · `docHost`: tọa độ/tài liệu) · `settingsHost` (popover ⚙, ẩn). Cột PHẢI: 🔎 preview.
+// Panel Lab — BÀN THÍ NGHIỆM. Cột TRÁI: header (nút ⚙ settings) · khung TRÊN `paramHost` (slider, mặc định FULL) ·
+// khung DƯỚI `docHost` (lưỡi dao/tài liệu — GẬP ĐƯỢC, mặc định ẩn; click header mở ½) · `settingsHost` (popover ⚙).
 // Trả handle 2 khung + settings + previewHost cho ArchPlanLab/setupRoofLab gắn nội dung.
 // Header Lab: CHỈ nút ⚙ → toggle settings popover. (Bỏ tiêu đề "Lab" + kéo panel — full màn nên vô nghĩa.)
 function buildLabHead(): { head: HTMLElement; settings: HTMLElement } {
@@ -378,17 +391,26 @@ export function setupLabBench(container: Element | null): {
 
   const { head, settings } = buildLabHead() // ⚙ settings popover
 
-  // 🔀 Selector thí nghiệm (Mái | Particles…) — sống NGOÀI 2 khung → KHÔNG bị xóa khi đổi experiment.
+  // 🔀 Selector thí nghiệm (Mái | Particles…) — NẰM CÙNG HÀNG với nút ⚙ (trong head). Sống NGOÀI 2 khung.
   const exp = document.createElement('div')
   exp.className = 'ap-lab-exp'
+  head.append(exp) // chip Mái/Particles ngang nút ⚙ settings
 
-  const params = mkLabFrame('ap-lab-frame-params', '🎛️ Thông số', 'Slider thông số sẽ thêm ở đây.')
+  // khung TRÊN headless (chip đã thay nhãn) · khung DƯỚI gập được (mặc định ẩn → khung trên full)
+  const params = mkLabFrame(
+    'ap-lab-frame-params',
+    '',
+    'Slider thông số sẽ thêm ở đây.',
+    false,
+    true
+  )
   const docs = mkLabFrame(
     'ap-lab-frame-docs',
     '📁 Thư mục · tài liệu',
-    'Danh sách thư mục / tài liệu để chọn.'
+    'Danh sách thư mục / tài liệu để chọn.',
+    true // khung DƯỚI gập được — mặc định ẩn, click header để mở ½
   )
-  left.append(head, exp, params.frame, docs.frame, settings)
+  left.append(head, params.frame, docs.frame, settings)
 
   const previewHost = document.createElement('div')
   previewHost.className = 'ap-preview-host' // 🔎 preview — luôn hiện trong Lab
