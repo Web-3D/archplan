@@ -2416,6 +2416,7 @@ export class ArchPlanLab extends BaseWorld {
   // rơi màu phẳng (load xong tự re-render). Tách khỏi _rebuildSite cho gọn (complexity).
   private _siteTexOpts(): SiteRenderOpts {
     const opts: SiteRenderOpts = { skipGrass: true, skipFence: true } // cỏ + rào do _syncGrass/_syncFence quản riêng
+    opts.buildingFootprint = this._foundationRects() // 🏔️ terrain giữ PHẲNG pad dưới nhà (= rect cỏ-né, đã +overhang)
     const byKey: NonNullable<SiteRenderOpts['groundMatByKey']> = {}
     for (const key of this._usedGroundTexKeys()) {
       const photo = this._groundMatFor(key) // material cache (build từ maps đã load) hoặc null (đang load)

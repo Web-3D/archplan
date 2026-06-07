@@ -15,12 +15,14 @@ import type {
   FenceConfig,
   GroundLayer,
   GroundMaterialKey,
+  TerrainConfig,
   WaterConfig,
   WaterKind,
   WaterMaterialKey,
   WaterPoint,
 } from 'threejs-modules/site/state'
 import {
+  defaultTerrain,
   GROUND_THICK_MAX,
   GROUND_THICK_MIN,
   makeFence,
@@ -249,6 +251,68 @@ function buildGroundControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => vo
     )
   )
   buildLotSliders(body, ctx, refresh)
+  buildTerrainControls(body, ctx)
+}
+
+// 🏔️ Section Terrain (nền gò sân vườn) trong tab Ground — bộ thông số noise ĐẦY ĐỦ. Mọi param STRUCTURAL →
+// ctx.applySite(c) (kéo = live-rebuild, buông = commit) như slider Thickness. Data-driven 10 slider (rule-50).
+function buildTerrainControls(body: HTMLElement, ctx: APGuiCtx): void {
+  const site = ctx.site
+  const t = site.terrain ?? defaultTerrain()
+  site.terrain = t // đảm bảo state cũ (thiếu terrain) có field
+  const hdr = document.createElement('div')
+  hdr.textContent = '🏔️ Terrain (gò sân vườn)'
+  hdr.style.cssText = 'margin:7px 0 3px;font-weight:600;opacity:.85'
+  body.append(
+    hdr,
+    toggleRow('Enable terrain', t.enabled, (on) => ((t.enabled = on), ctx.applySite(true)))
+  )
+  for (const [label, min, max, step, mf, get, set] of terrainSliderSpecs(t))
+    body.appendChild(
+      sliderRow(label, min, max, step, get(), (v, c) => (set(v), ctx.applySite(c)), mf)
+    )
+}
+
+// Spec 10 slider noise [label, min, max, step, mmFactor, get, set] — tách khỏi buildTerrainControls (rule-50).
+// mmFactor 1000 = ô số hiện mm (amplitude/pad/edge); 1 = giá trị thô unitless (freq/octaves/gain…).
+type TerrainSlider = [string, number, number, number, number, () => number, (v: number) => void]
+function terrainSliderSpecs(t: TerrainConfig): TerrainSlider[] {
+  return [
+    [
+      'Amplitude m',
+      0,
+      2,
+      0.05,
+      1000,
+      () => t.amplitude / 1000,
+      (v) => (t.amplitude = Math.round(v * 1000)),
+    ],
+    ['Frequency', 0.02, 1, 0.02, 1, () => t.frequency, (v) => (t.frequency = v)],
+    ['Octaves', 1, 8, 1, 1, () => t.octaves, (v) => (t.octaves = Math.round(v))],
+    ['Lacunarity', 1.5, 3, 0.1, 1, () => t.lacunarity, (v) => (t.lacunarity = v)],
+    ['Gain', 0.2, 0.8, 0.05, 1, () => t.gain, (v) => (t.gain = v)],
+    ['Warp', 0, 1, 0.05, 1, () => t.warp, (v) => (t.warp = v)],
+    ['Seed', 0, 9999, 1, 1, () => t.seed, (v) => (t.seed = Math.round(v))],
+    ['Resolution', 32, 128, 8, 1, () => t.resolution, (v) => (t.resolution = Math.round(v))],
+    [
+      'Pad margin m',
+      0,
+      3,
+      0.1,
+      1000,
+      () => t.padMargin / 1000,
+      (v) => (t.padMargin = Math.round(v * 1000)),
+    ],
+    [
+      'Edge flat m',
+      0,
+      3,
+      0.1,
+      1000,
+      () => t.edgeFlat / 1000,
+      (v) => (t.edgeFlat = Math.round(v * 1000)),
+    ],
+  ]
 }
 
 // 2 slider kích thước lô (ngang/sâu) + ô mm — tách riêng cho buildGroundControls gọn (rule-50).
