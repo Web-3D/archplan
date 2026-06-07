@@ -100,6 +100,18 @@ Tầng layer (`groundLayers[]`, mesh `userData.groundLayerIdx` trong `siteGroup`
 
 > Lỗ né nước (pool/pond/puddle + dải edge) carve ở **lõi** `site/render/fromState.ts` (`buildGroundLayers`→`layerGeometry` clip Sutherland-Hodgman). Kéo live: lỗ đi theo tạm, re-carve khi thả.
 
+### 5c. SITE element — GÒ terrain (mound) ⛰️
+
+Gò nặn-tay (`terrain.mounds[]`, cộng vào `heightAt` Σ-gò) = site element rời, handle 3D như đỉnh hồ. Chỉ hiện khi **terrain.enabled + moveMode**. Tool: `interaction/moundDrag.ts` **MoundTool** (mirror GroundTool).
+
+| Tương tác | Gò terrain làm sao |
+|---|---|
+| **🤚 Move** | MỖI gò 2 handle (sphere `depthTest:false` → luôn grab): **TÂM** (vàng, `role:center`) kéo XZ-plane → `mound.x/z`; **BÁN KÍNH** (cyan mép +X, `role:radius`) kéo → `radius` = dist-ngang tâm→con-trỏ (clamp 0.3–20m). Kéo = `applyTerrainLive` (swap geo nền base, rẻ) + đĩa footprint mờ; thả = `_applySite(true)` (cỏ né lại + autosave). Anchor: `tryStartHandle`/`dragMove`/`endDrag` (MoundTool) ⇆ lab `_tryStartSiteTool`/`_dragSiteTool`/`_endSiteDrag` (loop `_siteDragTools`); rebuild `_rebuildSite`+`_setMoveMode`. |
+| **➕ Tạo / Height / Falloff** | GUI Ground ▸ ⛰️ Gò nặn tay — `＋Thêm gò` (tạo, tự bật terrain) / slider Pos·Radius·**Height·Falloff** / `✕`. Height giữ slider (vertical-drag nhiễu góc-cam). |
+| **👆 Focus / 🎨 Paint / P Pick** | KHÔNG — list gò ở GUI (mỗi gò = row slider). |
+
+> 3 tool SITE (💧 water / 🟫 ground-free / ⛰️ mound) chia sẻ **`SiteDragTool` interface** (isDragging/dragMove/endDrag/cancelDrag/rebuildHandles/dispose) → lab dispatch qua LOOP `_siteDragTools()` (né complexity>10). tryStart riêng tên (tryStartDrag/Vertex/Handle) → helper `_tryStartSiteTool`.
+
 ---
 
 ## Phím tắt

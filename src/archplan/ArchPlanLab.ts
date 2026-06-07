@@ -187,6 +187,7 @@ import { setupLabBench } from './gui/tweak' // 🎛️ Lab = bàn thí nghiệm:
 import { GroundTool, type GroundToolHost } from './interaction/groundDrag' // 🟫 nắn đỉnh/tay-cầm ground free
 import { type HighlightHost, HighlightOverlay } from './interaction/highlight' // flash viền phần đang chỉnh — tách monolith
 import { type ManipulateHost, ManipulateTool } from './interaction/manipulate' // 🤚 Move + 🎯 Focus — tách monolith
+import { MoundTool, type MoundToolHost } from './interaction/moundDrag' // ⛰️ nặn gò terrain 3D (tâm + bán kính)
 import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 khay swatch atelier — tách monolith
 import { SunGizmo, type SunGizmoHost } from './interaction/sunGizmo' // ☀ sun = vật thể kéo trong scene
 import { WaterTool, type WaterToolHost } from './interaction/waterDrag' // 💧 kéo hồ/đỉnh/viền 3D — tách monolith
@@ -399,6 +400,18 @@ const BORDER_TEX_SPEC: Record<BorderTexKey, SurfaceTextureSpec> = {
 // Camera chính + raycaster pick/drag BẬT thêm layer này (cộng dồn, vẫn hit layer 0) để vẫn thấy + click/kéo hồ.
 const WATER_REFLECT_LAYER = 1
 
+// 3 tool nặn/kéo SITE (💧 water / 🟫 ground-free / ⛰️ mound) chia sẻ tập thao tác đồng nhất (trừ tryStart riêng
+// tên: tryStartDrag/tryStartVertex/tryStartHandle). Gom 1 interface để dispatch chung qua loop (dragMove/endDrag/
+// cancelDrag/rebuildHandles/dispose ở 1 chỗ) → né lặp + giữ complexity ≤10 khi đã có ≥3 tool (Rule-of-3).
+interface SiteDragTool {
+  isDragging(): boolean
+  dragMove(e: PointerEvent): void
+  endDrag(): void
+  cancelDrag(): void
+  rebuildHandles(): void
+  dispose(): void
+}
+
 export class ArchPlanLab extends BaseWorld {
   private state: BuildingState = defaultBuildingState()
   private gui: GUI | null = null
@@ -467,6 +480,7 @@ export class ArchPlanLab extends BaseWorld {
   private manipulate: ManipulateTool | null = null
   private waterTool: WaterTool | null = null // 💧 kéo hồ/đỉnh/viền 3D (interaction/waterDrag.ts); lab giữ _siteWaters/_activeWater
   private groundTool: GroundTool | null = null // 🟫 nắn đỉnh/tay-cầm ground free (interaction/groundDrag.ts); lab giữ _activeLayerIdx
+  private moundTool: MoundTool | null = null // ⛰️ nặn gò terrain 3D (interaction/moundDrag.ts); state = site.terrain.mounds[]
   private moveMode = false
   private _hiddenFloors = new Set<string>() // 🙈 floor.id ẩn (xây tầng dưới khỏi bị che) — transient, không persist
   private _syncMoveToggle: ((on: boolean) => void) | null = null // sync nút 🤚 trong gui Tools
@@ -696,10 +710,39 @@ export class ArchPlanLab extends BaseWorld {
     this._pickAt(e)
   }
 
-  // Move mode nhấn xuống: ưu tiên hồ → cổng → element building. Tách khỏi _onPointerDown (giữ complexity ≤10).
+  // 3 tool site đang sống (bỏ null trước onInit / sau dispose). Derived → luôn khớp field hiện tại; thứ tự =
+  // ưu tiên dispatch (💧 hồ → 🟫 ground-free → ⛰️ gò).
+  private _siteDragTools(): SiteDragTool[] {
+    // Narrow về union CLASS (không phải SiteDragTool): class có private field → predicate `t is SiteDragTool`
+    // sai chiều (interface không gán ngược được). Mỗi class vẫn gán-được vào SiteDragTool (khớp public method).
+    return [this.waterTool, this.groundTool, this.moundTool].filter(
+      (t): t is WaterTool | GroundTool | MoundTool => t !== null
+    )
+  }
+
+  // Nhấn Move thử bắt drag 3 tool site theo thứ tự ưu tiên (tryStart tên riêng nên không loop được) → true nếu
+  // tool nào bắt (dừng chuỗi, nhường nó). Ưu tiên TRƯỚC cổng/building (handle nhỏ, dễ trượt).
+  private _tryStartSiteTool(e: PointerEvent): boolean {
+    return (
+      !!this.waterTool?.tryStartDrag(e) ||
+      !!this.groundTool?.tryStartVertex(e) ||
+      !!this.moundTool?.tryStartHandle(e)
+    )
+  }
+
+  // Tool site nào đang kéo/nặn → dispatch dragMove; true nếu có (dừng chuỗi). Thứ tự = _siteDragTools.
+  private _dragSiteTool(e: PointerEvent): boolean {
+    for (const t of this._siteDragTools())
+      if (t.isDragging()) {
+        t.dragMove(e)
+        return true
+      }
+    return false
+  }
+
+  // Move mode nhấn xuống: ưu tiên tool site (hồ/ground-free/gò) → cổng → element building. Giữ complexity ≤10.
   private _pointerDownMove(e: PointerEvent): void {
-    if (this.waterTool?.tryStartDrag(e)) return // 💧 trúng mặt hồ (gần hơn pick-box) → kéo hồ
-    if (this.groundTool?.tryStartVertex(e)) return // 🟫 trúng tay-cầm layer free (nhỏ, ưu tiên) → nắn đỉnh/handle
+    if (this._tryStartSiteTool(e)) return // 💧🟫⛰️ trúng tool site → tool lo
     if (this._tryStartGateDrag(e)) return // 🚪 trúng cổng → trượt dọc cạnh rào
     this.manipulate?.dragStart(e) // Move tool: nhấn-giữ element building → kéo (focus GUI ngay khi nhấn)
     if (this.manipulate?.isDragging()) return // trúng building → manipulate lo
@@ -719,10 +762,8 @@ export class ArchPlanLab extends BaseWorld {
 
   // Move mode đang kéo: ưu tiên hồ (waterTool) → cổng (_gateDrag) → element building (manipulate).
   private _moveModeMove(e: PointerEvent): void {
-    if (this.waterTool?.isDragging()) this.waterTool.dragMove(e)
-    else if (this.groundTool?.isDragging())
-      this.groundTool.dragMove(e) // 🟫 nắn đỉnh/tay-cầm layer free
-    else if (this._gateDrag) this._gateDragMove(e)
+    if (this._dragSiteTool(e)) return // 💧🟫⛰️ tool site (hồ/ground-free/gò) đang kéo/nặn → dispatch
+    if (this._gateDrag) this._gateDragMove(e)
     else if (this.manipulate?.isDragging()) this.manipulate.dragMove(e)
     else if (this._layerDrag) this._layerDragMove(e) // 🟫 kéo tầng ground
   }
@@ -806,14 +847,11 @@ export class ArchPlanLab extends BaseWorld {
   // Buông chuột: nếu đang kéo hồ / nắn-ground / cổng / building / tầng-ground → commit cái đó + true. Tách khỏi
   // _onPointerUp (giữ complexity ≤10). Mỗi nhánh return sớm; KHÔNG bao gồm sun (orbit re-enable riêng).
   private _endSiteDrag(): boolean {
-    if (this.waterTool?.isDragging()) {
-      this.waterTool.endDrag() // ẩn viền + commit (cỏ né lại dưới hồ vị trí mới + autosave)
-      return true
-    }
-    if (this.groundTool?.isDragging()) {
-      this.groundTool.endDrag() // 🟫 ẩn viền + commit (rebuild đặt shape mới + lỗ-cut + autosave)
-      return true
-    }
+    for (const t of this._siteDragTools())
+      if (t.isDragging()) {
+        t.endDrag() // 💧🟫⛰️ ẩn viền/đĩa + commit (rebuild đặt shape/gò mới + cỏ né lại + autosave)
+        return true
+      }
     if (this._gateDrag) {
       this._commitGateDrag()
       return true
@@ -890,8 +928,7 @@ export class ArchPlanLab extends BaseWorld {
   private _setMoveMode(on: boolean): void {
     this.moveMode = on
     this.manipulate?.cancelDrag()
-    this.waterTool?.cancelDrag() // huỷ kéo hồ đang dở + ẩn viền (đổi mode / thoát chuột phải)
-    this.groundTool?.cancelDrag() // 🟫 huỷ nắn đỉnh ground đang dở + ẩn viền
+    for (const t of this._siteDragTools()) t.cancelDrag() // 💧🟫⛰️ huỷ kéo/nặn tool site đang dở + ẩn viền/đĩa
     this._gateDrag = null // huỷ kéo cổng đang dở
     this._layerDrag = null // 🟫 huỷ kéo tầng ground đang dở
     if (on) {
@@ -901,8 +938,7 @@ export class ArchPlanLab extends BaseWorld {
     }
     if (this.controls) this.controls.enabled = !on
     this._syncMoveToggle?.(on) // đổi class nút 🤚 (ap-move-on) — text bỏ, chỉ symbol
-    this.waterTool?.rebuildHandles() // 💧 hiện/ẩn handle đỉnh hồ theo moveMode
-    this.groundTool?.rebuildHandles() // 🟫 hiện/ẩn tay-cầm ground free theo moveMode
+    for (const t of this._siteDragTools()) t.rebuildHandles() // 💧🟫⛰️ hiện/ẩn handle tool site theo moveMode
     this._renderScene() // bật/tắt Move → dựng lại building để áp/bỏ tường-phẳng + nhuốm xanh "nghệ" ngay
   }
 
@@ -1115,6 +1151,7 @@ export class ArchPlanLab extends BaseWorld {
     this.scene.add(this.pickGroup) // SPIKE: lớp pick vô hình cho brush paint
     this.waterTool = new WaterTool(this._waterHost()) // 💧 kéo hồ/đỉnh/viền (tự add handle group vào scene)
     this.groundTool = new GroundTool(this._groundHost()) // 🟫 nắn đỉnh/tay-cầm ground free (tự add handle group)
+    this.moundTool = new MoundTool(this._moundHost()) // ⛰️ nặn gò terrain 3D (tự add handle group vào scene)
     this.manipulate = new ManipulateTool(this._manipulateHost()) // trước _setupGUI: nhận registerFocus
     this.highlight = new HighlightOverlay(this._highlightHost())
     // 💧 Mặt nước ở WATER_REFLECT_LAYER (set per-rebuild) → camera chính + raycaster phải BẬT layer này (cộng
@@ -1307,10 +1344,10 @@ export class ArchPlanLab extends BaseWorld {
     this.guard = null
     this.devHud?.dispose()
     this.devHud = null
-    this.waterTool?.dispose() // 💧 handle geo/mat + outline + gỡ handle group khỏi scene
+    for (const t of this._siteDragTools()) t.dispose() // 💧🟫⛰️ handle geo/mat + outline/đĩa + gỡ group khỏi scene
     this.waterTool = null
-    this.groundTool?.dispose() // 🟫 handle geo/mat + line + outline + gỡ handle group khỏi scene
     this.groundTool = null
+    this.moundTool = null
   }
 
   // ── Scene setup ────────────────────────────────────────────────────────────
@@ -1947,6 +1984,21 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
+  // Host cho MoundTool: scene refs + state + moveMode + 2 đường commit. Kéo handle gò → applyTerrainLive (swap geo
+  // nền base, rẻ — như slider terrain); buông → _applySite(true) full rebuild + autosave (cỏ né lại gò mới).
+  private _moundHost(): MoundToolHost {
+    return {
+      canvas: this.canvas,
+      camera: this.camera,
+      raycaster: this._ray,
+      scene: this.scene,
+      site: () => this.site,
+      moveMode: () => this.moveMode,
+      applyTerrainLive: () => this._applyTerrainLive(),
+      commitSite: () => this._applySite(true),
+    }
+  }
+
   // 🚀 SPLIT-DRAG (kéo 1 shape khi có NHIỀU shape): dựng 1 lần — shape khác (static) vào buildingGroup +
   // pick; shape ĐANG KÉO vào _dragGroup riêng (visual, KHÔNG pick — không cần raycast giữa drag). Mỗi frame
   // chỉ translate _dragGroup → 0 rebuild shape khác → mượt bất kể số shape. plainWalls=true (LOD phẳng, rẻ).
@@ -2428,6 +2480,7 @@ export class ArchPlanLab extends BaseWorld {
     this._rebuildGrid() // 🕳️ khoét lưới y=0 theo bbox hồ → hết sọc lưới đè lên lòng hồ
     this._applyCutVisibility() // 🟫 cut mới dựng = ẩn; hiện lại mảng của layer đang active (giữ qua rebuild)
     this.groundTool?.rebuildHandles() // 🟫 tay-cầm theo layer active mới (mesh mới → cao độ đúng) (free + moveMode)
+    this.moundTool?.rebuildHandles() // ⛰️ handle gò theo mounds mới (thêm/xoá/đổi qua GUI → vẽ lại) (terrain + moveMode)
   }
 
   // Gom opts texture cho renderSiteState: ground 'grass-tex' (PhotoGround) + fence wall 'cinder'/'stone'
