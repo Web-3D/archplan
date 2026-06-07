@@ -17,6 +17,7 @@ import type {
   WaterConfig,
   WaterKind,
   WaterMaterialKey,
+  WaterPoint,
 } from 'threejs-modules/site/state'
 import {
   GROUND_THICK_MAX,
@@ -426,16 +427,46 @@ function layerSlider(
   )
 }
 
-// Hàng Form hình mảng (rect/circle/ellipse — free-bezier chờ editor ground). Op (add/cut) KHÔNG còn dropdown —
-// xác định bởi tab "Mảng add"/"Khoét cut" chứa zone/cut.
+// Blob mượt 8 ĐIỂM (4 góc + 4 trung-điểm cạnh) từ rect width×depth (mm, local tâm gốc) + tay-cầm bezier MIRROR
+// (Catmull-Rom tangent = (P_next−P_prev)/6) → ra ngay form bo tròn, đỉnh+tay-cầm hiện sẵn để kéo nắn. DÙNG CHUNG
+// seed hồ (seedWaterRectPoints) + ground layer (groundFormRow) khi đổi → Free — 2 nơi, 1 nguồn.
+function rectBezierPoints(width: number, depth: number): WaterPoint[] {
+  const hw = width / 2
+  const hd = depth / 2
+  const c = [
+    { x: -hw, z: -hd },
+    { x: 0, z: -hd },
+    { x: hw, z: -hd },
+    { x: hw, z: 0 },
+    { x: hw, z: hd },
+    { x: 0, z: hd },
+    { x: -hw, z: hd },
+    { x: -hw, z: 0 },
+  ]
+  const n = c.length
+  return c.map((p, i) => {
+    const prev = c[(i + n - 1) % n]
+    const next = c[(i + 1) % n]
+    const tx = Math.round((next.x - prev.x) / 6) // Catmull-Rom → bezier handle (mirror smooth)
+    const tz = Math.round((next.z - prev.z) / 6)
+    return { ...p, outX: tx, outZ: tz, inX: -tx, inZ: -tz }
+  })
+}
+
+// Hàng Form hình mảng (rect/circle/ellipse/free-bezier). Op (add/cut) KHÔNG còn dropdown — xác định bởi tab
+// "Mảng add"/"Khoét cut" chứa zone/cut. Đổi → Free: seed blob 8-điểm (rectBezierPoints) → kéo đỉnh/tay-cầm 3D.
 function groundFormRow(ctx: APGuiCtx, layer: GroundLayer): HTMLElement {
-  const opts: [string, 'rect' | 'circle' | 'ellipse'][] = [
+  const opts: [string, 'rect' | 'circle' | 'ellipse' | 'free'][] = [
     ['Rect', 'rect'],
     ['Tròn', 'circle'],
     ['Ellipse', 'ellipse'],
+    ['Free (bezier)', 'free'],
   ]
-  return selectRow('Form', opts, (layer.shape ?? 'rect') as 'rect' | 'circle' | 'ellipse', (v) => {
+  const cur = (layer.shape ?? 'rect') as 'rect' | 'circle' | 'ellipse' | 'free'
+  return selectRow('Form', opts, cur, (v) => {
     layer.shape = v
+    if (v === 'free' && (layer.points?.length ?? 0) < 3)
+      layer.points = rectBezierPoints(layer.length, layer.width) // length×width = trục rect → blob seed
     ctx.applySite(true)
   })
 }
@@ -632,30 +663,9 @@ function buildGardenDomain(ctx: APGuiCtx): {
   }
 }
 
-// Seed polygon free từ chữ nhật width×depth (mm, local) khi chuyển → Free: 8 ĐIỂM quanh chu vi (4 góc + 4 trung
-// điểm cạnh) + tay-cầm bezier MIRROR theo Catmull-Rom (tangent = (P_next − P_prev)/6) → ra ngay BLOB MƯỢT bo
-// tròn, 8 anchor + tay-cầm hiện sẵn để kéo nắn (nhiều điểm = cong phức tạp hơn).
+// Seed polygon free hồ từ chữ nhật width×depth khi chuyển → Free: blob 8-điểm + tay-cầm (rectBezierPoints chung).
 function seedWaterRectPoints(w: WaterConfig): void {
-  const hw = w.width / 2
-  const hd = w.depth / 2
-  const c = [
-    { x: -hw, z: -hd },
-    { x: 0, z: -hd },
-    { x: hw, z: -hd },
-    { x: hw, z: 0 },
-    { x: hw, z: hd },
-    { x: 0, z: hd },
-    { x: -hw, z: hd },
-    { x: -hw, z: 0 },
-  ]
-  const n = c.length
-  w.points = c.map((p, i) => {
-    const prev = c[(i + n - 1) % n]
-    const next = c[(i + 1) % n]
-    const tx = Math.round((next.x - prev.x) / 6) // Catmull-Rom → bezier handle (mirror smooth)
-    const tz = Math.round((next.z - prev.z) / 6)
-    return { ...p, outX: tx, outZ: tz, inX: -tx, inZ: -tz }
-  })
+  w.points = rectBezierPoints(w.width, w.depth)
 }
 
 // Slider structural hồ (field mm) — áp khi BUÔNG (KHÔNG live: né tạo lại reflector/RTT mỗi frame).

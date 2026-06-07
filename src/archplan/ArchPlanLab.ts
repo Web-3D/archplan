@@ -165,6 +165,7 @@ import { type APGuiCtx, setupGUI, setupToolsPanel } from './gui/gui'
 import { setupLabExperiments } from './gui/lab-experiments' // 🔀 switcher thí nghiệm Lab (🏛 Mái | ✨ Particles)
 import { setupSitePanel } from './gui/site' // 🌳 panel sân vườn (site/lô + Garden ▸ Grass = slider cỏ 3D)
 import { setupLabBench } from './gui/tweak' // 🎛️ Lab = bàn thí nghiệm: 2 khung trái + preview cột phải
+import { GroundTool, type GroundToolHost } from './interaction/groundDrag' // 🟫 nắn đỉnh/tay-cầm ground free
 import { type HighlightHost, HighlightOverlay } from './interaction/highlight' // flash viền phần đang chỉnh — tách monolith
 import { type ManipulateHost, ManipulateTool } from './interaction/manipulate' // 🤚 Move + 🎯 Focus — tách monolith
 import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 khay swatch atelier — tách monolith
@@ -353,6 +354,7 @@ export class ArchPlanLab extends BaseWorld {
   private _siteNavigateFence: ((idx: number) => void) | null = null // 🧱 click rào 3D → nhảy GUI tới lớp rào idx
   private _siteNavigateLayer: ((idx: number) => void) | null = null // 🟫 click tầng ground 3D → nhảy GUI Ground▸Gn
   private _activeCutIdx = -1 // 🟫 layer cut đang active (focus tab / click / kéo) → mảng cut HIỆN XÁM; -1 = ẩn hết
+  private _activeLayerIdx = -1 // 🟫 layer ground đang focus (add HOẶC cut) → GroundTool hiện tay-cầm nắn (free); -1 = không
   private drawerPanels: HTMLElement[] = [] // panel non-gui trong drawer (Ground + Lab) — gỡ khi teardown
   private _drawerTab = 0 // tab drawer đang mở — nhớ qua _rebuildGUI
   private lDrawer: HTMLElement | null = null // drawer TRÁI: bảng Tools (Surface+tọa độ) — ẩn mặc định
@@ -407,6 +409,7 @@ export class ArchPlanLab extends BaseWorld {
   // GIỮ ở lab (điều phối 3 mode loại trừ); phiên kéo + map anchor folder nằm trong ManipulateTool.
   private manipulate: ManipulateTool | null = null
   private waterTool: WaterTool | null = null // 💧 kéo hồ/đỉnh/viền 3D (interaction/waterDrag.ts); lab giữ _siteWaters/_activeWater
+  private groundTool: GroundTool | null = null // 🟫 nắn đỉnh/tay-cầm ground free (interaction/groundDrag.ts); lab giữ _activeLayerIdx
   private moveMode = false
   private _hiddenFloors = new Set<string>() // 🙈 floor.id ẩn (xây tầng dưới khỏi bị che) — transient, không persist
   private _syncMoveToggle: ((on: boolean) => void) | null = null // sync nút 🤚 trong gui Tools
@@ -632,6 +635,7 @@ export class ArchPlanLab extends BaseWorld {
   // Move mode nhấn xuống: ưu tiên hồ → cổng → element building. Tách khỏi _onPointerDown (giữ complexity ≤10).
   private _pointerDownMove(e: PointerEvent): void {
     if (this.waterTool?.tryStartDrag(e)) return // 💧 trúng mặt hồ (gần hơn pick-box) → kéo hồ
+    if (this.groundTool?.tryStartVertex(e)) return // 🟫 trúng tay-cầm layer free (nhỏ, ưu tiên) → nắn đỉnh/handle
     if (this._tryStartGateDrag(e)) return // 🚪 trúng cổng → trượt dọc cạnh rào
     this.manipulate?.dragStart(e) // Move tool: nhấn-giữ element building → kéo (focus GUI ngay khi nhấn)
     if (this.manipulate?.isDragging()) return // trúng building → manipulate lo
@@ -652,6 +656,8 @@ export class ArchPlanLab extends BaseWorld {
   // Move mode đang kéo: ưu tiên hồ (waterTool) → cổng (_gateDrag) → element building (manipulate).
   private _moveModeMove(e: PointerEvent): void {
     if (this.waterTool?.isDragging()) this.waterTool.dragMove(e)
+    else if (this.groundTool?.isDragging())
+      this.groundTool.dragMove(e) // 🟫 nắn đỉnh/tay-cầm layer free
     else if (this._gateDrag) this._gateDragMove(e)
     else if (this.manipulate?.isDragging()) this.manipulate.dragMove(e)
     else if (this._layerDrag) this._layerDragMove(e) // 🟫 kéo tầng ground
@@ -724,29 +730,39 @@ export class ArchPlanLab extends BaseWorld {
       this._downPos = null
       return
     }
-    if (this.waterTool?.isDragging()) {
-      this.waterTool.endDrag() // ẩn viền + commit (_applySite: cỏ né lại dưới hồ vị trí mới + autosave)
-      this._downPos = null
-      return
-    }
-    if (this._gateDrag) {
-      this._commitGateDrag()
-      this._downPos = null
-      return
-    }
-    if (this.manipulate?.isDragging()) {
-      this.manipulate?.dragEnd()
-      this._downPos = null
-      return
-    }
-    if (this._layerDrag) {
-      this._commitLayerDrag() // 🟫 buông tầng ground → bake offset + rebuild + autosave
-      this._downPos = null
+    if (this._endSiteDrag()) {
+      this._downPos = null // 💧🟫🚪 buông 1 drag site/building (commit trong _endSiteDrag)
       return
     }
     this.picking = false
     this._maybeClickFocus(e)
     this._downPos = null
+  }
+
+  // Buông chuột: nếu đang kéo hồ / nắn-ground / cổng / building / tầng-ground → commit cái đó + true. Tách khỏi
+  // _onPointerUp (giữ complexity ≤10). Mỗi nhánh return sớm; KHÔNG bao gồm sun (orbit re-enable riêng).
+  private _endSiteDrag(): boolean {
+    if (this.waterTool?.isDragging()) {
+      this.waterTool.endDrag() // ẩn viền + commit (cỏ né lại dưới hồ vị trí mới + autosave)
+      return true
+    }
+    if (this.groundTool?.isDragging()) {
+      this.groundTool.endDrag() // 🟫 ẩn viền + commit (rebuild đặt shape mới + lỗ-cut + autosave)
+      return true
+    }
+    if (this._gateDrag) {
+      this._commitGateDrag()
+      return true
+    }
+    if (this.manipulate?.isDragging()) {
+      this.manipulate.dragEnd()
+      return true
+    }
+    if (this._layerDrag) {
+      this._commitLayerDrag() // 🟫 buông tầng ground → bake offset + rebuild + autosave
+      return true
+    }
+    return false
   }
 
   // Click (không kéo) ở chế độ thường → trỏ GUI tới đúng panel. Bỏ qua paint/pick. <5px = click.
@@ -811,6 +827,7 @@ export class ArchPlanLab extends BaseWorld {
     this.moveMode = on
     this.manipulate?.cancelDrag()
     this.waterTool?.cancelDrag() // huỷ kéo hồ đang dở + ẩn viền (đổi mode / thoát chuột phải)
+    this.groundTool?.cancelDrag() // 🟫 huỷ nắn đỉnh ground đang dở + ẩn viền
     this._gateDrag = null // huỷ kéo cổng đang dở
     this._layerDrag = null // 🟫 huỷ kéo tầng ground đang dở
     if (on) {
@@ -821,6 +838,7 @@ export class ArchPlanLab extends BaseWorld {
     if (this.controls) this.controls.enabled = !on
     this._syncMoveToggle?.(on) // đổi class nút 🤚 (ap-move-on) — text bỏ, chỉ symbol
     this.waterTool?.rebuildHandles() // 💧 hiện/ẩn handle đỉnh hồ theo moveMode
+    this.groundTool?.rebuildHandles() // 🟫 hiện/ẩn tay-cầm ground free theo moveMode
     this._renderScene() // bật/tắt Move → dựng lại building để áp/bỏ tường-phẳng + nhuốm xanh "nghệ" ngay
   }
 
@@ -895,7 +913,9 @@ export class ArchPlanLab extends BaseWorld {
   private _setActiveCut(idx: number): void {
     const layer = this.site.groundLayers?.[idx]
     this._activeCutIdx = layer?.op === 'cut' ? idx : -1
+    this._activeLayerIdx = layer ? idx : -1 // 🟫 layer active (add HOẶC cut) cho GroundTool nắn (add → không xám, vẫn nắn)
     this._applyCutVisibility()
+    this.groundTool?.rebuildHandles() // 🟫 đổi focus layer → vẽ lại tay-cầm đúng layer free (ẩn nếu không free)
   }
 
   // 🟫 Toggle .visible mọi mảng cut (userData.isCutPatch): chỉ mảng của _activeCutIdx hiện (xám). Raycaster
@@ -1030,6 +1050,7 @@ export class ArchPlanLab extends BaseWorld {
     this.scene.add(this.buildingGroup)
     this.scene.add(this.pickGroup) // SPIKE: lớp pick vô hình cho brush paint
     this.waterTool = new WaterTool(this._waterHost()) // 💧 kéo hồ/đỉnh/viền (tự add handle group vào scene)
+    this.groundTool = new GroundTool(this._groundHost()) // 🟫 nắn đỉnh/tay-cầm ground free (tự add handle group)
     this.manipulate = new ManipulateTool(this._manipulateHost()) // trước _setupGUI: nhận registerFocus
     this.highlight = new HighlightOverlay(this._highlightHost())
     // Listener ĐĂNG KÝ TRƯỚC _setupGUI/_buildScene: phím tắt (Z move, X palette) + pointer KHÔNG được phụ
@@ -1220,6 +1241,8 @@ export class ArchPlanLab extends BaseWorld {
     this.devHud = null
     this.waterTool?.dispose() // 💧 handle geo/mat + outline + gỡ handle group khỏi scene
     this.waterTool = null
+    this.groundTool?.dispose() // 🟫 handle geo/mat + line + outline + gỡ handle group khỏi scene
+    this.groundTool = null
   }
 
   // ── Scene setup ────────────────────────────────────────────────────────────
@@ -1839,6 +1862,22 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
+  // Host cho GroundTool: scene refs + state + layer active (lab giữ _activeLayerIdx) + commit. siteGroup để đọc
+  // cao độ mesh layer (đặt overlay tay-cầm đúng mặt). Body-drag (dời layer) KHÔNG qua đây — lab _layerDrag lo.
+  private _groundHost(): GroundToolHost {
+    return {
+      canvas: this.canvas,
+      camera: this.camera,
+      raycaster: this._ray,
+      scene: this.scene,
+      siteGroup: this.siteGroup,
+      site: () => this.site,
+      moveMode: () => this.moveMode,
+      activeLayerIdx: () => this._activeLayerIdx,
+      commitSite: () => this._applySite(true),
+    }
+  }
+
   // 🚀 SPLIT-DRAG (kéo 1 shape khi có NHIỀU shape): dựng 1 lần — shape khác (static) vào buildingGroup +
   // pick; shape ĐANG KÉO vào _dragGroup riêng (visual, KHÔNG pick — không cần raycast giữa drag). Mỗi frame
   // chỉ translate _dragGroup → 0 rebuild shape khác → mượt bất kể số shape. plainWalls=true (LOD phẳng, rẻ).
@@ -2312,6 +2351,7 @@ export class ArchPlanLab extends BaseWorld {
     this._rebuildEditorGround() // 🕳️ khoét lỗ hồ vào nền backdrop editor → không che đáy basin
     this._rebuildGrid() // 🕳️ khoét lưới y=0 theo bbox hồ → hết sọc lưới đè lên lòng hồ
     this._applyCutVisibility() // 🟫 cut mới dựng = ẩn; hiện lại mảng của layer đang active (giữ qua rebuild)
+    this.groundTool?.rebuildHandles() // 🟫 tay-cầm theo layer active mới (mesh mới → cao độ đúng) (free + moveMode)
   }
 
   // Gom opts texture cho renderSiteState: ground 'grass-tex' (PhotoGround) + fence wall 'cinder'/'stone'
