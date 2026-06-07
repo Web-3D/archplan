@@ -394,6 +394,11 @@ const BORDER_TEX_SPEC: Record<BorderTexKey, SurfaceTextureSpec> = {
 
 // ── ArchPlanLab ────────────────────────────────────────────────────────────────
 
+// 💧 Layer RIÊNG cho mặt nước (reflector). virtual-camera của reflector (layer 0 mặc định) KHÔNG render layer này
+// → 2+ hồ không render-lẫn-nhau → hết bug three `_inReflector` (re-entrancy nested-render làm hồ thứ 2 đơ gương).
+// Camera chính + raycaster pick/drag BẬT thêm layer này (cộng dồn, vẫn hit layer 0) để vẫn thấy + click/kéo hồ.
+const WATER_REFLECT_LAYER = 1
+
 export class ArchPlanLab extends BaseWorld {
   private state: BuildingState = defaultBuildingState()
   private gui: GUI | null = null
@@ -1112,6 +1117,10 @@ export class ArchPlanLab extends BaseWorld {
     this.groundTool = new GroundTool(this._groundHost()) // 🟫 nắn đỉnh/tay-cầm ground free (tự add handle group)
     this.manipulate = new ManipulateTool(this._manipulateHost()) // trước _setupGUI: nhận registerFocus
     this.highlight = new HighlightOverlay(this._highlightHost())
+    // 💧 Mặt nước ở WATER_REFLECT_LAYER (set per-rebuild) → camera chính + raycaster phải BẬT layer này (cộng
+    // dồn) để vẫn thấy + click/kéo hồ; còn virtual-camera reflector (layer 0) thì né mặt nước → hết đơ-2-hồ.
+    this.camera.layers.enable(WATER_REFLECT_LAYER)
+    this._ray.layers.enable(WATER_REFLECT_LAYER)
     // Listener ĐĂNG KÝ TRƯỚC _setupGUI/_buildScene: phím tắt (Z move, X palette) + pointer KHÔNG được phụ
     // thuộc scene-build thành công. Nếu _buildScene throw (shader/scene lỗi runtime) mà listener ở SAU thì
     // onInit văng → mất sạch phím tắt. Handler dùng optional-chaining (palette?/manipulate?) nên gọi sớm = no-op an toàn.
@@ -2404,6 +2413,9 @@ export class ArchPlanLab extends BaseWorld {
     const wcfgs = [...renderWaters(this.site), ...renderPuddles(this.site)]
     this._siteWaters = h.waters.map((surf, i) => ({ cfg: wcfgs[i], surf }))
     for (const x of this._siteWaters) x.surf.setCamera(this.camera) // dispose() tự free RTT reflector (né leak)
+    // 💧 Đẩy mặt nước sang layer riêng → virtual-camera reflector (layer 0) KHÔNG render mặt nước khác → 2+ hồ
+    // hết đơ gương (né re-entrancy _inReflector). Mất "nước-phản-chiếu-nước" (vốn không cần + né đệ quy).
+    for (const x of this._siteWaters) x.surf.getMesh().layers.set(WATER_REFLECT_LAYER)
     // active = pool tab đang chọn nếu còn render; không thì pool đầu (kể cả tắt, để GUI bind) → null nếu 0 pool.
     if (!this._activeWater || !this.site.waters.includes(this._activeWater)) {
       this._activeWater = this.site.waters.find((w) => w.kind === 'pool') ?? null
