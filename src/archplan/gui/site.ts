@@ -267,9 +267,19 @@ function buildTerrainControls(body: HTMLElement, ctx: APGuiCtx): void {
     hdr,
     toggleRow('Enable terrain', t.enabled, (on) => ((t.enabled = on), ctx.applySite(true)))
   )
+  // Kéo (c=false) → applyTerrainLive: SWAP geometry nền base (né water-RTT/recompile = tụt fps). Buông (c=true)
+  // → applySite(true): full rebuild + autosave. Mọi param terrain đều structural-geometry → cùng đường này.
   for (const [label, min, max, step, mf, get, set] of terrainSliderSpecs(t))
     body.appendChild(
-      sliderRow(label, min, max, step, get(), (v, c) => (set(v), ctx.applySite(c)), mf)
+      sliderRow(
+        label,
+        min,
+        max,
+        step,
+        get(),
+        (v, c) => (set(v), c ? ctx.applySite(true) : ctx.applyTerrainLive()),
+        mf
+      )
     )
 }
 

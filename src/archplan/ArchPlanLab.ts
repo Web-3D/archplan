@@ -154,6 +154,7 @@ import {
   buildSiteGrass,
   gateWorldSpec,
   grassBuildSig,
+  groundGeometry,
   pondWorldXZ,
   renderSiteState,
   siteGrassExclude,
@@ -567,6 +568,7 @@ export class ArchPlanLab extends BaseWorld {
   // 💧 Hồ ĐANG SỐNG (đa-instance): cfg↔surf zip theo renderWaters(site). _activeWater = pool của tab đang
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
+  private _siteGroundMesh: THREE.Mesh | null = null // 🏔️ ref mesh nền base → LIVE-rebuild geometry-only (terrain drag)
   private _activeWater: WaterConfig | null = null
   private labExp: { dispose: () => void } | null = null // 🔀 thí nghiệm Lab đang active (Mái / Particles)
   // 🧪 Lab = PHẦN RIÊNG (float persistent, NGOÀI drawer) — bàn thí nghiệm vật thể MỚI trước khi đưa vào GUI
@@ -1628,6 +1630,7 @@ export class ArchPlanLab extends BaseWorld {
       setActiveGroundLayer: (idx) => this._setActiveCut(idx), // 🟫 focus layer (navTo) → cut hiện xám / add ẩn cut
       applySiteLive: () => this._applySiteLive(),
       applyFenceLive: () => this._applyFenceLive(),
+      applyTerrainLive: () => this._applyTerrainLive(),
       siteStats: () => this._siteStats(),
       registerSiteReadout: (fn) => (this._refreshSiteReadout = fn),
       ...this._siteTuneGuiCtx(),
@@ -2395,6 +2398,7 @@ export class ArchPlanLab extends BaseWorld {
       shaders: this.siteShaders,
     }
     const h = renderSiteState(this.site, ctx, this._siteTexOpts())
+    this._siteGroundMesh = h.ground // 🏔️ giữ ref nền base → _applyTerrainLive swap geometry-only (né water-RTT)
     // zip cfg↔surf: h.waters = [hồ LÕM (renderWaters) ... rồi VŨNG phẳng (renderPuddles)] — ĐÚNG thứ tự lõi
     // dựng → ghép lại để drag/tune/handle nhắm đúng instance (gồm cả puddle).
     const wcfgs = [...renderWaters(this.site), ...renderPuddles(this.site)]
@@ -3022,6 +3026,28 @@ export class ArchPlanLab extends BaseWorld {
       this._syncFence()
       this._liveRebuild = false
       if (this.sun) this.sun.shadow.needsUpdate = true // bóng rào kéo theo
+    })
+  }
+
+  // 🏔️ LIVE drag slider TERRAIN: SWAP geometry nền base (G0) — KHÔNG _renderSite/_rebuildSite (= né tái-tạo
+  // water reflector RTT + recompile NodeMaterial = chỗ tụt fps). Chỉ build lưới displaced mới + thay
+  // mesh.geometry (dispose cũ, cập nhật siteGeos để _clearSite sau dispose đúng). Buông → _applySite(true) commit.
+  private _applyTerrainLive(): void {
+    if (this._siteRaf) return
+    this._siteRaf = requestAnimationFrame(() => {
+      this._siteRaf = 0
+      const mesh = this._siteGroundMesh
+      if (!mesh) {
+        this._applySiteLive() // chưa có ref nền (show off / chưa render) → fallback đường cũ
+        return
+      }
+      const geo = groundGeometry(this.site, { buildingFootprint: this._foundationRects() })
+      const old = mesh.geometry
+      mesh.geometry = geo
+      const i = this.siteGeos.indexOf(old)
+      if (i >= 0) this.siteGeos[i] = geo // tracking để _clearSite dispose geo MỚI (không phải cũ đã free)
+      old.dispose()
+      if (this.sun) this.sun.shadow.needsUpdate = true // bóng nhà đổ trên gò đổi theo
     })
   }
 
