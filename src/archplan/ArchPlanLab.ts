@@ -34,6 +34,16 @@ import cinderAoUrl from 'assets/textures/cinder-blocks-wall/production/ao.ktx2?u
 import cinderBaseColorUrl from 'assets/textures/cinder-blocks-wall/production/basecolor.ktx2?url'
 import cinderNormalUrl from 'assets/textures/cinder-blocks-wall/production/normal.ktx2?url'
 import cinderRoughnessUrl from 'assets/textures/cinder-blocks-wall/production/roughness.ktx2?url'
+// 🪨 3 texture đá cho RÀO/VIỀN hồ (border, TexturedSurface triplanar) — icelandic KHÔNG có ao
+import coalAoUrl from 'assets/textures/coal_stone/production/ao.ktx2?url'
+import coalBaseColorUrl from 'assets/textures/coal_stone/production/basecolor.ktx2?url'
+import coalNormalUrl from 'assets/textures/coal_stone/production/normal.ktx2?url'
+import coalRoughnessUrl from 'assets/textures/coal_stone/production/roughness.ktx2?url'
+import cobbleManifest from 'assets/textures/cobblestone/meta.json'
+import cobbleAoUrl from 'assets/textures/cobblestone/production/ao.ktx2?url'
+import cobbleBaseColorUrl from 'assets/textures/cobblestone/production/basecolor.ktx2?url'
+import cobbleNormalUrl from 'assets/textures/cobblestone/production/normal.ktx2?url'
+import cobbleRoughnessUrl from 'assets/textures/cobblestone/production/roughness.ktx2?url'
 import cgravelManifest from 'assets/textures/construction_grave/meta.json'
 import cgravelAoUrl from 'assets/textures/construction_grave/production/ao.ktx2?url'
 import cgravelBaseColorUrl from 'assets/textures/construction_grave/production/basecolor.ktx2?url'
@@ -44,6 +54,9 @@ import grassoAoUrl from 'assets/textures/grass_o/production/ao.ktx2?url'
 import grassoBaseColorUrl from 'assets/textures/grass_o/production/basecolor.ktx2?url'
 import grassoNormalUrl from 'assets/textures/grass_o/production/normal.ktx2?url'
 import grassoRoughnessUrl from 'assets/textures/grass_o/production/roughness.ktx2?url'
+import icelandicBaseColorUrl from 'assets/textures/icelandic_jagged/production/basecolor.ktx2?url'
+import icelandicNormalUrl from 'assets/textures/icelandic_jagged/production/normal.ktx2?url'
+import icelandicRoughnessUrl from 'assets/textures/icelandic_jagged/production/roughness.ktx2?url'
 // 🪵 Gỗ KHUNG-DƯỚI stone-pillar (understructMaterial='wood-tex') = Old Plywood — tách hẳn vân deck.
 import oldplyManifest from 'assets/textures/Old-piwood/meta.json'
 import oldplyAoUrl from 'assets/textures/Old-piwood/production/ao.ktx2?url'
@@ -56,6 +69,10 @@ import sandAoUrl from 'assets/textures/rippled_sand/production/ao.ktx2?url'
 import sandBaseColorUrl from 'assets/textures/rippled_sand/production/basecolor.ktx2?url'
 import sandNormalUrl from 'assets/textures/rippled_sand/production/normal.ktx2?url'
 import sandRoughnessUrl from 'assets/textures/rippled_sand/production/roughness.ktx2?url'
+import rockAoUrl from 'assets/textures/rock_rough/production/ao.ktx2?url'
+import rockBaseColorUrl from 'assets/textures/rock_rough/production/basecolor.ktx2?url'
+import rockNormalUrl from 'assets/textures/rock_rough/production/normal.ktx2?url'
+import rockRoughnessUrl from 'assets/textures/rock_rough/production/roughness.ktx2?url'
 import romanManifest from 'assets/textures/roman_stone_floor/meta.json'
 import romanAoUrl from 'assets/textures/roman_stone_floor/production/ao.ktx2?url'
 import romanBaseColorUrl from 'assets/textures/roman_stone_floor/production/basecolor.ktx2?url'
@@ -145,6 +162,7 @@ import {
   waterPolygons,
 } from 'threejs-modules/site/render/fromState'
 import {
+  type BorderMaterialKey,
   coverageStats,
   defaultSiteState,
   type FenceConfig,
@@ -338,6 +356,39 @@ const GROUND_TEX_SPEC: Partial<
       ao: { url: sand4kAoUrl, colorSpace: 'linear' },
     },
   },
+  cobblestone: {
+    tile: cobbleManifest.tileSizeMeters,
+    spec: {
+      baseColor: { url: cobbleBaseColorUrl, colorSpace: 'srgb' },
+      normal: { url: cobbleNormalUrl, colorSpace: 'linear' },
+      roughness: { url: cobbleRoughnessUrl, colorSpace: 'linear' },
+      ao: { url: cobbleAoUrl, colorSpace: 'linear' },
+    },
+  },
+}
+
+// 🪨 Texture đá cho RÀO/VIỀN hồ (TexturedSurface triplanar). tile 0.5m (đá nhỏ ~0.35m → đủ chi tiết đá/viên).
+// icelandic KHÔNG có ao map. Key = BorderMaterialKey trừ 'none'.
+type BorderTexKey = Exclude<BorderMaterialKey, 'none'>
+const BORDER_TILE = 0.5
+const BORDER_TEX_SPEC: Record<BorderTexKey, SurfaceTextureSpec> = {
+  'icelandic-jagged': {
+    baseColor: { url: icelandicBaseColorUrl, colorSpace: 'srgb' },
+    normal: { url: icelandicNormalUrl, colorSpace: 'linear' },
+    roughness: { url: icelandicRoughnessUrl, colorSpace: 'linear' },
+  },
+  'coal-stone': {
+    baseColor: { url: coalBaseColorUrl, colorSpace: 'srgb' },
+    normal: { url: coalNormalUrl, colorSpace: 'linear' },
+    roughness: { url: coalRoughnessUrl, colorSpace: 'linear' },
+    ao: { url: coalAoUrl, colorSpace: 'linear' },
+  },
+  'rock-rough': {
+    baseColor: { url: rockBaseColorUrl, colorSpace: 'srgb' },
+    normal: { url: rockNormalUrl, colorSpace: 'linear' },
+    roughness: { url: rockRoughnessUrl, colorSpace: 'linear' },
+    ao: { url: rockAoUrl, colorSpace: 'linear' },
+  },
 }
 
 // ── ArchPlanLab ────────────────────────────────────────────────────────────────
@@ -470,6 +521,12 @@ export class ArchPlanLab extends BaseWorld {
   // 🌱 Material PhotoGround CACHE 1 lần MỖI KEY (sống lab-lifetime) → bơm ctx.groundMatByKey: nhiều ground
   // (base + layer) cùng key DÙNG CHUNG → KHÔNG recompile NodeMaterial mỗi rebuild. Lab sở hữu → dispose onDispose.
   private _groundMat: Partial<Record<GroundMaterialKey, PhotoGround>> = {}
+  // 🪨 Texture đá RÀO/VIỀN hồ: maps + TexturedSurface (triplanar) CACHE 1 lần/key (lab-lifetime) → bơm
+  // ctx.borderMatByKey. Lab sở hữu maps + surf → dispose onDispose. Load ASYNC khi hồ dùng borderMaterial≠none.
+  private _borderTex: Partial<
+    Record<BorderTexKey, { maps: TexturedSurfaceMaps; surf: TexturedSurface }>
+  > = {}
+  private _borderTexLoading: Partial<Record<BorderTexKey, boolean>> = {}
   // 🪵 Slab walnut: texture-maps + PhotoGround (material CACHE 1 lần → KHÔNG recompile mỗi build/frame kéo;
   // slab dựng lại mỗi edit). Lab sở hữu cả maps lẫn PhotoGround → dispose ở onDispose. Bơm ctx.slabTexMat.
   private _slabTexMaps: PhotoGroundMaps | null = null
@@ -2365,8 +2422,44 @@ export class ArchPlanLab extends BaseWorld {
       if (photo) byKey[key] = photo.getMaterial()
     }
     if (Object.keys(byKey).length > 0) opts.groundMatByKey = byKey
+    // 🪨 Material đá RÀO/VIỀN hồ (TexturedSurface) theo borderMaterial dùng → inject; chưa load → kick-off async.
+    const borderByKey: NonNullable<SiteRenderOpts['borderMatByKey']> = {}
+    for (const key of this._usedBorderTexKeys()) {
+      const cached = this._borderTex[key]
+      if (cached) borderByKey[key] = cached.surf.getMaterial()
+      else this._ensureBorderTex(key) // load xong → _siteSig='' + re-render (rào rơi màu phẳng tạm)
+    }
+    if (Object.keys(borderByKey).length > 0) opts.borderMatByKey = borderByKey
     // Fence material KHÔNG resolve ở đây nữa (đa-lớp → mỗi lớp 1 kind riêng) — _syncFence bơm per-fence.
     return opts
+  }
+
+  // 🪨 Key đá border đang dùng (unique) = mọi hồ pool/pond borderEnabled + borderMaterial≠none.
+  private _usedBorderTexKeys(): BorderTexKey[] {
+    const keys = new Set<BorderTexKey>()
+    for (const w of renderWaters(this.site)) {
+      if (w.borderEnabled && w.borderMaterial !== 'none') keys.add(w.borderMaterial)
+    }
+    return [...keys]
+  }
+
+  // 🪨 Load texture set đá border theo key 1 lần, ASYNC → build TexturedSurface (triplanar, tile BORDER_TILE) +
+  // cache. Xong → invalidate siteSig + re-render (rào hiện đá thay màu phẳng tạm). Lỗi → giữ màu phẳng.
+  private _ensureBorderTex(key: BorderTexKey): void {
+    if (this._borderTex[key] || this._borderTexLoading[key]) return
+    this._borderTexLoading[key] = true
+    loadSurfaceTextureSet(BORDER_TEX_SPEC[key], this.renderer)
+      .then((maps) => {
+        const surf = new TexturedSurface({ maps, tileSizeMeters: BORDER_TILE })
+        this._borderTex[key] = { maps, surf }
+        this._borderTexLoading[key] = false
+        this._siteSig = '' // ép _rebuildSite với material đá mới
+        this._renderSite()
+      })
+      .catch((e: unknown) => {
+        this._borderTexLoading[key] = false
+        console.warn('[ArchPlanLab] load border rock texture lỗi — giữ màu phẳng:', e)
+      })
   }
 
   // PhotoGround cached cho 1 key: có sẵn → trả; có MAPS (đã load) → build PhotoGround (tile theo GROUND_TEX_SPEC)
@@ -2663,11 +2756,22 @@ export class ArchPlanLab extends BaseWorld {
     this._slabTexMaps = null
     this._disposeEditorSandTex() // 🏖️ PhotoGround nền cát editor (tách helper — giữ complexity ≤10)
     this._disposeFoundWoodTextures() // 🪵🌳 gỗ deck + khung-dưới (Wooden Planks/Old Plywood/Tree Bark)
+    this._disposeFenceBorderTex() // 🧱🪨 TexturedSurface tường rào (cinder/stone) + đá border (3 rock)
+  }
+
+  // 🧱🪨 Teardown TexturedSurface tường rào (cinder/stone) + đá border (3 rock). surf = material cache lab-
+  // lifetime; maps = texture-set caller-owned. Tách khỏi _disposeSurfaceTextures (giữ complexity ≤10).
+  private _disposeFenceBorderTex(): void {
     for (const k of ['cinder', 'stone'] as const) {
-      this._fenceTex[k]?.surf.dispose() // TexturedSurface material (cache lab-lifetime) MỖI kind
+      this._fenceTex[k]?.surf.dispose()
       disposeSurfaceTextureSet(this._fenceTex[k]?.maps ?? null)
     }
     this._fenceTex = {}
+    for (const k of Object.keys(this._borderTex) as BorderTexKey[]) {
+      this._borderTex[k]?.surf.dispose()
+      disposeSurfaceTextureSet(this._borderTex[k]?.maps ?? null)
+    }
+    this._borderTex = {}
   }
 
   // 🪵🌳 Teardown gỗ móng: deck (Wooden Planks) + khung-dưới (Old Plywood + Tree Bark). TexturedSurface.dispose

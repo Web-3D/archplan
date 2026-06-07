@@ -11,6 +11,7 @@
  */
 
 import type {
+  BorderMaterialKey,
   FenceConfig,
   GroundLayer,
   GroundMaterialKey,
@@ -55,6 +56,7 @@ const GROUND_OPTS: [string, GroundMaterialKey][] = [
   ['Uncut grass (O)', 'grass-o'],
   ['Thai beach sand 2K', 'thai-beach-sand-2k'],
   ['Thai beach sand 4K', 'thai-beach-sand-4k'],
+  ['Cobblestone', 'cobblestone'],
 ]
 
 import type { APGuiCtx } from './ctx'
@@ -771,10 +773,22 @@ function buildEdgeTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig, withEdge
 // 🪨 Hàng controls RÀO/VIỀN quanh hồ: toggle + cao/đường-kính + màu. Auto theo shape (rect=rào gỗ cọc+ray;
 // tròn/ellipse/free=đá cuội xếp liền). Slider/màu COMMIT-ONLY (chỉ áp khi buông) → né tái tạo reflector RTT mỗi
 // frame lúc kéo (PERFORMANCE.md: applySite rebuild cả hồ). Tách giữ buildEdgeTab gọn.
+const BORDER_MAT_OPTS: [string, BorderMaterialKey][] = [
+  ['None (màu)', 'none'],
+  ['Icelandic slate', 'icelandic-jagged'],
+  ['Coal stone', 'coal-stone'],
+  ['Rock rough', 'rock-rough'],
+]
 function buildBorderRows(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void {
   host.appendChild(
     toggleRow('🪨 Border (rào/đá)', w.borderEnabled, (on) => {
       w.borderEnabled = on
+      ctx.applySite(true)
+    })
+  )
+  host.appendChild(
+    selectRow('Border mat', BORDER_MAT_OPTS, w.borderMaterial, (v) => {
+      w.borderMaterial = v // 'none' = màu phẳng; texture đá (triplanar) — áp cả đá cuội lẫn rào gỗ
       ctx.applySite(true)
     })
   )
