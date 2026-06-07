@@ -320,7 +320,7 @@ function rebuildGroundTabs(
   host: HTMLElement,
   refresh: () => void,
   reg: GReg,
-  rebuild: (focusLayer?: number) => void
+  rebuild: (focusLayer?: number, focusLevel?: number) => void
 ): Tabs {
   for (const t of reg.tabs) t.dispose()
   reg.tabs.length = 0
@@ -331,23 +331,16 @@ function rebuildGroundTabs(
   buildGroundControls(base, ctx, refresh)
   host.appendChild(base)
   const items: TabItem[] = [{ label: 'G0', panel: base, title: 'Base ground (nền lô, mặc định)' }]
-  const layers = (ctx.site.groundLayers ??= [])
-  const levels = groundLevelNums(layers)
+  ctx.site.groundLayers ??= []
+  const levels = groundEditorLevels(ctx.site.groundLevels ?? 0)
   levels.forEach((lv) => {
     const pane = buildLevelPane(ctx, lv, rebuild, reg)
     host.appendChild(pane)
     items.push({ label: `G${lv}`, panel: pane, title: `Ground level ${lv}` })
   })
   const addBtn = addInstanceButton('G-level', () => {
-    layers.push(
-      makeGroundLayer({
-        level: (levels[levels.length - 1] ?? 0) + 1,
-        op: 'add',
-        length: NEW_ZONE_SIZE,
-        width: NEW_ZONE_SIZE,
-      })
-    )
-    rebuild(layers.length - 1) // focus zone của G-level mới
+    const n = (ctx.site.groundLevels = (ctx.site.groundLevels ?? 0) + 1) // +1 G-level RỖNG (chưa zone/cut)
+    rebuild(-1, n) // focus tab G-level mới (tab index = level, G0=0)
     ctx.applySite(true)
   })
   const tabs = new Tabs(host, items, {
@@ -371,23 +364,33 @@ function buildGroundDomain(
   ensureCutGrayCss() // tô xám CHỈ tab "Khoét cut" + nội dung của nó (scoped) — G/Mảng add giữ nâu
   const reg: GReg = { tabs: [], mid: new Map(), inst: new Map() }
   let topTabs: Tabs | null = null
+  // Chọn tab add/cut (mid) + instance Z/C của layer (tách khỏi navTo giữ complexity ≤10).
+  const selectMidInst = (
+    layers: GroundLayer[],
+    layer: GroundLayer,
+    lv: number,
+    op: 'add' | 'cut'
+  ): void => {
+    reg.mid.get(lv)?.select(Number(op === 'cut'), { trusted: false }) // G2+ add/cut (cut=1, add=0)
+    const sibs = layers.filter((l) => (l.level ?? 1) === lv && (l.op ?? 'add') === op)
+    reg.inst.get(`${lv}:${op}`)?.select(Math.max(0, sibs.indexOf(layer)), { trusted: false })
+  }
   const navTo = (idx: number): void => {
     const layers = ctx.site.groundLayers ?? []
     const layer = layers[idx]
     if (!layer) return
     const lv = layer.level ?? 1
     const op = layer.op ?? 'add'
-    const top = groundLevelNums(layers).indexOf(lv)
+    const top = groundEditorLevels(ctx.site.groundLevels ?? 0).indexOf(lv)
     if (top < 0) return
     topTabs?.select(top + 1, { trusted: false }) // +1: G0 base = tab 0
-    reg.mid.get(lv)?.select(Number(op === 'cut'), { trusted: false }) // G2+ add/cut (cut=1, add=0)
-    const sibs = layers.filter((l) => (l.level ?? 1) === lv && (l.op ?? 'add') === op)
-    reg.inst.get(`${lv}:${op}`)?.select(Math.max(0, sibs.indexOf(layer)), { trusted: false })
+    selectMidInst(layers, layer, lv, op)
     ctx.setActiveGroundLayer?.(idx) // 🟫 báo Lab layer active → cut hiện XÁM trên editor (add → ẩn cut)
   }
-  const rebuild = (focusLayer = -1): void => {
+  const rebuild = (focusLayer = -1, focusLevel = -1): void => {
     topTabs = rebuildGroundTabs(ctx, host, refresh, reg, rebuild)
     if (focusLayer >= 0) navTo(focusLayer)
+    else if (focusLevel >= 0) topTabs.select(focusLevel, { trusted: false }) // focusLevel = tab index (G0=0)
   }
   rebuild()
   return {
@@ -593,14 +596,32 @@ function buildLevelPane(
   ;(tabs.getTablist().children[1] as HTMLElement | undefined)?.classList.add('ap-cut-tabbtn') // nút "Khoét cut" → xám
   reg.tabs.push(tabs)
   reg.mid.set(lv, tabs) // navigate → tab add/cut
+  host.appendChild(removeGLevelRow(ctx, lv, rebuild)) // ✕ xoá CẢ G-level (dưới add/cut tabs)
   return host
 }
 
-// Danh sách G-level (1-based) phân biệt, tăng dần. Rỗng = chưa có layer nào (chỉ G0 base).
-function groundLevelNums(layers: GroundLayer[]): number[] {
-  const set = new Set<number>()
-  for (const l of layers) set.add(l.level ?? 1)
-  return [...set].sort((a, b) => a - b)
+// ✕ Xoá G-level lv: bỏ MỌI layer level đó + DỒN level cao hơn xuống 1 + groundLevels−−. Về G0 + clear active.
+// (Model count tường minh → tầng RỖNG không tự co như cũ → cần nút này, kẻo G lỡ thêm bị kẹt.)
+function removeGLevelRow(
+  ctx: APGuiCtx,
+  lv: number,
+  rebuild: (focusLayer?: number) => void
+): HTMLElement {
+  return removeRow(`✕ Remove G${lv}`, () => {
+    const site = ctx.site
+    site.groundLayers = (site.groundLayers ?? []).filter((l) => (l.level ?? 1) !== lv)
+    for (const l of site.groundLayers) if ((l.level ?? 1) > lv) l.level = (l.level ?? 1) - 1
+    site.groundLevels = Math.max(0, (site.groundLevels ?? 0) - 1)
+    ctx.setActiveGroundLayer?.(-1) // clear active (idx dồn → tránh stale handle)
+    rebuild(-1) // về G0 (tầng đã xoá)
+    ctx.applySite(true)
+  })
+}
+
+// Danh sách G-level editor = 1..count (tường minh, GỒM tầng rỗng). count = site.groundLevels (≥ max level layers
+// đã đảm bảo lúc parse + add-zone). Rỗng (count=0) → chỉ G0 base.
+function groundEditorLevels(count: number): number[] {
+  return Array.from({ length: count }, (_, i) => i + 1)
 }
 
 // Cỏ 3D nhú lên (tier B — GrassBlades): LỚP THỰC VẬT độc lập surface — mọc trên nền BẤT KỲ (grass/soil/
