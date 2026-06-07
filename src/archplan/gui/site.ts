@@ -760,11 +760,44 @@ function buildEdgeTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig, withEdge
   if (withEdge) {
     waterSlider(host, ctx, w, 'Edge width m', 0, 2, 'edgeWidth') // dải coping quanh hồ (0 = tắt)
     materialRow(host, ctx, w, 'Edge mat', 'edgeMaterial', EDGE_MAT_OPTS) // coping: chỉ None (chưa lát caro)
+    buildBorderRows(host, ctx, w) // 🪨 rào gỗ (rect) / đá cuội (cong) quanh vành coping
   }
   const note = document.createElement('div')
   note.style.cssText = 'font-size:9px;opacity:.7;margin-top:4px;line-height:1.3'
-  note.textContent = 'Free: bật Move (Z) → kéo chấm vàng ở góc.'
+  note.textContent = 'Free: bật Move (Z) → kéo chấm vàng ở góc. Border: rect=rào gỗ, cong=đá cuội.'
   host.appendChild(note)
+}
+
+// 🪨 Hàng controls RÀO/VIỀN quanh hồ: toggle + cao/đường-kính + màu. Auto theo shape (rect=rào gỗ cọc+ray;
+// tròn/ellipse/free=đá cuội xếp liền). Slider/màu COMMIT-ONLY (chỉ áp khi buông) → né tái tạo reflector RTT mỗi
+// frame lúc kéo (PERFORMANCE.md: applySite rebuild cả hồ). Tách giữ buildEdgeTab gọn.
+function buildBorderRows(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void {
+  host.appendChild(
+    toggleRow('🪨 Border (rào/đá)', w.borderEnabled, (on) => {
+      w.borderEnabled = on
+      ctx.applySite(true)
+    })
+  )
+  host.appendChild(
+    sliderRow(
+      'Border H m',
+      0.1,
+      1.2,
+      0.05,
+      w.borderHeight / 1000,
+      (v, c) => {
+        w.borderHeight = Math.round(v * 1000)
+        if (c) ctx.applySite(true) // commit-only: né reflector thrash lúc kéo
+      },
+      1000
+    )
+  )
+  host.appendChild(
+    colorRow('Border màu', w.borderColor, (hex, c) => {
+      w.borderColor = hex
+      if (c) ctx.applySite(true) // commit-only
+    })
+  )
 }
 
 // Slider % Surface: [label, min%, max%, step, field-key 0–1]. Field = value/100. (rippleScale tách riêng — raw.)
@@ -898,10 +931,11 @@ function buildPoolInstance(
   const bottom = document.createElement('div')
   const bottomTabs = buildBottomTab(bottom, ctx, w)
   host.append(edge, surface, bottom)
+  const edgeLabel = w.kind === 'pond' ? 'Pond edge' : 'Pool edge' // nhãn theo kind (pond→Pond edge)
   const tabs = new Tabs(
     host,
     [
-      { label: 'Pool edge', panel: edge, title: 'Pool edge — outline / size / position' },
+      { label: edgeLabel, panel: edge, title: `${edgeLabel} — outline / size / position` },
       { label: 'Surface', panel: surface, title: 'Water surface look' },
       { label: 'Bottom', panel: bottom, title: 'Floor + walls' },
     ],
