@@ -1757,6 +1757,22 @@
   color: #2a322c;
   font-size: 10px;
 }
+/* 2 cột bo viền cạnh nhau trong khung thông số (Base | Xà sống). Cột hẹp → label slider tự xuống dòng. */
+.ap-lab-float .ap-roof-2col {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+.ap-lab-float .ap-roof-2col > * {
+  flex: 1;
+  min-width: 0;
+}
+.ap-lab-float .ap-roof-subframe {
+  padding: 5px 6px;
+  border: 1px solid #d4dad6;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.25);
+}
 /* Khung tên + nút 💾 lưu GỘP thành 1 cụm (input liền nút). */
 .ap-lab-float .ap-roof-saverow {
   display: flex;

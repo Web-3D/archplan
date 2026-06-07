@@ -28,6 +28,8 @@ export interface RoofLabParams {
   ridgeDepth: number // chiều RỘNG mặt phẳng chung theo Z (0 = sống đường thẳng/hip · >0 = chữ nhật/frustum)
   thickness: number // độ dày solidify base (m, ⊥ mặt). 0 = mặt mỏng như cũ · >0 = khối đặc có mép hiên
   capHeight: number // chiều CAO peak (rise đỉnh WX trên mặt phẳng chung, trục Y) — RIÊNG, độc lập cao base
+  hipArea: number // DIỆN TÍCH tiết diện xà sống (m²) — tiết diện vuông cạnh √area (0 = ẩn xà)
+  hipLen: number // CHIỀU DÀI xà sống (× độ dài sống, 0..1, tính từ đáy)
 }
 
 // ⭐ MÁI CHUẨN — hình dáng GỐC (frustum chia tọa độ A–V) để bắt đầu mọi dạng mái. Mở Mái = state này.
@@ -40,6 +42,8 @@ export const DEFAULT_ROOF: RoofLabParams = {
   ridgeDepth: 2.5, // Rộng mặt phẳng chung
   thickness: 0.1, // Độ dày base
   capHeight: 1, // Cao peak → đỉnh WX ở y=1.6 (cao base 0.6 + 1)
+  hipArea: 0.06, // Diện tích tiết diện xà (≈ vuông cạnh 0.245)
+  hipLen: 1, // Chiều dài xà = full sống
 }
 
 // 🔪 Lưỡi dao = mặt cắt. transform (nghiêng X/Y/Z + vị trí) định vị; hình do bladeSDF (editor) quyết.
@@ -242,7 +246,7 @@ function buildCoordEditor(
   const legend = document.createElement('div')
   legend.className = 'ap-roof-legend'
   legend.textContent =
-    'Trục: Dài=X Rộng=Z Cao=Y · Base chân: ABCD · Nóc base ≡ chân peak: EFGH · Sống: AE BF CH DG · Chiếu↓đáy: KLMN · KLMN cắt biên: O–V · Đỉnh peak: WX'
+    'Trục: Dài=X Rộng=Z Cao=Y · Base chân: ABCD · Nóc base ≡ chân peak: EFGH · Sống: AE BF CH DG · Chiếu↓đáy: KLMN · KLMN cắt biên: O–V · Đỉnh peak: WX · Trung điểm xà: I1–I4'
   el.appendChild(legend)
   const sync = (): void => {
     let i = 0
@@ -286,12 +290,40 @@ function buildRoofParamCol(
   col.append(
     mkColTitle('🏠 Mái'),
     sliderRow('Độ mờ', 0, 1, 0.05, 0.7, (v) => preview.setOpacity(v)), // độ đục base + peak
-    buildBaseRows(params, regen),
+    build2Col(buildBaseRows(params, regen), buildHipRows(params, regen)), // Base | Xà sống cạnh nhau
     buildSharedRows(params, regen),
     buildPeakRows(params, regen),
     buildApexRows(apex, updateApex)
   )
   return col
+}
+
+// 2 cột bo viền cạnh nhau (vd Base | Xà sống) trong cột controls hẹp.
+function build2Col(left: HTMLElement, right: HTMLElement): HTMLElement {
+  const row = document.createElement('div')
+  row.className = 'ap-roof-2col'
+  left.classList.add('ap-roof-subframe')
+  right.classList.add('ap-roof-subframe')
+  row.append(left, right)
+  return row
+}
+
+// XÀ SỐNG (khung riêng cạnh Base — sẽ thêm slide): 4 hộp dọc sống EA/FB/HC/GD, 2 cạnh đáy luôn dính 2 mặt.
+// Diện tích = tiết diện vuông (√area) · Chiều dài = × độ dài sống (từ đáy).
+function buildHipRows(params: RoofLabParams, regen: () => void): HTMLElement {
+  const box = document.createElement('div')
+  box.append(
+    mkColTitle('🪵 Xà sống'),
+    sliderRow('Diện tích', 0, 0.5, 0.01, params.hipArea, (v) => {
+      params.hipArea = v
+      regen()
+    }),
+    sliderRow('Chiều dài', 0, 1, 0.02, params.hipLen, (v) => {
+      params.hipLen = v
+      regen()
+    })
+  )
+  return box
 }
 
 // BASE (phần dưới = frustum): chân base Dài(X)/Rộng(Z) + Cao(Y) + Độ dày solidify.
@@ -727,6 +759,7 @@ export function setupRoofLab(
     preview.setProjection(verts) // KLMN = chiếu nóc EFGH xuống đáy
     preview.setExtension(verts) // O–V = cạnh KLMN kéo dài cắt biên đáy
     preview.setCapBlock(verts, params.capHeight) // peak GEFHWX (chân = nóc base) + cạnh đỉnh WX
+    preview.setHipBeams(verts, params.hipArea, params.hipLen) // 4 hộp xà dọc sống EA/FB/HC/GD
     coordEd.sync() // đồng bộ ô số (không dựng lại DOM)
   }
   const regen = (): void => {

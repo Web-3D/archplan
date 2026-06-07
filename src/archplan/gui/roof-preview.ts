@@ -33,6 +33,26 @@ export interface LabeledPoint {
   z: number
 }
 
+// 4 SỐNG (hip): { đáy, nóc, 4 góc mặt1, 4 góc mặt2 }. Xà dọc sống có 2 cạnh đáy nằm trên mặt1 & mặt2.
+// Mặt: trước ABFE[0,1,5,4] · phải BCHF[1,2,7,5] · sau CDGH[2,3,6,7] · trái DAEG[3,0,4,6].
+const HIP_DEF: ReadonlyArray<{ b: number; n: number; f1: number[]; f2: number[] }> = [
+  { b: 0, n: 4, f1: [0, 1, 5, 4], f2: [3, 0, 4, 6] }, // EA: trước + trái
+  { b: 1, n: 5, f1: [0, 1, 5, 4], f2: [1, 2, 7, 5] }, // FB: trước + phải
+  { b: 2, n: 7, f1: [1, 2, 7, 5], f2: [2, 3, 6, 7] }, // HC: phải + sau
+  { b: 3, n: 6, f1: [2, 3, 6, 7], f2: [3, 0, 4, 6] }, // GD: sau + trái
+]
+
+// 1 hộp = 8 đỉnh (0-3 đáy · 4-7 nóc). 12 tam giác. DoubleSide nên winding không tới hạn.
+// prettier-ignore
+const BOX_TRI = [
+  0, 2, 1, 0, 3, 2, // đáy
+  4, 5, 6, 4, 6, 7, // nóc
+  0, 1, 5, 0, 5, 4, // cạnh 0-1
+  1, 2, 6, 1, 6, 5, // cạnh 1-2
+  2, 3, 7, 2, 7, 6, // cạnh 2-3
+  3, 0, 4, 3, 4, 7, // cạnh 3-0
+]
+
 export class RoofPreview {
   private readonly renderer: THREE.WebGLRenderer
   private readonly scene = new THREE.Scene()
@@ -65,6 +85,13 @@ export class RoofPreview {
   private capGeo: THREE.BufferGeometry | null = null // khối GEFHWX = nêm trên nóc (đáy EFGH → đỉnh WX)
   private capMat: THREE.MeshStandardMaterial | null = null // xanh dương nhạt, opacity dùng chung setOpacity
   private capMesh: THREE.Mesh | null = null
+  private hipGeo: THREE.BufferGeometry | null = null // 4 hộp xà dọc sống EA/FB/HC/GD (2 cạnh đáy dính 2 mặt)
+  private hipMat: THREE.MeshStandardMaterial | null = null
+  private hipMesh: THREE.Mesh | null = null
+  private readonly hipMids: THREE.Mesh[] = [] // 4 trung điểm xà sống I1..I4 (sphere)
+  private readonly hipMidLabels: THREE.Sprite[] = [] // nhãn I1..I4
+  private hipMidGeo: THREE.SphereGeometry | null = null
+  private hipMidMat: THREE.MeshBasicMaterial | null = null
   private readonly decor: THREE.Object3D[] = [] // trục + lưới + nhãn trục (tĩnh, dispose ở cuối)
   private hemi: THREE.HemisphereLight | null = null // đèn nền — settings đổi độ sáng
   private key: THREE.DirectionalLight | null = null // đèn chiếu chính — settings đổi độ sáng
@@ -185,6 +212,8 @@ export class RoofPreview {
     this._initExtension()
     this._initCutEdge()
     this._initCapBlock()
+    this._initHipBeams()
+    this._initHipMids()
   }
 
   // Geometry rỗng cho LineSegments (vertCount đỉnh) — push vào lineGeos để dispose.
@@ -283,6 +312,39 @@ export class RoofPreview {
     this.capMesh = new THREE.Mesh(this.capGeo, this.capMat)
     this.capMesh.visible = false // hiện khi setCapBlock có apex hợp lệ
     this.scene.add(this.capMesh)
+  }
+
+  // 4 hộp xà dọc sống (EA/FB/HC/GD) — 4 box × 8 đỉnh = 32 đỉnh. Index cố định, vị trí cập nhật ở setHipBeams.
+  private _initHipBeams(): void {
+    this.hipGeo = new THREE.BufferGeometry()
+    this.hipGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(96), 3))
+    const idx: number[] = []
+    for (let k = 0; k < 4; k++) for (const t of BOX_TRI) idx.push(t + k * 8)
+    this.hipGeo.setIndex(idx)
+    this.hipMat = new THREE.MeshStandardMaterial({
+      color: 0x6b4a2a, // gỗ nâu sẫm
+      roughness: 0.7,
+      metalness: 0,
+      side: THREE.DoubleSide,
+      flatShading: true,
+    })
+    this.hipMesh = new THREE.Mesh(this.hipGeo, this.hipMat)
+    this.scene.add(this.hipMesh)
+  }
+
+  // 4 trung điểm xà sống I1..I4 (sphere lục + nhãn) — vị trí cập nhật ở setHipBeams.
+  private _initHipMids(): void {
+    this.hipMidGeo = new THREE.SphereGeometry(0.07, 12, 9)
+    this.hipMidMat = new THREE.MeshBasicMaterial({ color: 0x16a34a })
+    for (let i = 0; i < 4; i++) {
+      const m = new THREE.Mesh(this.hipMidGeo, this.hipMidMat)
+      this.hipMids.push(m)
+      this.scene.add(m)
+      const lbl = this._makeTextSprite(`I${i + 1}`, '#0f6b30')
+      lbl.scale.set(0.42, 0.42, 1)
+      this.hipMidLabels.push(lbl)
+      this.scene.add(lbl)
+    }
   }
 
   // 4 điểm di động A'B'C'D' (sphere cam) trên pháp tuyến + nhãn — vị trí cập nhật ở setApex.
@@ -588,6 +650,84 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     this.cutLabels[1].position.set(x1, y + 0.25, z)
   }
 
+  // Hướng TRONG MẶT từ sống vào lòng mặt (⊥ sống d): apex→centroid mặt rồi bỏ thành phần dọc d → chuẩn hóa.
+  private _slopeDir(
+    P: THREE.Vector3[],
+    face: number[],
+    apex: THREE.Vector3,
+    d: THREE.Vector3
+  ): THREE.Vector3 {
+    const c = new THREE.Vector3()
+    for (const i of face) c.add(P[i])
+    c.multiplyScalar(1 / face.length)
+    const v = new THREE.Vector3().subVectors(c, apex)
+    v.addScaledVector(d, -v.dot(d)) // bỏ thành phần dọc sống → nằm trong mặt, ⊥ sống
+    return v.normalize()
+  }
+
+  // Tính 8 đỉnh 1 hộp xà (4 đáy `lows` + vector cao `hv`). Tiết diện VUÔNG cạnh `side` (diện tích = side²): rộng =
+  // a·|s2−s1| = side (a tự suy), cao (vươn ra ngoài) = side. Dài = lenFrac·(Pn−Pb) từ đáy. 2 cạnh đáy LUÔN trên 2 mặt.
+  private _hipBox(
+    P: THREE.Vector3[],
+    C: THREE.Vector3,
+    hip: { b: number; n: number; f1: number[]; f2: number[] },
+    side: number,
+    lenFrac: number
+  ): { lows: THREE.Vector3[]; hv: THREE.Vector3 } {
+    const Pb = P[hip.b]
+    const full = new THREE.Vector3().subVectors(P[hip.n], Pb)
+    const d = new THREE.Vector3().copy(full).normalize()
+    const mid = new THREE.Vector3().copy(Pb).addScaledVector(full, 0.5)
+    const s1 = this._slopeDir(P, hip.f1, mid, d)
+    const s2 = this._slopeDir(P, hip.f2, mid, d)
+    const bdir = new THREE.Vector3().subVectors(s2, s1) // hướng cạnh đáy (men ngang giữa 2 mặt)
+    const a = side / (bdir.length() || 1) // → rộng tiết diện = a·|s2−s1| = side (vuông)
+    const Pe = new THREE.Vector3().copy(Pb).addScaledVector(full, lenFrac) // đầu xà (cắt theo chiều dài)
+    const lows = [
+      new THREE.Vector3().copy(Pb).addScaledVector(s1, a),
+      new THREE.Vector3().copy(Pb).addScaledVector(s2, a),
+      new THREE.Vector3().copy(Pe).addScaledVector(s2, a),
+      new THREE.Vector3().copy(Pe).addScaledVector(s1, a),
+    ]
+    const hv = new THREE.Vector3().copy(bdir).cross(d).normalize()
+    if (hv.dot(new THREE.Vector3().subVectors(mid, C)) < 0) hv.negate() // vươn RA NGOÀI
+    hv.multiplyScalar(side)
+    return { lows, hv }
+  }
+
+  // Đặt trung điểm xà I (hi=0..3) = tâm hộp = trung bình 4 đáy + nửa vector cao. show=false → ẩn marker + nhãn.
+  private _placeHipMid(hi: number, lows: THREE.Vector3[], hv: THREE.Vector3, show: boolean): void {
+    const ctr = new THREE.Vector3()
+    for (const lp of lows) ctr.add(lp)
+    ctr.multiplyScalar(0.25).addScaledVector(hv, 0.5)
+    this.hipMids[hi].position.copy(ctr)
+    this.hipMids[hi].visible = show
+    this.hipMidLabels[hi].position.set(ctr.x, ctr.y + 0.22, ctr.z)
+    this.hipMidLabels[hi].visible = show
+  }
+
+  // 4 hộp xà dọc sống EA/FB/HC/GD: tiết diện vuông DIỆN TÍCH `area` (m²) · dài `lenFrac` (×hip, từ đáy) + trung điểm I1–I4.
+  setHipBeams(verts: LabeledPoint[], area: number, lenFrac: number): void {
+    if (this.isDisposed || !this.hipGeo || verts.length < 8) return
+    const side = Math.sqrt(Math.max(0, area))
+    const P = verts.map((q) => new THREE.Vector3(q.x, q.y, q.z))
+    const C = new THREE.Vector3()
+    for (const p of P) C.add(p)
+    C.multiplyScalar(1 / P.length)
+    const attr = this.hipGeo.getAttribute('position') as THREE.BufferAttribute
+    const show = side > 0 && lenFrac > 0
+    let vi = 0
+    let hi = 0
+    for (const hip of HIP_DEF) {
+      const { lows, hv } = this._hipBox(P, C, hip, side, lenFrac)
+      for (const lp of lows) attr.setXYZ(vi++, lp.x, lp.y, lp.z)
+      for (const lp of lows) attr.setXYZ(vi++, lp.x + hv.x, lp.y + hv.y, lp.z + hv.z)
+      this._placeHipMid(hi++, lows, hv, show)
+    }
+    attr.needsUpdate = true
+    this.hipGeo.computeVertexNormals()
+  }
+
   // Khớp buffer render với kích thước HIỂN THỊ canvas (rộng×cao theo CSS) + aspect. Bỏ qua khi ẩn (client = 0).
   private _syncSize(): void {
     const cw = this.canvas.clientWidth
@@ -622,8 +762,19 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     for (const sp of this.projLabels) this._disposeSprite(sp) // nhãn K L M N
     for (const sp of this.extLabels) this._disposeSprite(sp) // nhãn O–V
     for (const sp of this.cutLabels) this._disposeSprite(sp) // nhãn W X
-    // geo/mat dùng chung: sphere 4 điểm A'B'C'D' + khối nêm GEFHWX (geo+mat)
-    for (const d of [this.apexGeo, this.apexMat, this.capGeo, this.capMat]) d?.dispose()
+    for (const sp of this.hipMidLabels) this._disposeSprite(sp) // nhãn I1..I4
+    // geo/mat dùng chung: sphere A'B'C'D' + nêm GEFHWX + 4 hộp xà + sphere trung điểm I
+    for (const d of [
+      this.apexGeo,
+      this.apexMat,
+      this.capGeo,
+      this.capMat,
+      this.hipGeo,
+      this.hipMat,
+      this.hipMidGeo,
+      this.hipMidMat,
+    ])
+      d?.dispose()
     for (const g of this.lineGeos) g.dispose() // geo pháp tuyến + KLMN (chung solid/dashed)
     for (const m of this.lineMats) m.dispose()
   }
