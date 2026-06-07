@@ -2413,9 +2413,12 @@ export class ArchPlanLab extends BaseWorld {
     const wcfgs = [...renderWaters(this.site), ...renderPuddles(this.site)]
     this._siteWaters = h.waters.map((surf, i) => ({ cfg: wcfgs[i], surf }))
     for (const x of this._siteWaters) x.surf.setCamera(this.camera) // dispose() tự free RTT reflector (né leak)
-    // 💧 Đẩy mặt nước sang layer riêng → virtual-camera reflector (layer 0) KHÔNG render mặt nước khác → 2+ hồ
-    // hết đơ gương (né re-entrancy _inReflector). Mất "nước-phản-chiếu-nước" (vốn không cần + né đệ quy).
-    for (const x of this._siteWaters) x.surf.getMesh().layers.set(WATER_REFLECT_LAYER)
+    // 💧 Mặt nước sang layer riêng + reflector LOẠI layer đó khỏi RTT (virtualCamera=camera.clone() copy layers
+    // → phải disable mỗi frame trong setTime) → 2+ hồ KHÔNG render-lẫn-nhau → hết đơ gương (_inReflector). KI-012.
+    for (const x of this._siteWaters) {
+      x.surf.getMesh().layers.set(WATER_REFLECT_LAYER)
+      x.surf.excludeReflectionLayer(WATER_REFLECT_LAYER)
+    }
     // active = pool tab đang chọn nếu còn render; không thì pool đầu (kể cả tắt, để GUI bind) → null nếu 0 pool.
     if (!this._activeWater || !this.site.waters.includes(this._activeWater)) {
       this._activeWater = this.site.waters.find((w) => w.kind === 'pool') ?? null
