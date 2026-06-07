@@ -3041,7 +3041,8 @@ export class ArchPlanLab extends BaseWorld {
         this._applySiteLive() // chưa có ref nền (show off / chưa render) → fallback đường cũ
         return
       }
-      const geo = groundGeometry(this.site, { buildingFootprint: this._foundationRects() })
+      // clean=false: live-drag bỏ-ô nhanh (răng cưa tạm, né clip Martinez mỗi frame). Buông → applySite(true) clip sạch.
+      const geo = groundGeometry(this.site, { buildingFootprint: this._foundationRects() }, false)
       const old = mesh.geometry
       mesh.geometry = geo
       const i = this.siteGeos.indexOf(old)
