@@ -696,11 +696,12 @@ function buildAddZoneExtras(
     })
   )
   layer.terrain ??= defaultTerrain() // 🏔️ gò riêng zone (đảm bảo field)
+  // live = applyTerrainLive (rebuild zone-only geo cell-drop, né water-RTT = tụt fps); buông = applySite clip sạch.
   buildTerrainControls(
     pane,
     ctx,
     layer.terrain,
-    () => ctx.applySiteLive(),
+    () => ctx.applyTerrainLive(),
     () => rebuild(flatIdx),
     false
   )

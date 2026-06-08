@@ -150,6 +150,7 @@ import {
   type TexturedSurfaceMaps,
 } from 'threejs-modules/shaders/surface/TexturedSurface' // 🧱 fence wall texture (tường dọc, triplanar) + material cache
 import {
+  buildGroundLayers,
   buildSiteFence,
   buildSiteGrass,
   gateWorldSpec,
@@ -3128,8 +3129,41 @@ export class ArchPlanLab extends BaseWorld {
       const i = this.siteGeos.indexOf(old)
       if (i >= 0) this.siteGeos[i] = geo // tracking để _clearSite dispose geo MỚI (không phải cũ đã free)
       old.dispose()
+      this._rebuildGroundLayersLive() // 🏔️ zones (G1+) bám gò/gò-riêng theo — rebuild zone-only (né water-RTT)
       if (this.sun) this.sun.shadow.needsUpdate = true // bóng nhà đổ trên gò đổi theo
     })
+  }
+
+  // 🏔️ LIVE rebuild ZONE meshes (G1+) khi kéo slider terrain G0/zone: gỡ+dispose mesh zone cũ (userData.groundLayerIdx)
+  // khỏi siteGroup rồi dựng lại clean=false (cell-drop nhanh). KHÔNG đụng nước(reflector)/cỏ/base → né tụt fps. Material
+  // zone = cache (resolveGroundMat, KHÔNG dispose); cut-patch material own → dispose tránh leak. Buông → _applySite clip sạch.
+  private _rebuildGroundLayersLive(): void {
+    if (!this.site.groundLayers?.length) return
+    const old = this.siteGroup.children.filter(
+      (o): o is THREE.Mesh => o instanceof THREE.Mesh && o.userData.groundLayerIdx !== undefined
+    )
+    for (const m of old) {
+      this.siteGroup.remove(m)
+      const gi = this.siteGeos.indexOf(m.geometry)
+      if (gi >= 0) this.siteGeos.splice(gi, 1)
+      m.geometry.dispose()
+      if (m.userData.isCutPatch) this._disposeSiteMat(m.material as THREE.Material) // cut-patch own mat
+    }
+    const ctx: SiteRenderCtx = {
+      group: this.siteGroup,
+      geos: this.siteGeos,
+      mats: this.siteMats,
+      shaders: this.siteShaders,
+    }
+    buildGroundLayers(this.site, ctx, this._siteTexOpts(), false) // clean=false (cell-drop, mượt fps)
+    this._applyCutVisibility() // cut-patch mới = ẩn; hiện lại mảng của layer active
+  }
+
+  // Gỡ 1 material khỏi siteMats + dispose (cut-patch own material lúc live-rebuild zones).
+  private _disposeSiteMat(mat: THREE.Material): void {
+    const mi = this.siteMats.indexOf(mat)
+    if (mi >= 0) this.siteMats.splice(mi, 1)
+    mat.dispose()
   }
 
   // Diện tích nhà phủ (m²) = Σ bbox shape tầng trệt — đối chiếu 建ぺい率 trong bảng số liệu.
