@@ -2521,11 +2521,15 @@ export class ArchPlanLab extends BaseWorld {
     return opts
   }
 
-  // 🪨 Key đá border đang dùng (unique) = mọi hồ pool/pond borderEnabled + borderMaterial≠none.
+  // 🪨 Key đá đang dùng (unique) = hồ pool/pond borderEnabled + borderMaterial≠none ∪ cụm đá non bộ material≠none.
+  // RockCluster dùng CHUNG cache/texture đá với border hồ (triplanar world-space) → 1 set, 1 material/key.
   private _usedBorderTexKeys(): BorderTexKey[] {
     const keys = new Set<BorderTexKey>()
     for (const w of renderWaters(this.site)) {
       if (w.borderEnabled && w.borderMaterial !== 'none') keys.add(w.borderMaterial)
+    }
+    for (const r of renderRocks(this.site)) {
+      if (r.material !== 'none') keys.add(r.material)
     }
     return [...keys]
   }

@@ -1615,6 +1615,14 @@ function buildWaterDomain(ctx: APGuiCtx): {
   }
 }
 
+// 🪨 Texture đá (triplanar) cho cụm non bộ — DÙNG CHUNG set với border hồ (icelandic/coal/rock). 'none' = màu phẳng.
+const ROCK_MAT_OPTS: [string, BorderMaterialKey][] = [
+  ['None (màu phẳng)', 'none'],
+  ['Icelandic jagged', 'icelandic-jagged'],
+  ['Coal stone', 'coal-stone'],
+  ['Rock rough', 'rock-rough'],
+]
+
 // 🪨 Slider STRUCTURAL 1 cụm đá (tuple [label, min, max, step, mmFactor, get, set]) — kéo = applyRocksLive
 // (rebuild rock-only, né water-RTT) / buông = applySite. Data-driven (rule-50). KHÔNG gồm Pos (live tuneRock) / Color.
 type RockSlider = [string, number, number, number, number, () => number, (v: number) => void]
@@ -1686,6 +1694,9 @@ function buildRockPane(
         mf
       )
     )
+  pane.appendChild(
+    selectRow('Material', ROCK_MAT_OPTS, r.material, (v) => ((r.material = v), ctx.applySite(true)))
+  )
   pane.appendChild(
     colorRow(
       'Color',
