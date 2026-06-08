@@ -8,8 +8,15 @@ import type GUI from 'lil-gui'
 import type * as THREE from 'three'
 import type { GrassBlades } from 'threejs-modules/components/GrassBlades'
 import type { RockCluster } from 'threejs-modules/components/RockCluster'
+import type { StoneScatter } from 'threejs-modules/components/StoneScatter'
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
-import type { CoverageStats, RockConfig, SiteState, WaterConfig } from 'threejs-modules/site/state'
+import type {
+  CoverageStats,
+  RockConfig,
+  SiteState,
+  StoneFieldConfig,
+  WaterConfig,
+} from 'threejs-modules/site/state'
 
 import type { GridOpts, GroundType, SunOpts } from '../scene/scene'
 import type { BuildingState, ShapeInstance } from '../state/state'
@@ -57,6 +64,12 @@ export interface APGuiCtx {
   // 🪨 LIVE drag slider STRUCTURAL đá (count/craggy/footprint…): rebuild CHỈ rock meshes (throttle) — KHÔNG đụng
   // water-RTT/cỏ/nền (= chỗ tụt fps). Buông → applySite(true) commit (bám gò + autosave).
   applyRocksLive(): void
+  // 🪨 Tinh chỉnh lối đi lát đá LIVE (vị trí/màu) trên StoneScatter của ĐÚNG instance cfg — KHÔNG dựng lại
+  // geometry. No-op nếu khuôn đó chưa render (tắt). cfg = config tab instance đang chỉnh.
+  tuneStoneField(cfg: StoneFieldConfig, apply: (s: StoneScatter) => void, persist: boolean): void
+  // 🪨 LIVE drag slider STRUCTURAL lối đi (frame/rMin/rMax/gap/seed…): rebuild CHỈ stone meshes (throttle) —
+  // KHÔNG đụng water-RTT/cỏ/nền. Buông → applySite(true) commit (bám gò + re-scatter cỏ né khuôn + autosave).
+  applyStoneFieldsLive(): void
   // 💧 Hiện VIỀN form định vị (mảng mờ mặt nền) khi KÉO slider Pos/Width/Depth — live preview vị trí+kích
   // thước KHÔNG rebuild (né leak reflector). Buông slider = applySite(true) commit + tự ẩn viền.
   previewWater(cfg: WaterConfig): void

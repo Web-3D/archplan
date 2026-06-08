@@ -141,6 +141,7 @@ import type { GrassBlades, GrassExcludeRect } from 'threejs-modules/components/G
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
 import type { RockCluster } from 'threejs-modules/components/RockCluster'
 import { SkyGradient } from 'threejs-modules/components/SkyGradient' // 🌅 bầu trời gradient ngày↔đêm
+import type { StoneScatter } from 'threejs-modules/components/StoneScatter' // 🪨 lối đi lát đá Poisson
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
@@ -155,6 +156,7 @@ import {
   buildRocks,
   buildSiteFence,
   buildSiteGrass,
+  buildStoneFields,
   gateWorldSpec,
   grassBuildSig,
   groundGeometry,
@@ -175,9 +177,11 @@ import {
   isGroundTexKey,
   renderPuddles,
   renderRocks,
+  renderStoneFields,
   renderWaters,
   type RockConfig,
   type SiteState,
+  type StoneFieldConfig,
   type WaterConfig,
 } from 'threejs-modules/site/state'
 import { Tabs } from 'threejs-modules/ui/Tabs' // 🗂️ tab ngang drawer (🏠 Building | 🌳 Ground | 🎛️ Lab)
@@ -595,6 +599,9 @@ export class ArchPlanLab extends BaseWorld {
   // 🪨 Cụm đá non bộ ĐANG SỐNG (đa-instance): cfg↔cluster zip theo renderRocks(site) → tune live (pos/màu) + rebuild
   // rock-only khi kéo slider structural. dispose thật do siteShaders lo (mỗi RockCluster trong đó).
   private _siteRocks: { cfg: RockConfig; cluster: RockCluster }[] = []
+  // 🪨 Lối đi lát đá ĐANG SỐNG (đa-instance): cfg↔field zip theo renderStoneFields(site) → tune live (pos/màu) +
+  // rebuild stone-only khi kéo slider structural. dispose thật do siteShaders lo (mỗi StoneScatter trong đó).
+  private _siteStoneFields: { cfg: StoneFieldConfig; field: StoneScatter }[] = []
   private _siteGroundMesh: THREE.Mesh | null = null // 🏔️ ref mesh nền base → LIVE-rebuild geometry-only (terrain drag)
   private _activeWater: WaterConfig | null = null
   private labExp: { dispose: () => void } | null = null // 🔀 thí nghiệm Lab đang active (Mái / Particles)
@@ -1661,7 +1668,14 @@ export class ArchPlanLab extends BaseWorld {
   // 4 callback tinh-chỉnh LIVE cỏ/hồ — tách spread để _makeGuiCtx gọn (rule-50).
   private _siteTuneGuiCtx(): Pick<
     APGuiCtx,
-    'tuneGrass' | 'tuneWater' | 'setActiveWater' | 'previewWater' | 'tuneRock' | 'applyRocksLive'
+    | 'tuneGrass'
+    | 'tuneWater'
+    | 'setActiveWater'
+    | 'previewWater'
+    | 'tuneRock'
+    | 'applyRocksLive'
+    | 'tuneStoneField'
+    | 'applyStoneFieldsLive'
   > {
     return {
       tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
@@ -1670,6 +1684,8 @@ export class ArchPlanLab extends BaseWorld {
       previewWater: (cfg) => this.waterTool?.showOutline(cfg),
       tuneRock: (cfg, apply, persist) => this._tuneRock(cfg, apply, persist),
       applyRocksLive: () => this._applyRocksLive(),
+      tuneStoneField: (cfg, apply, persist) => this._tuneStoneField(cfg, apply, persist),
+      applyStoneFieldsLive: () => this._applyStoneFieldsLive(),
     }
   }
 
@@ -2478,6 +2494,9 @@ export class ArchPlanLab extends BaseWorld {
     // 🪨 zip cfg↔cluster theo renderRocks(site) (cùng thứ tự lõi dựng) → tune live (pos/màu) nhắm đúng instance.
     const rcfgs = renderRocks(this.site)
     this._siteRocks = h.rocks.map((cluster, i) => ({ cfg: rcfgs[i], cluster }))
+    // 🪨 zip cfg↔field theo renderStoneFields(site) (cùng thứ tự lõi dựng) → tune live (pos/màu) nhắm đúng instance.
+    const sfcfgs = renderStoneFields(this.site)
+    this._siteStoneFields = h.stoneFields.map((field, i) => ({ cfg: sfcfgs[i], field }))
     for (const x of this._siteWaters) x.surf.setCamera(this.camera) // dispose() tự free RTT reflector (né leak)
     // 💧 Mặt nước sang layer riêng + reflector LOẠI layer đó khỏi RTT (virtualCamera=camera.clone() copy layers
     // → phải disable mỗi frame trong setTime) → 2+ hồ KHÔNG render-lẫn-nhau → hết đơ gương (_inReflector). KI-012.
@@ -2530,6 +2549,9 @@ export class ArchPlanLab extends BaseWorld {
     }
     for (const r of renderRocks(this.site)) {
       if (r.material !== 'none') keys.add(r.material)
+    }
+    for (const f of renderStoneFields(this.site)) {
+      if (f.material !== 'none') keys.add(f.material)
     }
     return [...keys]
   }
@@ -3110,6 +3132,48 @@ export class ArchPlanLab extends BaseWorld {
     this._siteRocks = clusters.map((cluster, i) => ({ cfg: rcfgs[i], cluster }))
   }
 
+  // 🪨 Tinh chỉnh lối đi lát đá LIVE (pos/màu) trên StoneScatter của ĐÚNG instance cfg — KHÔNG dựng lại geometry.
+  private _tuneStoneField(
+    cfg: StoneFieldConfig,
+    apply: (s: StoneScatter) => void,
+    persist: boolean
+  ): void {
+    const field = this._siteStoneFields.find((x) => x.cfg === cfg)?.field
+    if (field) apply(field)
+    if (this.sun) this.sun.shadow.needsUpdate = true // bóng đá đổ theo (đổi vị trí/màu)
+    if (persist) this.store.autosave(this.state, this.site)
+  }
+
+  // 🪨 LIVE drag slider STRUCTURAL lối đi (frame/rMin/rMax/gap/thickness/seed): rebuild CHỈ stone meshes (throttle
+  // ≤1/frame) — KHÔNG đụng nước(reflector)/cỏ/nền → né tụt fps. Buông → _applySite(true) commit (bám gò + cỏ né khuôn).
+  private _applyStoneFieldsLive(): void {
+    if (this._siteRaf) return
+    this._siteRaf = requestAnimationFrame(() => {
+      this._siteRaf = 0
+      this._rebuildStoneFieldsLive()
+      if (this.sun) this.sun.shadow.needsUpdate = true
+    })
+  }
+
+  // Gỡ+dispose mọi StoneScatter cũ (khỏi siteShaders + scene) rồi dựng lại từ state. field.dispose() lo
+  // geometry+material+gỡ mesh khỏi parent → chỉ cần rút khỏi siteShaders tránh double-dispose ở _clearSite.
+  private _rebuildStoneFieldsLive(): void {
+    for (const { field } of this._siteStoneFields) {
+      const si = this.siteShaders.indexOf(field)
+      if (si >= 0) this.siteShaders.splice(si, 1)
+      field.dispose()
+    }
+    const ctx: SiteRenderCtx = {
+      group: this.siteGroup,
+      geos: this.siteGeos,
+      mats: this.siteMats,
+      shaders: this.siteShaders,
+    }
+    const fields = buildStoneFields(this.site, ctx, this._siteTexOpts())
+    const sfcfgs = renderStoneFields(this.site)
+    this._siteStoneFields = fields.map((field, i) => ({ cfg: sfcfgs[i], field }))
+  }
+
   private _clearSite(): void {
     for (const g of this.siteGeos) g.dispose()
     for (const m of this.siteMats) m.dispose()
@@ -3121,6 +3185,7 @@ export class ArchPlanLab extends BaseWorld {
     // theo chữ ký → giữ nguyên scatter qua các rebuild không-liên-quan-cỏ (đây là cốt lõi né lag).
     this._siteWaters = [] // dispose thật do siteShaders lo (mỗi WaterSurface trong đó); _activeWater giữ (cfg ref)
     this._siteRocks = [] // 🪨 dispose thật do siteShaders lo (mỗi RockCluster trong đó)
+    this._siteStoneFields = [] // 🪨 dispose thật do siteShaders lo (mỗi StoneScatter trong đó)
     this.siteGroup.clear()
   }
 
