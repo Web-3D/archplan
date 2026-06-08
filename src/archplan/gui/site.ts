@@ -15,6 +15,7 @@ import type {
   FenceConfig,
   GroundLayer,
   GroundMaterialKey,
+  RockConfig,
   TerrainConfig,
   TerrainMound,
   WaterConfig,
@@ -28,6 +29,7 @@ import {
   GROUND_THICK_MIN,
   makeFence,
   makeGroundLayer,
+  makeRock,
   makeWater,
 } from 'threejs-modules/site/state'
 import { type TabItem, Tabs } from 'threejs-modules/ui/Tabs'
@@ -1613,13 +1615,136 @@ function buildWaterDomain(ctx: APGuiCtx): {
   }
 }
 
-// Hàng tab con SITE (Ground|Fence|Garden|Water) — tách khỏi setupSitePanel cho rule-50.
+// 🪨 Slider STRUCTURAL 1 cụm đá (tuple [label, min, max, step, mmFactor, get, set]) — kéo = applyRocksLive
+// (rebuild rock-only, né water-RTT) / buông = applySite. Data-driven (rule-50). KHÔNG gồm Pos (live tuneRock) / Color.
+type RockSlider = [string, number, number, number, number, () => number, (v: number) => void]
+function rockSliderSpecs(r: RockConfig): RockSlider[] {
+  return [
+    [
+      'Footprint',
+      0.3,
+      6,
+      0.1,
+      1000,
+      () => r.footprintRadius / 1000,
+      (v) => (r.footprintRadius = Math.round(v * 1000)),
+    ],
+    ['Height', 0.3, 5, 0.1, 1000, () => r.height / 1000, (v) => (r.height = Math.round(v * 1000))],
+    ['Count', 3, 60, 1, 1, () => r.rockCount, (v) => (r.rockCount = Math.round(v))],
+    ['Craggy', 0, 1, 0.05, 100, () => r.craggy, (v) => (r.craggy = v)],
+    ['Scale', 0.3, 3, 0.05, 100, () => r.rockScale, (v) => (r.rockScale = v)],
+    ['Detail', 1, 3, 1, 1, () => r.detail, (v) => (r.detail = Math.round(v))],
+    ['Seed', 0, 999, 1, 1, () => r.seed, (v) => (r.seed = Math.round(v))],
+  ]
+}
+
+// 🪨 1 hàng Pos (X/Z): kéo = tuneRock dời mesh LIVE (cheap, KHÔNG rebuild) / buông = applySite (bám gò chuẩn lại).
+// Lưu offset (mm); slider chạy theo mét (mmFactor 1000). Y giữ nguyên khi kéo, commit mới sample lại cao-độ gò.
+function rockPosRow(
+  ctx: APGuiCtx,
+  r: RockConfig,
+  label: string,
+  axis: 'offsetX' | 'offsetZ'
+): HTMLElement {
+  const move = (v: number): void =>
+    ctx.tuneRock(
+      r,
+      (rc) => (axis === 'offsetX' ? (rc.getMesh().position.x = v) : (rc.getMesh().position.z = v)),
+      false
+    )
+  return sliderRow(
+    label,
+    -15,
+    15,
+    0.1,
+    r[axis] / 1000,
+    (v, c) => ((r[axis] = Math.round(v * 1000)), c ? ctx.applySite(true) : move(v)),
+    1000
+  )
+}
+
+// 🪨 Controls 1 cụm đá: Enable + Pos X/Z (live) + slider structural (applyRocksLive kéo / applySite buông) +
+// Color (live setColor) + ✕ Remove. Tách rule-50.
+function buildRockPane(
+  ctx: APGuiCtx,
+  r: RockConfig,
+  i: number,
+  rebuild: (focus?: number) => void
+): HTMLElement {
+  const pane = document.createElement('div')
+  pane.appendChild(toggleRow('Enable', r.enabled, (on) => ((r.enabled = on), ctx.applySite(true))))
+  pane.append(rockPosRow(ctx, r, 'Pos X', 'offsetX'), rockPosRow(ctx, r, 'Pos Z', 'offsetZ'))
+  for (const [label, min, max, step, mf, get, set] of rockSliderSpecs(r))
+    pane.appendChild(
+      sliderRow(
+        label,
+        min,
+        max,
+        step,
+        get(),
+        (v, c) => (set(v), c ? ctx.applySite(true) : ctx.applyRocksLive()),
+        mf
+      )
+    )
+  pane.appendChild(
+    colorRow(
+      'Color',
+      r.color,
+      (hex, c) => ((r.color = hex), ctx.tuneRock(r, (rc) => rc.setColor(hex), c))
+    )
+  )
+  pane.appendChild(
+    removeRow('✕ Remove', () => {
+      const arr = ctx.site.rocks ?? []
+      arr.splice(arr.indexOf(r), 1)
+      rebuild(Math.max(0, i - 1))
+      ctx.applySite(true)
+    })
+  )
+  return pane
+}
+
+// 🪨 Hàng instance R1|R2|＋ — mỗi pane = buildRockPane. Rỗng → chỉ ＋ (thêm-mới BẬT luôn, thấy ngay). Tách rule-50.
+function buildRockTabs(ctx: APGuiCtx, host: HTMLElement, rebuild: (focus?: number) => void): Tabs {
+  const rocks = (ctx.site.rocks ??= [])
+  const items: TabItem[] = []
+  rocks.forEach((r, i) => {
+    const pane = buildRockPane(ctx, r, i, rebuild)
+    host.appendChild(pane)
+    items.push({ label: `R${i + 1}`, panel: pane, title: `Rock cluster ${i + 1}` })
+  })
+  const addBtn = addInstanceButton('rock', () => {
+    const arr = (ctx.site.rocks ??= [])
+    arr.push(makeRock(true)) // thêm-mới BẬT (clicked ＋ = muốn thấy đá ngay)
+    rebuild(arr.length - 1)
+    ctx.applySite(true)
+  })
+  return new Tabs(host, items, { classes: GROUND_TAB_CLASSES, injectCss: false, addEl: addBtn })
+}
+
+// 🪨 Sub-tab "Rock" → hàng instance R1|R2|＋ (đa cụm non bộ). Tabs động → rebuild mỗi thêm/xoá. Trả { panel, dispose }.
+function buildRockDomain(ctx: APGuiCtx): { panel: HTMLElement; dispose: () => void } {
+  const host = document.createElement('div')
+  host.classList.add('ap-ground-domain') // reuse style instance-tab (xám/nâu) — KHÔNG thêm CSS Factory
+  let tabs: Tabs | null = null
+  const rebuild = (focus?: number): void => {
+    tabs?.dispose()
+    host.replaceChildren()
+    tabs = buildRockTabs(ctx, host, rebuild)
+    if (focus !== undefined) tabs.select(focus, { trusted: false })
+  }
+  rebuild()
+  return { panel: host, dispose: (): void => tabs?.dispose() }
+}
+
+// Hàng tab con SITE (Ground|Fence|Garden|Water|Rock) — tách khỏi setupSitePanel cho rule-50.
 function makeSiteTabs(
   host: HTMLElement,
   ground: HTMLElement,
   fence: HTMLElement,
   garden: HTMLElement,
-  water: HTMLElement
+  water: HTMLElement,
+  rock: HTMLElement
 ): Tabs {
   return new Tabs(
     host,
@@ -1628,6 +1753,7 @@ function makeSiteTabs(
       { label: 'Fence', panel: fence, title: 'Fence' },
       { label: 'Garden', panel: garden, title: 'Grass (3D, any surface) + trees' },
       { label: 'Water', panel: water, title: 'Water: Pool / Pond / Puddle' },
+      { label: 'Rock', panel: rock, title: 'Non bộ — cụm đá mỏm (RockCluster)' },
     ],
     {
       classes: {
@@ -1641,8 +1767,9 @@ function makeSiteTabs(
   )
 }
 
-// Panel "🌳 Ground" (drawer tab) — chia BẬC TAB con "Ground" | "Fence" | "Garden" | "Water" (folder-style).
+// Panel "🌳 Ground" (drawer tab) — chia BẬC TAB con "Ground" | "Fence" | "Garden" | "Water" | "Rock" (folder-style).
 // "Garden" lồng BẬC 2 (Grass|Tree) — Grass = on/off + slider chi tiết cỏ (chuyển từ Lab; preview ở lại Lab).
+// "Rock" 🪨 = non bộ — hàng instance R1|R2|＋ cụm đá mỏm (RockCluster); Pos/Color live, structural rebuild rock-only.
 // Trả { panel, dispose, navigateToWater }: panel cho drawer Tabs; navigateToWater = click hồ 3D → mở tab hồ.
 export function setupSitePanel(
   ctx: APGuiCtx,
@@ -1678,18 +1805,19 @@ export function setupSitePanel(
   const water = buildWaterDomain(ctx)
   const waterSub = water.panel
 
-  p.append(groundSub, fenceSub, gardenSub, waterSub)
+  // Sub-tab "Rock": 🪨 non bộ — hàng instance R1|R2|＋ (cụm đá mỏm). Cạnh Water.
+  const rock = buildRockDomain(ctx)
+  const rockSub = rock.panel
+
+  p.append(groundSub, fenceSub, gardenSub, waterSub, rockSub)
   container?.appendChild(p)
 
-  const tabs = makeSiteTabs(p, groundSub, fenceSub, gardenSub, waterSub)
+  const tabs = makeSiteTabs(p, groundSub, fenceSub, gardenSub, waterSub, rockSub)
   return {
     panel: p,
     dispose: (): void => {
       tabs.dispose()
-      ground.dispose()
-      fence.dispose()
-      garden.dispose()
-      water.dispose()
+      for (const d of [ground, fence, garden, water, rock]) d.dispose()
     },
     // Click hồ 3D → mở sub-tab "Water" (index 3) rồi ủy quyền water domain mở type+instance tab của cfg.
     navigateToWater: (cfg: WaterConfig): boolean => {

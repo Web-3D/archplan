@@ -139,6 +139,7 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js'
 import { PMREMGenerator } from 'three/webgpu'
 import type { GrassBlades, GrassExcludeRect } from 'threejs-modules/components/GrassBlades'
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
+import type { RockCluster } from 'threejs-modules/components/RockCluster'
 import { SkyGradient } from 'threejs-modules/components/SkyGradient' // 🌅 bầu trời gradient ngày↔đêm
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
@@ -151,6 +152,7 @@ import {
 } from 'threejs-modules/shaders/surface/TexturedSurface' // 🧱 fence wall texture (tường dọc, triplanar) + material cache
 import {
   buildGroundLayers,
+  buildRocks,
   buildSiteFence,
   buildSiteGrass,
   gateWorldSpec,
@@ -172,7 +174,9 @@ import {
   type GroundMaterialKey,
   isGroundTexKey,
   renderPuddles,
+  renderRocks,
   renderWaters,
+  type RockConfig,
   type SiteState,
   type WaterConfig,
 } from 'threejs-modules/site/state'
@@ -588,6 +592,9 @@ export class ArchPlanLab extends BaseWorld {
   // 💧 Hồ ĐANG SỐNG (đa-instance): cfg↔surf zip theo renderWaters(site). _activeWater = pool của tab đang
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
+  // 🪨 Cụm đá non bộ ĐANG SỐNG (đa-instance): cfg↔cluster zip theo renderRocks(site) → tune live (pos/màu) + rebuild
+  // rock-only khi kéo slider structural. dispose thật do siteShaders lo (mỗi RockCluster trong đó).
+  private _siteRocks: { cfg: RockConfig; cluster: RockCluster }[] = []
   private _siteGroundMesh: THREE.Mesh | null = null // 🏔️ ref mesh nền base → LIVE-rebuild geometry-only (terrain drag)
   private _activeWater: WaterConfig | null = null
   private labExp: { dispose: () => void } | null = null // 🔀 thí nghiệm Lab đang active (Mái / Particles)
@@ -1654,13 +1661,15 @@ export class ArchPlanLab extends BaseWorld {
   // 4 callback tinh-chỉnh LIVE cỏ/hồ — tách spread để _makeGuiCtx gọn (rule-50).
   private _siteTuneGuiCtx(): Pick<
     APGuiCtx,
-    'tuneGrass' | 'tuneWater' | 'setActiveWater' | 'previewWater'
+    'tuneGrass' | 'tuneWater' | 'setActiveWater' | 'previewWater' | 'tuneRock' | 'applyRocksLive'
   > {
     return {
       tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
       tuneWater: (cfg, apply, persist) => this._tuneWater(cfg, apply, persist),
       setActiveWater: (cfg) => this.waterTool?.setActiveCfg(cfg),
       previewWater: (cfg) => this.waterTool?.showOutline(cfg),
+      tuneRock: (cfg, apply, persist) => this._tuneRock(cfg, apply, persist),
+      applyRocksLive: () => this._applyRocksLive(),
     }
   }
 
@@ -2466,6 +2475,9 @@ export class ArchPlanLab extends BaseWorld {
     // dựng → ghép lại để drag/tune/handle nhắm đúng instance (gồm cả puddle).
     const wcfgs = [...renderWaters(this.site), ...renderPuddles(this.site)]
     this._siteWaters = h.waters.map((surf, i) => ({ cfg: wcfgs[i], surf }))
+    // 🪨 zip cfg↔cluster theo renderRocks(site) (cùng thứ tự lõi dựng) → tune live (pos/màu) nhắm đúng instance.
+    const rcfgs = renderRocks(this.site)
+    this._siteRocks = h.rocks.map((cluster, i) => ({ cfg: rcfgs[i], cluster }))
     for (const x of this._siteWaters) x.surf.setCamera(this.camera) // dispose() tự free RTT reflector (né leak)
     // 💧 Mặt nước sang layer riêng + reflector LOẠI layer đó khỏi RTT (virtualCamera=camera.clone() copy layers
     // → phải disable mỗi frame trong setTime) → 2+ hồ KHÔNG render-lẫn-nhau → hết đơ gương (_inReflector). KI-012.
@@ -3054,6 +3066,46 @@ export class ArchPlanLab extends BaseWorld {
     if (persist) this.store.autosave(this.state, this.site)
   }
 
+  // 🪨 Chỉnh LIVE cụm đá của ĐÚNG instance cfg (vị trí mesh / màu) — KHÔNG dựng lại geometry. No-op nếu cụm đó
+  // chưa render (tắt). Pos đổi → mesh.position (Y giữ; bám-gò chuẩn lại khi commit applySite). Màu → setColor.
+  private _tuneRock(cfg: RockConfig, apply: (r: RockCluster) => void, persist: boolean): void {
+    const cluster = this._siteRocks.find((x) => x.cfg === cfg)?.cluster
+    if (cluster) apply(cluster)
+    if (this.sun) this.sun.shadow.needsUpdate = true // bóng đá đổ theo (đổi vị trí/hình)
+    if (persist) this.store.autosave(this.state, this.site)
+  }
+
+  // 🪨 LIVE drag slider STRUCTURAL đá (count/craggy/footprint/height/scale/detail/seed): rebuild CHỈ rock meshes
+  // (throttle ≤1/frame) — dispose cụm cũ (geometry+material) khỏi siteShaders rồi buildRocks lại. KHÔNG đụng
+  // nước(reflector)/cỏ/nền → né tụt fps. Buông → _applySite(true) commit (bám gò chuẩn + autosave).
+  private _applyRocksLive(): void {
+    if (this._siteRaf) return
+    this._siteRaf = requestAnimationFrame(() => {
+      this._siteRaf = 0
+      this._rebuildRocksLive()
+      if (this.sun) this.sun.shadow.needsUpdate = true
+    })
+  }
+
+  // Gỡ+dispose mọi RockCluster cũ (khỏi siteShaders + scene) rồi dựng lại từ state. cluster.dispose() lo
+  // geometry+material+gỡ mesh khỏi parent → chỉ cần rút khỏi siteShaders tránh double-dispose ở _clearSite.
+  private _rebuildRocksLive(): void {
+    for (const { cluster } of this._siteRocks) {
+      const si = this.siteShaders.indexOf(cluster)
+      if (si >= 0) this.siteShaders.splice(si, 1)
+      cluster.dispose()
+    }
+    const ctx: SiteRenderCtx = {
+      group: this.siteGroup,
+      geos: this.siteGeos,
+      mats: this.siteMats,
+      shaders: this.siteShaders,
+    }
+    const clusters = buildRocks(this.site, ctx, this._siteTexOpts())
+    const rcfgs = renderRocks(this.site)
+    this._siteRocks = clusters.map((cluster, i) => ({ cfg: rcfgs[i], cluster }))
+  }
+
   private _clearSite(): void {
     for (const g of this.siteGeos) g.dispose()
     for (const m of this.siteMats) m.dispose()
@@ -3064,6 +3116,7 @@ export class ArchPlanLab extends BaseWorld {
     // 🌿 KHÔNG đụng _siteGrass ở đây: cỏ sống trong _grassGroup BỀN, dispose/dựng lại do _syncGrass quản
     // theo chữ ký → giữ nguyên scatter qua các rebuild không-liên-quan-cỏ (đây là cốt lõi né lag).
     this._siteWaters = [] // dispose thật do siteShaders lo (mỗi WaterSurface trong đó); _activeWater giữ (cfg ref)
+    this._siteRocks = [] // 🪨 dispose thật do siteShaders lo (mỗi RockCluster trong đó)
     this.siteGroup.clear()
   }
 
