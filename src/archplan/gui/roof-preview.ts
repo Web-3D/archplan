@@ -1121,23 +1121,25 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     for (const lp of lows) attr.setXYZ(i++, lp.x + hv.x, lp.y + hv.y, lp.z + hv.z)
   }
 
-  // 4 XÀ SỐNG dọc hip EA/FB/HC/GD — CHỈ NỬA DƯỚI (góc nhấc tip → TRUNG ĐIỂM hip I), chuỗi `n` đốt STRADDLE: 2 cạnh
-  // đáy LUÔN trên 2 mặt tạo hip, thân vươn LÊN (nằm trên sống). I1–I4 = trung điểm hip (t=0.5, ngay trên hip cong).
-  // Đốt neo ở I kéo xuống tip theo `lenFrac` (lenFrac=1 → I→tip = nửa dưới đầy). Bézier tip → nóc, control theo `curve`.
+  // 4 XÀ SỐNG dọc hip EA/FB/HC/GD — CHỈ NỬA DƯỚI (góc nhấc tip → ĐIỂM I), chuỗi `n` đốt STRADDLE: 2 cạnh
+  // đáy LUÔN trên 2 mặt tạo hip, thân vươn LÊN (nằm trên sống). I1–I4 = điểm TRƯỢT trên hip (t=`midT`, ngay trên hip cong).
+  // Đốt neo ở I kéo xuống tip theo `lenFrac` (lenFrac=1 → I→tip đầy). Bézier tip → nóc, control theo `curve`.
   setHipBeams(
     verts: LabeledPoint[],
     heights: number[],
     area: number,
     lenFrac: number,
     seg: number,
-    curve: number
+    curve: number,
+    midT = 0.5, // VỊ TRÍ I dọc hip (t∈[0,1]: 0 = góc nhấc/tip · 1 = nóc). Slider "Vị trí I".
+    midY = 0 // ĐÈ HIP: dịch Y của I (nâng/hạ sống). Slider "Đè hip Y". Tent đỉnh tại I → marker lên đúng đoạn này.
   ): void {
     if (this.isDisposed || !this.hipGeo || verts.length < 8) return
     const side = Math.sqrt(Math.max(0, area))
     const n = Math.max(1, Math.min(MAX_CORNER_SEG, Math.round(seg)))
     const show = side > 0 && lenFrac > 0
     const attr = this.hipGeo.getAttribute('position') as THREE.BufferAttribute
-    const tStart = 0.5 * (1 - lenFrac) // neo ở I (t=0.5) kéo xuống D' (t=0) theo lenFrac
+    const tStart = midT * (1 - lenFrac) // neo ở I (t=midT) kéo xuống tip (t=0) theo lenFrac
     let box = 0
     for (let c = 0; c < 4; c++) {
       const co = verts[c]
@@ -1152,15 +1154,17 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
       const c2 = this._faceCentroid(verts, heights, HIP_FACES[c][1])
       let prev = this._bezierAt(tip, ctrl, nocV, tStart)
       for (let s = 1; s <= n; s++) {
-        const p = this._bezierAt(tip, ctrl, nocV, tStart + (0.5 - tStart) * (s / n))
+        const p = this._bezierAt(tip, ctrl, nocV, tStart + (midT - tStart) * (s / n))
         if (show) this._straddleSeg(attr, box, [prev, p], [c1, c2], side)
         box++
         prev = p
       }
-      this._placeHipMidAt(c, this._bezierAt(tip, ctrl, nocV, 0.5), show) // I = TRUNG ĐIỂM hip (t=0.5)
+      const iPt = this._bezierAt(tip, ctrl, nocV, midT) // I trên hip (t=midT)
+      iPt.y += midY // ĐÈ Y: nâng/hạ I (tent đỉnh=1 tại midT) → khớp mặt hip đã đè
+      this._placeHipMidAt(c, iPt, show)
     }
     attr.needsUpdate = true
-    this.hipGeo.setDrawRange(0, show ? box * BOX_TRI.length : 0)
+    this.hipGeo.setDrawRange(0, Number(show) * box * BOX_TRI.length) // show=false → 0 (né ternary, giảm complexity)
     this.hipGeo.computeVertexNormals()
   }
 
@@ -1183,19 +1187,19 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     }
   }
 
-  // X1 = trung điểm cung hiên OA' (mép trước gần A), Y1 = cung hiên VA' (mép trái gần A) — TRÊN cung (giống I/J, t=0.5).
-  // Cung = CÙNG Bézier với setEave (_cornerArc): inner(O/V, y=0) → A' (góc nhấc), control kéo về góc đáy A theo curve.
-  setArcMids(verts: LabeledPoint[], heights: number[], curve: number): void {
+  // X1 trên cung hiên OA' (mép trước gần A), Y1 trên cung hiên VA' (mép trái gần A) — TRƯỢT THEO I: cùng tỉ lệ
+  // khoảng-cách-từ-A' như I trên hip (midT). Cung Bézier inner(O/V,y=0)→A'(tip): A' ở t=1 → fraction midT từ A' = t=1−midT.
+  setArcMids(verts: LabeledPoint[], heights: number[], curve: number, midT = 0.5): void {
     if (this.isDisposed || verts.length < 8) return
     const a = new THREE.Vector3(verts[0].x, verts[0].y, verts[0].z) // góc đáy A
     const tip = new THREE.Vector3(verts[0].x, verts[0].y + heights[0], verts[0].z) // A'
     const ptO = new THREE.Vector3(verts[4].x, 0, verts[0].z) // O = (E.x, A.z) mép trước
     const ptV = new THREE.Vector3(verts[0].x, 0, verts[4].z) // V = (A.x, E.z) mép trái
-    const arcMid = (inner: THREE.Vector3): THREE.Vector3 => {
+    const arcAt = (inner: THREE.Vector3): THREE.Vector3 => {
       const ctrl = new THREE.Vector3().addVectors(inner, tip).multiplyScalar(0.5).lerp(a, curve)
-      return this._bezierAt(inner, ctrl, tip, 0.5)
+      return this._bezierAt(inner, ctrl, tip, 1 - midT) // bám I: cùng fraction từ A'
     }
-    const pts = [arcMid(ptO), arcMid(ptV)]
+    const pts = [arcAt(ptO), arcAt(ptV)]
     for (let i = 0; i < 2; i++) {
       this.arcMids[i].position.copy(pts[i])
       this.arcMidLabels[i].position.set(pts[i].x, pts[i].y + 0.22, pts[i].z)
