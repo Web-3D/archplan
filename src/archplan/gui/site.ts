@@ -252,15 +252,23 @@ function buildGroundControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => vo
     )
   )
   buildLotSliders(body, ctx, refresh)
-  buildTerrainControls(body, ctx, refresh)
+  site.terrain ??= defaultTerrain() // đảm bảo G0 có terrain field
+  buildTerrainControls(body, ctx, site.terrain, () => ctx.applyTerrainLive(), refresh, true)
 }
 
 // 🏔️ Section Terrain (nền gò sân vườn) trong tab Ground — bộ thông số noise ĐẦY ĐỦ. Mọi param STRUCTURAL →
 // ctx.applySite(c) (kéo = live-rebuild, buông = commit) như slider Thickness. Data-driven 10 slider (rule-50).
-function buildTerrainControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => void): void {
-  const site = ctx.site
-  const t = site.terrain ?? defaultTerrain()
-  site.terrain = t // đảm bảo state cũ (thiếu terrain) có field
+// Section Terrain DÙNG CHUNG: G0 nền (t=site.terrain, applyLive=applyTerrainLive geo-swap, showDetail=true) HOẶC
+// zone riêng (t=layer.terrain, applyLive=applySiteLive, showDetail=false — detail per-zone = Feature sau). Caller
+// đảm bảo `t` tồn tại (ensure ??= defaultTerrain). Mọi param structural → applySite(true) khi buông.
+function buildTerrainControls(
+  body: HTMLElement,
+  ctx: APGuiCtx,
+  t: TerrainConfig,
+  applyLive: () => void,
+  refresh: () => void,
+  showDetail: boolean
+): void {
   const hdr = document.createElement('div')
   hdr.textContent = '🏔️ Terrain (gò sân vườn)'
   hdr.style.cssText = 'margin:7px 0 3px;font-weight:600;opacity:.85'
@@ -268,8 +276,6 @@ function buildTerrainControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => v
     hdr,
     toggleRow('Enable terrain', t.enabled, (on) => ((t.enabled = on), ctx.applySite(true)))
   )
-  // Kéo (c=false) → applyTerrainLive: SWAP geometry nền base (né water-RTT/recompile = tụt fps). Buông (c=true)
-  // → applySite(true): full rebuild + autosave. Mọi param terrain đều structural-geometry → cùng đường này.
   for (const [label, min, max, step, mf, get, set] of terrainSliderSpecs(t))
     body.appendChild(
       sliderRow(
@@ -278,24 +284,24 @@ function buildTerrainControls(body: HTMLElement, ctx: APGuiCtx, refresh: () => v
         max,
         step,
         get(),
-        (v, c) => (set(v), c ? ctx.applySite(true) : ctx.applyTerrainLive()),
+        (v, c) => (set(v), c ? ctx.applySite(true) : applyLive()),
         mf
       )
     )
-  // 🏔️ Detail (Phase 4): micro-relief normal — KHÁC slider trên (geometry): chỉ đổi UNIFORM PhotoGround → live
-  // = applyTerrainDetail (KHÔNG rebuild geo/recompile), buông = applySite(true) persist. Chỉ ăn trên ground texture.
-  body.appendChild(
-    sliderRow(
-      'Detail (sần)',
-      0,
-      1,
-      0.05,
-      t.detail,
-      (v, c) => ((t.detail = v), c ? ctx.applySite(true) : ctx.applyTerrainDetail()),
-      1
+  // 🏔️ Detail (Phase 4): micro-relief normal (UNIFORM PhotoGround, KHÔNG geo) — chỉ G0 (showDetail). Per-zone = sau.
+  if (showDetail)
+    body.appendChild(
+      sliderRow(
+        'Detail (sần)',
+        0,
+        1,
+        0.05,
+        t.detail,
+        (v, c) => ((t.detail = v), c ? ctx.applySite(true) : ctx.applyTerrainDetail()),
+        1
+      )
     )
-  )
-  buildMoundControls(body, ctx, t, refresh) // ⛰️ gò nặn tay (Phase 3)
+  buildMoundControls(body, ctx, t, applyLive, refresh) // ⛰️ gò nặn tay (Phase 3)
 }
 
 // ⛰️ Gò nặn-tay (Phase 3): list mounds + ＋thêm/✕xoá + slider mỗi gò. Mounds cộng vào heightAt (Σ gò, đã có từ
@@ -305,6 +311,7 @@ function buildMoundControls(
   body: HTMLElement,
   ctx: APGuiCtx,
   t: TerrainConfig,
+  applyLive: () => void,
   refresh: () => void
 ): void {
   const halfW = ctx.site.lotWidth / 2000
@@ -313,7 +320,7 @@ function buildMoundControls(
   hdr.textContent = '⛰️ Gò nặn tay'
   hdr.style.cssText = 'margin:8px 0 2px;font-weight:600;opacity:.85'
   body.appendChild(hdr)
-  t.mounds.forEach((m, i) => buildMoundRow(body, ctx, t, m, i, halfW, halfD, refresh))
+  t.mounds.forEach((m, i) => buildMoundRow(body, ctx, t, m, i, halfW, halfD, applyLive, refresh))
   const addRow = document.createElement('div')
   addRow.style.cssText = 'margin-top:6px'
   const btn = document.createElement('button')
@@ -344,6 +351,7 @@ function buildMoundRow(
   i: number,
   halfW: number,
   halfD: number,
+  applyLive: () => void,
   refresh: () => void
 ): void {
   const box = document.createElement('div')
@@ -360,7 +368,7 @@ function buildMoundRow(
         max,
         step,
         get(),
-        (v, c) => (set(v), c ? ctx.applySite(true) : ctx.applyTerrainLive()),
+        (v, c) => (set(v), c ? ctx.applySite(true) : applyLive()),
         mf
       )
     )
@@ -671,6 +679,33 @@ function groundFormRow(ctx: APGuiCtx, layer: GroundLayer): HTMLElement {
 
 // Pane 1 ZONE (op='add': +Surface +Thickness) hoặc CUT (op='cut': chỉ hình+vị trí — khoét không có vật liệu/bề
 // dày riêng). Form + Length/Width + Pos X/Z (cut định vị bằng slider vì không có mesh để Move-drag) + ✕ xoá.
+// Phần riêng ADD-zone (sau Length/Width): Thickness + Drape + section Terrain GÒ-RIÊNG zone. Tách giữ buildZonePane
+// ≤50 dòng. Drape structural→rebuild; Terrain reuse buildTerrainControls (live=applySiteLive, refresh=focus zone).
+function buildAddZoneExtras(
+  pane: HTMLElement,
+  ctx: APGuiCtx,
+  layer: GroundLayer,
+  flatIdx: number,
+  rebuild: (focus?: number) => void
+): void {
+  pane.appendChild(layerSlider(ctx, layer, 'thickness', 'Thickness cm', 1, 10, 0.5, 10))
+  pane.appendChild(
+    toggleRow('Drape (bám gò)', layer.drape ?? false, (on) => {
+      layer.drape = on
+      ctx.applySite(true)
+    })
+  )
+  layer.terrain ??= defaultTerrain() // 🏔️ gò riêng zone (đảm bảo field)
+  buildTerrainControls(
+    pane,
+    ctx,
+    layer.terrain,
+    () => ctx.applySiteLive(),
+    () => rebuild(flatIdx),
+    false
+  )
+}
+
 function buildZonePane(
   ctx: APGuiCtx,
   layer: GroundLayer,
@@ -696,16 +731,7 @@ function buildZonePane(
   pane.appendChild(groundFormRow(ctx, layer)) // circle=đường kính, ellipse=trục X
   pane.appendChild(layerSlider(ctx, layer, 'length', 'Length m', 0.5, 40, 0.1, 1000))
   pane.appendChild(layerSlider(ctx, layer, 'width', 'Width m', 0.5, 40, 0.1, 1000))
-  if (op === 'add') {
-    pane.appendChild(layerSlider(ctx, layer, 'thickness', 'Thickness cm', 1, 10, 0.5, 10))
-    // 🏔️ Drape: zone UỐN theo gò (lưới displaced) thay vì slab phẳng. Chỉ ăn khi Terrain bật. structural → rebuild.
-    pane.appendChild(
-      toggleRow('Drape (bám gò)', layer.drape ?? false, (on) => {
-        layer.drape = on
-        ctx.applySite(true)
-      })
-    )
-  }
+  if (op === 'add') buildAddZoneExtras(pane, ctx, layer, flatIdx, rebuild)
   pane.appendChild(layerSlider(ctx, layer, 'offsetX', 'Pos X m', -20, 20, 0.1, 1000))
   pane.appendChild(layerSlider(ctx, layer, 'offsetZ', 'Pos Z m', -20, 20, 0.1, 1000))
   pane.appendChild(
