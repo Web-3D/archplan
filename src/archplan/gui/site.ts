@@ -696,8 +696,16 @@ function buildZonePane(
   pane.appendChild(groundFormRow(ctx, layer)) // circle=đường kính, ellipse=trục X
   pane.appendChild(layerSlider(ctx, layer, 'length', 'Length m', 0.5, 40, 0.1, 1000))
   pane.appendChild(layerSlider(ctx, layer, 'width', 'Width m', 0.5, 40, 0.1, 1000))
-  if (op === 'add')
+  if (op === 'add') {
     pane.appendChild(layerSlider(ctx, layer, 'thickness', 'Thickness cm', 1, 10, 0.5, 10))
+    // 🏔️ Drape: zone UỐN theo gò (lưới displaced) thay vì slab phẳng. Chỉ ăn khi Terrain bật. structural → rebuild.
+    pane.appendChild(
+      toggleRow('Drape (bám gò)', layer.drape ?? false, (on) => {
+        layer.drape = on
+        ctx.applySite(true)
+      })
+    )
+  }
   pane.appendChild(layerSlider(ctx, layer, 'offsetX', 'Pos X m', -20, 20, 0.1, 1000))
   pane.appendChild(layerSlider(ctx, layer, 'offsetZ', 'Pos Z m', -20, 20, 0.1, 1000))
   pane.appendChild(
