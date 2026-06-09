@@ -57,6 +57,12 @@ export interface APGuiCtx {
   // 🪨 LIVE drag slider STRUCTURAL đá (count/craggy/footprint…): rebuild CHỈ rock meshes (throttle) — KHÔNG đụng
   // water-RTT/cỏ/nền (= chỗ tụt fps). Buông → applySite(true) commit (bám gò + autosave).
   applyRocksLive(): void
+  // 🪨 XOAY path-zone LIVE: CHỈ set mesh.rotation.y (transform thuần — KHÔNG rebuild gì → né water-RTT = tụt fps).
+  // flatIdx = index trong groundLayers (mesh.userData.groundLayerIdx). Buông slider → applySite(true) commit.
+  tunePathRotLive(flatIdx: number, rotDeg: number): void
+  // 🪨 LIVE drag slider STRUCTURAL path (frame/R/gap/seed…): rebuild CHỈ zone meshes (surface+path, throttle) —
+  // KHÔNG đụng water-RTT/cỏ/nền. Buông → applySite(true) commit.
+  applyZonesLive(): void
   // 💧 Hiện VIỀN form định vị (mảng mờ mặt nền) khi KÉO slider Pos/Width/Depth — live preview vị trí+kích
   // thước KHÔNG rebuild (né leak reflector). Buông slider = applySite(true) commit + tự ẩn viền.
   previewWater(cfg: WaterConfig): void

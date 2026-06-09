@@ -744,8 +744,8 @@ function pathFormRow(ctx: APGuiCtx, layer: GroundLayer): HTMLElement {
   return selectRow('Form', PATH_FORM_OPTS, cur, (v) => ((layer.shape = v), ctx.applySite(true)))
 }
 
-// 🪨 Slider STRUCTURAL rải đá path-zone (tuple [label,min,max,step,mmFactor,get,set]) — kéo/buông = applySite(c)
-// (như slider surface zone). Data-driven (rule-50).
+// 🪨 Slider STRUCTURAL rải đá path-zone (tuple [label,min,max,step,mmFactor,get,set]) — KÉO = applyZonesLive
+// (rebuild zone-only, NÉ water-RTT = tụt fps) / buông = applySite. KHÔNG gồm Rotate (live transform riêng). Data-driven.
 function pathSliderSpecs(p: StonePathParams): RockSlider[] {
   return [
     ['R min', 0.05, 2, 0.01, 1000, () => p.rMin / 1000, (v) => (p.rMin = Math.round(v * 1000))],
@@ -762,24 +762,60 @@ function pathSliderSpecs(p: StonePathParams): RockSlider[] {
       (v) => (p.thickness = Math.round(v * 1000)),
     ],
     ['Seed', 0, 999, 1, 1, () => p.seed, (v) => (p.seed = Math.round(v))],
-    ['Rotate°', -180, 180, 1, 1, () => p.rot, (v) => (p.rot = Math.round(v))],
   ]
 }
 
-// 🪨 Thân pane PATH-zone: Form (rect/tròn) + Frame W/D + slider đá (gồm Rotate) + Material (texture) + Color.
-function buildPathZoneBody(pane: HTMLElement, ctx: APGuiCtx, layer: GroundLayer): void {
+// 🪨 Hàng XOAY path: kéo = tunePathRotLive (CHỈ set mesh.rotation.y — 0 rebuild, né water-RTT) / buông = applySite.
+function pathRotRow(ctx: APGuiCtx, p: StonePathParams, flatIdx: number): HTMLElement {
+  return sliderRow(
+    'Rotate°',
+    -180,
+    180,
+    1,
+    p.rot,
+    (v, c) => (
+      (p.rot = Math.round(v)),
+      c ? ctx.applySite(true) : ctx.tunePathRotLive(flatIdx, p.rot)
+    ),
+    1
+  )
+}
+
+// 🪨 Thân pane PATH-zone: Form (rect/tròn) + Frame W/D + slider đá + Rotate (live) + Material + Color. Slider
+// structural KÉO = applyZonesLive (né water-RTT); buông = applySite. flatIdx cho xoay live nhắm đúng mesh.
+function buildPathZoneBody(
+  pane: HTMLElement,
+  ctx: APGuiCtx,
+  layer: GroundLayer,
+  flatIdx: number
+): void {
   const p = (layer.path ??= makeStonePathParams())
   pane.appendChild(pathFormRow(ctx, layer)) // Chữ nhật | Tròn
   pane.appendChild(layerSlider(ctx, layer, 'length', 'Frame W m', 0.5, 40, 0.1, 1000))
   pane.appendChild(layerSlider(ctx, layer, 'width', 'Frame D m', 0.5, 40, 0.1, 1000))
   for (const [label, min, max, step, mf, get, set] of pathSliderSpecs(p))
     pane.appendChild(
-      sliderRow(label, min, max, step, get(), (v, c) => (set(v), ctx.applySite(c)), mf)
+      sliderRow(
+        label,
+        min,
+        max,
+        step,
+        get(),
+        (v, c) => (set(v), c ? ctx.applySite(true) : ctx.applyZonesLive()),
+        mf
+      )
     )
+  pane.appendChild(pathRotRow(ctx, p, flatIdx)) // 🪨 xoay LIVE (transform, né rebuild)
   pane.appendChild(
     selectRow('Material', ROCK_MAT_OPTS, p.material, (v) => ((p.material = v), ctx.applySite(true)))
   )
-  pane.appendChild(colorRow('Color', p.color, (hex, c) => ((p.color = hex), ctx.applySite(c))))
+  pane.appendChild(
+    colorRow(
+      'Color',
+      p.color,
+      (hex, c) => ((p.color = hex), c ? ctx.applySite(true) : ctx.applyZonesLive())
+    )
+  )
 }
 
 // 🟫 Thân pane SURFACE-zone: vật liệu + form + Length/Width + Thickness/Drape/Terrain (buildAddZoneExtras).
@@ -818,7 +854,7 @@ function buildZonePane(
   const pane = document.createElement('div')
   if (op === 'add') {
     pane.appendChild(zoneKindRow(ctx, layer, flatIdx, rebuild)) // 🪨 Type: Surface | Path
-    if (layer.zoneKind === 'path') buildPathZoneBody(pane, ctx, layer)
+    if (layer.zoneKind === 'path') buildPathZoneBody(pane, ctx, layer, flatIdx)
     else buildSurfaceZoneBody(pane, ctx, layer, flatIdx, rebuild)
   } else {
     pane.appendChild(groundFormRow(ctx, layer)) // cut: chỉ hình + vị trí (không vật liệu/dày)

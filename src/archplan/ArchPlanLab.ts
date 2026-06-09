@@ -1670,7 +1670,14 @@ export class ArchPlanLab extends BaseWorld {
   // 4 callback tinh-chỉnh LIVE cỏ/hồ — tách spread để _makeGuiCtx gọn (rule-50).
   private _siteTuneGuiCtx(): Pick<
     APGuiCtx,
-    'tuneGrass' | 'tuneWater' | 'setActiveWater' | 'previewWater' | 'tuneRock' | 'applyRocksLive'
+    | 'tuneGrass'
+    | 'tuneWater'
+    | 'setActiveWater'
+    | 'previewWater'
+    | 'tuneRock'
+    | 'applyRocksLive'
+    | 'tunePathRotLive'
+    | 'applyZonesLive'
   > {
     return {
       tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
@@ -1679,6 +1686,8 @@ export class ArchPlanLab extends BaseWorld {
       previewWater: (cfg) => this.waterTool?.showOutline(cfg),
       tuneRock: (cfg, apply, persist) => this._tuneRock(cfg, apply, persist),
       applyRocksLive: () => this._applyRocksLive(),
+      tunePathRotLive: (flatIdx, rotDeg) => this._tunePathRotLive(flatIdx, rotDeg),
+      applyZonesLive: () => this._applyZonesLive(),
     }
   }
 
@@ -3248,6 +3257,32 @@ export class ArchPlanLab extends BaseWorld {
     const mi = this.siteMats.indexOf(mat)
     if (mi >= 0) this.siteMats.splice(mi, 1)
     mat.dispose()
+  }
+
+  // 🪨 Mesh zone (add/cut/path) mang userData.groundLayerIdx=idx trong siteGroup (nhất đầu khớp). null nếu chưa render.
+  private _layerMeshByIdx(idx: number): THREE.Mesh | null {
+    for (const o of this.siteGroup.children) {
+      if (o instanceof THREE.Mesh && o.userData.groundLayerIdx === idx) return o
+    }
+    return null
+  }
+
+  // 🪨 XOAY path-zone LIVE: chỉ set mesh.rotation.y (transform thuần, 0 rebuild → né water-RTT). Buông → applySite.
+  private _tunePathRotLive(flatIdx: number, rotDeg: number): void {
+    const mesh = this._layerMeshByIdx(flatIdx)
+    if (mesh) mesh.rotation.y = (rotDeg * Math.PI) / 180
+    if (this.sun) this.sun.shadow.needsUpdate = true // bóng đá xoay theo
+  }
+
+  // 🪨 LIVE drag slider STRUCTURAL path (frame/R/gap/seed…): rebuild CHỈ zone meshes (throttle ≤1/frame) — KHÔNG
+  // đụng nước(reflector)/cỏ/nền → né tụt fps. Buông → applySite(true) commit. Mirror _applyTerrainLive (zone-only).
+  private _applyZonesLive(): void {
+    if (this._siteRaf) return
+    this._siteRaf = requestAnimationFrame(() => {
+      this._siteRaf = 0
+      this._rebuildGroundLayersLive()
+      if (this.sun) this.sun.shadow.needsUpdate = true
+    })
   }
 
   // Diện tích nhà phủ (m²) = Σ bbox shape tầng trệt — đối chiếu 建ぺい率 trong bảng số liệu.
