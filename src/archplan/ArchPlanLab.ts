@@ -535,6 +535,7 @@ export class ArchPlanLab extends BaseWorld {
     startOffX: number
     startOffZ: number
     startPt: THREE.Vector3
+    startMeshPos: THREE.Vector3 // 🪨 vị trí mesh GỐC trước kéo — surface zone=(0,0,0) geo-world-baked; path=(offX,baseY,offZ)
   } | null = null
   private _liveRebuild = false // true trong rAF live-drag (kéo nhà/hồ/slider) → hoãn rải-lại-cỏ vì exclude
   // Chữ ký SITE (nền/nước/rào, BỎ grass3d — cỏ quản riêng). Kéo NHÀ đổi `state` chứ KHÔNG đổi `site` →
@@ -796,6 +797,7 @@ export class ArchPlanLab extends BaseWorld {
       startOffX: layer.offsetX,
       startOffZ: layer.offsetZ,
       startPt: hit.point.clone(),
+      startMeshPos: (hit.object as THREE.Mesh).position.clone(), // 🪨 path mesh giữ offset+baseY ở position
     }
     return true
   }
@@ -809,7 +811,12 @@ export class ArchPlanLab extends BaseWorld {
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -d.startPt.y)
     const pt = new THREE.Vector3()
     if (!this._ray.ray.intersectPlane(plane, pt)) return
-    d.mesh.position.set(pt.x - d.startPt.x, 0, pt.z - d.startPt.z) // 0 rebuild — chỉ transform
+    // 🪨 vị-trí-gốc + Δ chiếu mặt-phẳng (giữ Y mesh): surface=(0,0,0)+Δ như cũ; path=(offX,baseY,offZ)+Δ (giữ độ cao)
+    d.mesh.position.set(
+      d.startMeshPos.x + (pt.x - d.startPt.x),
+      d.startMeshPos.y,
+      d.startMeshPos.z + (pt.z - d.startPt.z)
+    ) // 0 rebuild — chỉ transform
   }
 
   // 🟫 Buông: gập Δ mesh.position vào offsetX/Z state → _applySite(true) rebuild site 1 LẦN (bake offset mới) +
@@ -820,8 +827,9 @@ export class ArchPlanLab extends BaseWorld {
     if (!d) return
     const layer = this.site.groundLayers?.[d.idx]
     if (layer) {
-      layer.offsetX = Math.round(d.startOffX + d.mesh.position.x * 1000)
-      layer.offsetZ = Math.round(d.startOffZ + d.mesh.position.z * 1000)
+      // Δ = vị-trí-hiện − vị-trí-gốc (surface startMeshPos=0 → như cũ; path trừ offset gốc → khỏi cộng đôi)
+      layer.offsetX = Math.round(d.startOffX + (d.mesh.position.x - d.startMeshPos.x) * 1000)
+      layer.offsetZ = Math.round(d.startOffZ + (d.mesh.position.z - d.startMeshPos.z) * 1000)
     }
     this._applySite(true)
   }

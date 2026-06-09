@@ -725,10 +725,23 @@ function zoneKindRow(
 ): HTMLElement {
   return selectRow('Type', ZONE_KIND_OPTS, layer.zoneKind ?? 'surface', (v) => {
     layer.zoneKind = v
-    if (v === 'path') layer.path ??= makeStonePathParams()
+    if (v === 'path') {
+      layer.path ??= makeStonePathParams()
+      if (layer.shape !== 'circle') layer.shape = 'rect' // path chỉ rect|circle (ellipse/free → rect)
+    }
     rebuild(flatIdx) // dựng lại pane → hiện controls đúng loại
     ctx.applySite(true)
   })
+}
+
+// 🪨 Form khung path: Chữ nhật | Tròn (= ellipse nội tiếp). DÙNG CHUNG GroundLayer.shape (chỉ rect|circle cho path).
+const PATH_FORM_OPTS: [string, 'rect' | 'circle'][] = [
+  ['Chữ nhật', 'rect'],
+  ['Tròn', 'circle'],
+]
+function pathFormRow(ctx: APGuiCtx, layer: GroundLayer): HTMLElement {
+  const cur = layer.shape === 'circle' ? 'circle' : 'rect'
+  return selectRow('Form', PATH_FORM_OPTS, cur, (v) => ((layer.shape = v), ctx.applySite(true)))
 }
 
 // 🪨 Slider STRUCTURAL rải đá path-zone (tuple [label,min,max,step,mmFactor,get,set]) — kéo/buông = applySite(c)
@@ -749,12 +762,14 @@ function pathSliderSpecs(p: StonePathParams): RockSlider[] {
       (v) => (p.thickness = Math.round(v * 1000)),
     ],
     ['Seed', 0, 999, 1, 1, () => p.seed, (v) => (p.seed = Math.round(v))],
+    ['Rotate°', -180, 180, 1, 1, () => p.rot, (v) => (p.rot = Math.round(v))],
   ]
 }
 
-// 🪨 Thân pane PATH-zone: Frame W/D (= rect zone) + slider đá + Material (texture, dùng chung border hồ) + Color.
+// 🪨 Thân pane PATH-zone: Form (rect/tròn) + Frame W/D + slider đá (gồm Rotate) + Material (texture) + Color.
 function buildPathZoneBody(pane: HTMLElement, ctx: APGuiCtx, layer: GroundLayer): void {
   const p = (layer.path ??= makeStonePathParams())
+  pane.appendChild(pathFormRow(ctx, layer)) // Chữ nhật | Tròn
   pane.appendChild(layerSlider(ctx, layer, 'length', 'Frame W m', 0.5, 40, 0.1, 1000))
   pane.appendChild(layerSlider(ctx, layer, 'width', 'Frame D m', 0.5, 40, 0.1, 1000))
   for (const [label, min, max, step, mf, get, set] of pathSliderSpecs(p))
