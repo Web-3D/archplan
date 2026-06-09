@@ -793,6 +793,10 @@ function buildPathZoneBody(
   pane.appendChild(pathFormRow(ctx, layer)) // Chữ nhật | Tròn
   pane.appendChild(layerSlider(ctx, layer, 'length', 'Frame W m', 0.5, 40, 0.1, 1000))
   pane.appendChild(layerSlider(ctx, layer, 'width', 'Frame D m', 0.5, 40, 0.1, 1000))
+  // 🏔️ Bám gò: dùng chung layer.drape — drape zone ngoài zoneRects → gò giữ nhấp nhô → đá theo cao-độ (heightAt).
+  pane.appendChild(
+    toggleRow('Bám gò', layer.drape ?? false, (on) => ((layer.drape = on), ctx.applySite(true)))
+  )
   for (const [label, min, max, step, mf, get, set] of pathSliderSpecs(p))
     pane.appendChild(
       sliderRow(
