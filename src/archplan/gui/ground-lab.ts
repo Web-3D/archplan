@@ -270,7 +270,15 @@ class GroundPreview {
     const draw = (e: PointerEvent): void => {
       const uv = this._pickUV(e)
       if (uv)
-        this.paint.stamp(uv.x, uv.y, this.brushSize, this.paintSlot as number, this.brushErase)
+        // sàn Lab vuông → rU = rV (stamp ellipse stage 3 — zone chữ nhật mới cần 2 bán kính lệch)
+        this.paint.stamp(
+          uv.x,
+          uv.y,
+          this.brushSize,
+          this.brushSize,
+          this.paintSlot as number,
+          this.brushErase
+        )
     }
     this.canvas.addEventListener('pointerdown', (e) => {
       if (this.paintSlot === null) return

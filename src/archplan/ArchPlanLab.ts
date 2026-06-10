@@ -165,6 +165,7 @@ import {
   type SiteRenderOpts,
   waterPolygons,
 } from 'threejs-modules/site/render/fromState'
+import { shapeToLocalPolygon } from 'threejs-modules/site/shapes' // 🖌 bbox zone → rect uv mask vẽ
 import {
   type BorderMaterialKey,
   coverageStats,
@@ -173,6 +174,7 @@ import {
   GROUND_PRESETS,
   type GroundLayer,
   type GroundMaterialKey,
+  type GroundMixParams,
   isGroundTexKey,
   renderPuddles,
   renderWaters,
@@ -183,7 +185,9 @@ import { Tabs } from 'threejs-modules/ui/Tabs' // 🗂️ tab ngang drawer (🏠
 import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
 import { RuntimeGuard } from 'threejs-modules/utils/core/RuntimeGuard'
 
+import type { MixPaintTarget } from './gui/ctx' // 🖌 target cọ mix: zone GroundLayer | 'base' (nền lô G0)
 import { DevHud } from './gui/devhud' // perf HUD dev (fps/budget/leak) — tách monolith
+import { PaintMask } from './gui/ground-paint' // 🖌 mask vẽ tay per-zone (stage 3 mix nền — dùng chung class với Lab)
 import { type APGuiCtx, setupGUI, setupToolsPanel } from './gui/gui'
 import { setupLabExperiments } from './gui/lab-experiments' // 🔀 switcher thí nghiệm Lab (🏛 Mái | ✨ Particles)
 import { setupSitePanel } from './gui/site' // 🌳 panel sân vườn (site/lô + Garden ▸ Grass = slider cỏ 3D)
@@ -549,9 +553,20 @@ export class ArchPlanLab extends BaseWorld {
   // (base + layer) cùng key DÙNG CHUNG → KHÔNG recompile NodeMaterial mỗi rebuild. Lab sở hữu → dispose onDispose.
   private _groundMat: Partial<Record<GroundMaterialKey, PhotoGround>> = {}
 
-  // 🎨 PhotoGroundMix CACHE per-ZONE (key = chính object GroundLayer — sống qua rebuild vì site.ts sửa tại chỗ):
-  // sig = base+slots (texture/bias/seed bake vào graph) — đổi sig = dựng lại material; uniform khác apply mỗi build.
-  private readonly _zoneMix = new Map<GroundLayer, { gmix: PhotoGroundMix; sig: string }>()
+  // 🎨 PhotoGroundMix CACHE per-TARGET (key = object GroundLayer — sống qua rebuild vì site.ts sửa tại chỗ —
+  // HOẶC 'base' = nền lô G0): sig = CHỈ keys texture (stage 3: bias/seed/paint-rect = uniform live) — đổi sig =
+  // dựng lại material (pm GIỮ). pm = PaintMask 128² mask vẽ tay — sống cùng entry, dispose khi zone xóa/lab dispose.
+  private readonly _zoneMix = new Map<
+    MixPaintTarget,
+    { gmix: PhotoGroundMix; sig: string; pm: PaintMask }
+  >()
+  // 🖌 Mode VẼ MASK mix (stage 3): target (zone | 'base') + slot đang vẽ (null = tắt); _mixPainting = đang giữ
+  // chuột kéo nét. Bật = orbit khóa (như paintMode SPIKE); pointer raycast mesh target → uv bbox → pm.stamp.
+  // Buông = persist base64.
+  private _mixPaint: { target: MixPaintTarget; slot: number } | null = null
+  private _mixPainting = false
+  private readonly _mixBrush = { size: 0.6, erase: false } // cọ: bán kính m world + chế độ tẩy (UI board đẩy vào)
+  private _syncMixPaint: (() => void) | null = null // UI đăng ký — bỏ highlight 🖌 khi mode bị tắt từ ngoài
   // 🪨 Texture đá RÀO/VIỀN hồ: maps + TexturedSurface (triplanar) CACHE 1 lần/key (lab-lifetime) → bơm
   // ctx.borderMatByKey. Lab sở hữu maps + surf → dispose onDispose. Load ASYNC khi hồ dùng borderMaterial≠none.
   private _borderTex: Partial<
@@ -721,6 +736,12 @@ export class ArchPlanLab extends BaseWorld {
     if (e.button !== 0) return // chỉ chuột trái
     this._downPos = { x: e.clientX, y: e.clientY } // để _onPointerUp phân biệt click vs drag/orbit
     if (this.sunGizmo?.tryStartDrag(e)) return // ☀ nhấn trúng quả sun → kéo (ưu tiên cao nhất, mọi mode)
+    if (this._mixPaint) {
+      this._mixPainting = true // 🖌 vẽ mask mix: giữ chuột kéo nét trên zone (orbit đã khóa khi bật mode)
+      this.canvas.setPointerCapture(e.pointerId)
+      this._mixStampAt(e)
+      return
+    }
     if (this.paintMode) {
       this._paintAt(e) // SPIKE brush: click → sơn tường
       return
@@ -785,6 +806,10 @@ export class ArchPlanLab extends BaseWorld {
   private readonly _onPointerMove = (e: PointerEvent): void => {
     if (this.sunGizmo?.isDragging()) {
       this.sunGizmo.drag(e) // ☀ đang kéo sun → đổi hướng nắng theo vòm
+      return
+    }
+    if (this._mixPainting) {
+      this._mixStampAt(e) // 🖌 đang kéo nét cọ mask mix
       return
     }
     if (this.moveMode) {
@@ -876,6 +901,12 @@ export class ArchPlanLab extends BaseWorld {
       this._downPos = null
       return
     }
+    if (this._mixPainting) {
+      this._mixPainting = false
+      this._commitMixPaint() // 🖌 buông nét → serialize base64 vào state + autosave (mode vẫn bật, vẽ tiếp được)
+      this._downPos = null
+      return
+    }
     if (this._endSiteDrag()) {
       this._downPos = null // 💧🟫🚪 buông 1 drag site/building (commit trong _endSiteDrag)
       return
@@ -949,7 +980,10 @@ export class ArchPlanLab extends BaseWorld {
   private _setPickMode(on: boolean): void {
     this.pickMode = on
     this.picking = false
-    if (on) this._setMoveMode(false) // 3 mode loại trừ
+    if (on) {
+      this._setMoveMode(false) // 3 mode loại trừ
+      this._mixPaintOff() // 🖌 đang vẽ mask mix → thoát (UI tự bỏ highlight qua sync)
+    }
     if (this.controls) this.controls.enabled = !on
     if (!on) this.coordPicker?.setVisible(false)
     this._syncPickCheckbox?.(on) // đồng bộ ô tick trong panel (vd khi thoát bằng chuột phải)
@@ -961,6 +995,7 @@ export class ArchPlanLab extends BaseWorld {
     if (on) {
       this._setPickMode(false) // 3 mode loại trừ
       this._setMoveMode(false)
+      this._mixPaintOff() // 🖌
     }
     if (this.controls) this.controls.enabled = !on
   }
@@ -977,6 +1012,7 @@ export class ArchPlanLab extends BaseWorld {
       this._setPaintMode(false)
       this.palette?.markSwatch(null)
       this._setPickMode(false)
+      this._mixPaintOff() // 🖌 đang vẽ mask mix → thoát
     }
     if (this.controls) this.controls.enabled = !on
     this._syncMoveToggle?.(on) // đổi class nút 🤚 (ap-move-on) — text bỏ, chỉ symbol
@@ -1693,7 +1729,7 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
-  // 4 callback tinh-chỉnh LIVE cỏ/hồ — tách spread để _makeGuiCtx gọn (rule-50).
+  // Callback tinh-chỉnh LIVE cỏ/hồ + 🖌 mix-paint — tách spread để _makeGuiCtx gọn (rule-50).
   private _siteTuneGuiCtx(): Pick<
     APGuiCtx,
     | 'tuneGrass'
@@ -1702,6 +1738,13 @@ export class ArchPlanLab extends BaseWorld {
     | 'previewWater'
     | 'tunePathRotLive'
     | 'applyZonesLive'
+    | 'setMixPaint'
+    | 'getMixPaint'
+    | 'getMixBrush'
+    | 'setMixBrush'
+    | 'clearMixPaint'
+    | 'tuneMixLive'
+    | 'registerMixPaintSync'
   > {
     return {
       tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
@@ -1710,6 +1753,32 @@ export class ArchPlanLab extends BaseWorld {
       previewWater: (cfg) => this.waterTool?.showOutline(cfg),
       tunePathRotLive: (flatIdx, rotDeg) => this._tunePathRotLive(flatIdx, rotDeg),
       applyZonesLive: () => this._applyZonesLive(),
+      ...this._mixPaintGuiCtx(), // 🖌 stage 3 — cọ vẽ mask mix per-zone
+    }
+  }
+
+  // 🖌 7 callback VẼ MASK MIX (stage 3) — tách spread để _makeGuiCtx gọn (rule-50), cùng pattern _siteTuneGuiCtx.
+  private _mixPaintGuiCtx(): Pick<
+    APGuiCtx,
+    | 'setMixPaint'
+    | 'getMixPaint'
+    | 'getMixBrush'
+    | 'setMixBrush'
+    | 'clearMixPaint'
+    | 'tuneMixLive'
+    | 'registerMixPaintSync'
+  > {
+    return {
+      setMixPaint: (target, slot) => this._setMixPaint(target, slot),
+      getMixPaint: () => this._mixPaint,
+      getMixBrush: () => ({ ...this._mixBrush }),
+      setMixBrush: (sizeM, erase) => {
+        this._mixBrush.size = sizeM
+        this._mixBrush.erase = erase
+      },
+      clearMixPaint: (target, slot) => this._clearMixPaint(target, slot),
+      tuneMixLive: (target) => this._tuneMixLive(target),
+      registerMixPaintSync: (fn) => (this._syncMixPaint = fn),
     }
   }
 
@@ -2582,6 +2651,7 @@ export class ArchPlanLab extends BaseWorld {
     if (Object.keys(byKey).length > 0) opts.groundMatByKey = byKey
     this._pruneZoneMix() // 🎨 dọn cache mix của zone đã xóa
     opts.groundMixMat = (layer) => this._groundMixFor(layer) // 🎨 zone bật mix → material PhotoGroundMix
+    opts.groundBaseMixMat = () => this._groundMixFor('base') // 🎨 G0 nền lô bật mix (site.groundMix)
     // 🪨 Material đá RÀO/VIỀN hồ (TexturedSurface) theo borderMaterial dùng → inject; chưa load → kick-off async.
     const borderByKey: NonNullable<SiteRenderOpts['borderMatByKey']> = {}
     for (const key of this._usedBorderTexKeys()) {
@@ -2657,12 +2727,9 @@ export class ArchPlanLab extends BaseWorld {
     for (const photo of Object.values(this._groundMat)) photo?.setDetail(d)
   }
 
-  // 🎨 Material MIX cho 1 zone (layer.mix bật): maps đủ (base + slots, đều phải key TEXTURE) → PhotoGroundMix
-  // cache theo object layer; thiếu maps → kick-off load + null (zone rơi texture đơn tạm, load xong re-render).
-  private _groundMixFor(layer: GroundLayer): THREE.Material | null {
-    const mix = layer.mix
-    if (!mix) return null
-    const keys = [mix.base, ...mix.slots.map((s) => s.key)]
+  // 🎨 Gom maps đã-load cho base + slots của 1 mix — key màu phẳng hoặc maps chưa load (kick-off async) → null.
+  // Tách khỏi _groundMixFor (complexity ≤10).
+  private _mixMapSets(keys: GroundMaterialKey[]): PhotoGroundMaps[] | null {
     const sets: PhotoGroundMaps[] = []
     for (const k of keys) {
       if (!isGroundTexKey(k)) return null // key màu phẳng (soil/gravel…) — mix chỉ nhận texture
@@ -2673,23 +2740,50 @@ export class ArchPlanLab extends BaseWorld {
       }
       sets.push(maps)
     }
-    const sig = JSON.stringify([keys, mix.slots.map((s) => [s.bias, s.seed])]) // bake vào graph → đổi = dựng lại
-    let hit = this._zoneMix.get(layer)
+    return sets
+  }
+
+  // 🖌 Params mix của 1 target — zone: layer.mix · 'base' (nền lô G0): site.groundMix. undefined = mix tắt.
+  private _mixParamsOf(target: MixPaintTarget): GroundMixParams | undefined {
+    return target === 'base' ? this.site.groundMix : target.mix
+  }
+
+  // 🎨 Material MIX cho 1 target (zone Z1+ HOẶC nền lô G0 'base'): maps đủ (base + slots, đều phải key
+  // TEXTURE) → PhotoGroundMix cache theo target; thiếu maps → kick-off load + null (rơi texture đơn tạm).
+  private _groundMixFor(target: MixPaintTarget): THREE.Material | null {
+    const mix = this._mixParamsOf(target)
+    if (!mix) return null
+    const keys = [mix.base, ...mix.slots.map((s) => s.key)]
+    const sets = this._mixMapSets(keys)
+    if (!sets) return null
+    // Stage 3: sig CHỈ keys texture — bias/seed/paint-rect = uniform live → kéo Ngưỡng KHÔNG dựng lại material.
+    const sig = JSON.stringify(keys)
+    let hit = this._zoneMix.get(target)
     if (!hit || hit.sig !== sig) {
+      const pm = hit?.pm ?? this._makeZonePaint(mix) // pm SỐNG qua rebuild (đổi texture không mất nét vẽ)
       hit?.gmix.dispose()
       const gmix = new PhotoGroundMix({
         base: sets[0],
         slots: mix.slots.map((s, i) => ({ maps: sets[i + 1], bias: s.bias, seed: s.seed })),
+        paint: pm.texture,
         tileSizeMeters: GROUND_TEX_SPEC[mix.base]?.tile ?? 2,
       })
-      hit = { gmix, sig }
-      this._zoneMix.set(layer, hit)
+      hit = { gmix, sig, pm }
+      this._zoneMix.set(target, hit)
     }
     this._applyMixUniforms(hit.gmix, mix)
+    this._applyMixPaintRect(hit.gmix, target)
     return hit.gmix.getMaterial()
   }
 
-  // Đẩy bộ uniform LIVE của mix vào material (mỗi lần build site — rẻ, không recompile).
+  // 🖌 PaintMask 128² cho 1 target mới vào cache — có base64 trong state (load/reload) → nạp lại nét vẽ.
+  private _makeZonePaint(mix: GroundMixParams): PaintMask {
+    const pm = new PaintMask(128) // 128² đủ vạt/lối mòn per-target, base64 ~87KB (Lab giữ 256² cho sàn 12m)
+    if (mix.paint) pm.loadBase64(mix.paint)
+    return pm
+  }
+
+  // Đẩy bộ uniform LIVE của mix vào material (mỗi lần build site / kéo slider — rẻ, không recompile).
   private _applyMixUniforms(g: PhotoGroundMix, m: NonNullable<GroundLayer['mix']>): void {
     g.set('maskScale', m.maskScale)
     g.set('maskSoft', m.maskSoft)
@@ -2703,17 +2797,140 @@ export class ArchPlanLab extends BaseWorld {
     g.set('margin', m.margin)
     g.set('farOn', m.farOn)
     g.set('farRange', m.farRange)
+    m.slots.forEach((s, i) => g.setSlot(i, s.bias, s.seed)) // 🖌 stage 3: per-slot uniform (Ngưỡng live)
+  }
+
+  // 🖌 BBox world-XZ của zone (m) — rect uv cho mask vẽ: shader + stamp dùng CÙNG công thức (world−o)/s.
+  private _mixZoneRect(layer: GroundLayer): { ox: number; oz: number; sx: number; sz: number } {
+    const local = shapeToLocalPolygon({
+      shape: layer.shape ?? 'rect',
+      width: layer.length,
+      depth: layer.width,
+      points: layer.points ?? [],
+    })
+    let minX = Infinity
+    let maxX = -Infinity
+    let minZ = Infinity
+    let maxZ = -Infinity
+    for (const p of local) {
+      minX = Math.min(minX, p.x)
+      maxX = Math.max(maxX, p.x)
+      minZ = Math.min(minZ, p.z)
+      maxZ = Math.max(maxZ, p.z)
+    }
+    return {
+      ox: layer.offsetX / 1000 + minX,
+      oz: layer.offsetZ / 1000 + minZ,
+      sx: maxX - minX,
+      sz: maxZ - minZ,
+    }
+  }
+
+  // 🖌 Rect mask của target: zone = bbox shape; 'base' = NGUYÊN LÔ (tâm world (0,0), lotWidth×lotDepth).
+  private _mixRectOf(target: MixPaintTarget): { ox: number; oz: number; sx: number; sz: number } {
+    if (target !== 'base') return this._mixZoneRect(target)
+    const sx = this.site.lotWidth / 1000
+    const sz = this.site.lotDepth / 1000
+    return { ox: -sx / 2, oz: -sz / 2, sx, sz }
+  }
+
+  private _applyMixPaintRect(g: PhotoGroundMix, target: MixPaintTarget): void {
+    const r = this._mixRectOf(target)
+    g.setPaintRect(r.ox, r.oz, r.sx, r.sz) // uniform live — zone dời/resize/lô đổi cỡ chỉ set lại, không recompile
   }
 
   // Dọn cache mix của zone đã XÓA (layer không còn trong groundLayers) — gọi mỗi lần gom opts.
+  // 'base' (nền lô G0) sống lab-lifetime — không bao giờ prune.
   private _pruneZoneMix(): void {
     const live = this.site.groundLayers ?? []
     for (const k of [...this._zoneMix.keys()]) {
-      if (!live.includes(k)) {
-        this._zoneMix.get(k)?.gmix.dispose()
-        this._zoneMix.delete(k)
-      }
+      if (k === 'base' || live.includes(k)) continue
+      const v = this._zoneMix.get(k)
+      v?.gmix.dispose()
+      v?.pm.dispose() // 🖌 DataTexture mask vẽ của zone xóa
+      this._zoneMix.delete(k)
+      if (this._mixPaint?.target === k) this._mixPaintOff() // đang vẽ đúng zone vừa xóa → thoát mode
     }
+  }
+
+  // ── 🖌 VẼ MASK MIX per-zone + G0 base (stage 3) — mode + cọ + persist ────────────────────────────────
+
+  // Bật/tắt mode vẽ: target ≠ null = vẽ slot đó (orbit khóa, tắt 3 mode kia); null = thoát (orbit lại).
+  private _setMixPaint(target: MixPaintTarget | null, slot: number): void {
+    if (target) {
+      this._setPickMode(false)
+      this._setMoveMode(false)
+      this._setPaintMode(false) // các setter này bật lại orbit — khóa lại ngay dưới
+    }
+    this._mixPaint = target ? { target, slot } : null
+    this._mixPainting = false
+    if (this.controls) this.controls.enabled = !target
+  }
+
+  // Thoát mode vẽ từ NGOÀI (Move/Pick/Paint bật, zone xóa) — báo UI bỏ highlight 🖌. Không đụng orbit
+  // (caller tự quản controls.enabled theo mode của nó).
+  private _mixPaintOff(): void {
+    if (!this._mixPaint) return
+    this._mixPaint = null
+    this._mixPainting = false
+    this._syncMixPaint?.()
+  }
+
+  // 1 dấu cọ: raycast mesh ĐÚNG target đang vẽ (zone: userData.groundLayerIdx · 'base': userData.isBaseGround)
+  // → world → uv bbox → stamp ellipse (bán kính m world / size mỗi trục — chữ nhật không méo cọ).
+  // Trượt ra ngoài target = không vẽ.
+  private _mixStampAt(e: PointerEvent): void {
+    const t = this._mixPaint
+    const hit = t ? this._zoneMix.get(t.target) : undefined
+    if (!t || !this._mixParamsOf(t.target) || !hit) return
+    const isBase = t.target === 'base'
+    const idx = isBase ? -1 : (this.site.groundLayers ?? []).indexOf(t.target as GroundLayer)
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const isect = this._ray
+      .intersectObjects(this.siteGroup.children, true)
+      .find((h) =>
+        isBase ? h.object.userData.isBaseGround === true : h.object.userData.groundLayerIdx === idx
+      )
+    if (!isect) return
+    const r = this._mixRectOf(t.target)
+    const u = (isect.point.x - r.ox) / Math.max(1e-6, r.sx)
+    const v = (isect.point.z - r.oz) / Math.max(1e-6, r.sz)
+    const b = this._mixBrush
+    hit.pm.stamp(
+      u,
+      v,
+      b.size / Math.max(1e-6, r.sx),
+      b.size / Math.max(1e-6, r.sz),
+      t.slot,
+      b.erase
+    )
+  }
+
+  // Buông nét cọ → serialize mask vào state (base64, null nếu trắng → bỏ field) + autosave (reload còn nét).
+  private _commitMixPaint(): void {
+    const t = this._mixPaint
+    const hit = t ? this._zoneMix.get(t.target) : undefined
+    const mix = t ? this._mixParamsOf(t.target) : undefined
+    if (!mix || !hit) return
+    mix.paint = hit.pm.toBase64() ?? undefined
+    this.store.autosave(this.state, this.site)
+  }
+
+  // Nút "Xóa nét" của board: xóa kênh slot trong mask target + persist ngay (texture live, không cần rebuild).
+  private _clearMixPaint(target: MixPaintTarget, slot: number): void {
+    const hit = this._zoneMix.get(target)
+    const mix = this._mixParamsOf(target)
+    if (!hit || !mix) return
+    hit.pm.clear(slot)
+    mix.paint = hit.pm.toBase64() ?? undefined
+    this.store.autosave(this.state, this.site)
+  }
+
+  // Kéo slider mix (Ngưỡng/Macro/…) → đẩy thẳng uniform vào material đang sống — KHÔNG rebuild site.
+  private _tuneMixLive(target: MixPaintTarget): void {
+    const hit = this._zoneMix.get(target)
+    const mix = this._mixParamsOf(target)
+    if (hit && mix) this._applyMixUniforms(hit.gmix, mix)
   }
 
   // Tập key ground dùng TEXTURE (unique) = base ground + mọi TẦNG layer chồng (lọc isGroundTexKey).
@@ -2985,7 +3202,10 @@ export class ArchPlanLab extends BaseWorld {
       this._groundMat[k]?.dispose() // 🌱 PhotoGround material MỖI key (cache lab-lifetime; KHÔNG đụng maps)
     }
     this._groundMat = {}
-    for (const v of this._zoneMix.values()) v.gmix.dispose() // 🎨 mix per-zone
+    for (const v of this._zoneMix.values()) {
+      v.gmix.dispose() // 🎨 mix per-zone
+      v.pm.dispose() // 🖌 DataTexture mask vẽ
+    }
     this._zoneMix.clear()
     for (const k of Object.keys(this._groundTex) as GroundMaterialKey[]) {
       disposeSurfaceTextureSet(this._groundTex[k] ?? null) // 🌱🏜️ ground texture-set MỖI key (lab sở hữu)

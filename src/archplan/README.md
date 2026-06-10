@@ -67,7 +67,12 @@ ArchPlanLab (extends BaseWorld)
   ├── 🗄️ Drawer PHẢI (.ap-drawer) ← shell bền; cobalt trong suốt; Tabs ngang (mở tab nào cũng PHỦ KÍN drawer):
   │     ├── 🏠 Building            ← lil-gui (floors → instances → structure/roof/dims/walls)
   │     ├── 🌳 Ground              ← BẬC TAB con Ground|Fence|Garden|Water folder-style (English; Ground/Fence tông NÂU,
-  │     │                            Garden tông XANH curated --gd-* + Water tông XANH NƯỚC --wt-* tách riêng); Ground=SURFACE vật liệu(grass/soil/gravel)+lô ·
+  │     │                            Garden tông XANH curated --gd-* + Water tông XANH NƯỚC --wt-* tách riêng); Ground=SURFACE vật liệu(grass/soil/gravel)+lô
+  │     │                            [G0 base + zone Surface ĐỀU có toggle "Mix nền (Lab)" → bảng trộn PhotoGroundMix TSL (port nền Lab XONG TRỌN 3 stage
+  │     │                            2026-06-10; target MixPaintTarget = GroundLayer | 'base' — G0 dùng site.groundMix, mask = nguyên lô): Nền chính + ≤4 slot
+  │     │                            Ngưỡng + 🖌 VẼ MASK per-target (cọ ellipse m world raycast đúng mesh — zone theo groundLayerIdx, G0 theo isBaseGround;
+  │     │                            Tẩy/Xóa nét, mode loại trừ Move/Pick, persist base64 128² autosave) + 6 slider chung — TẤT CẢ slider = uniform LIVE
+  │     │                            (tuneMixLive, không recompile)] ·
   │     │                            Garden=🌿 THỰC VẬT 3D, LỒNG BẬC 2 (Grass|Tree, palette --gd-* OKLCH green ramp bg-1→bg-5): Grass = ô on/off
   │     │                            cỏ-3D (mọc nền bất kỳ) + SLIDER chi tiết cỏ (CHUYỂN từ Lab) → TAB cấp1 Lá đơn|Bụi cỏ; Lá đơn có cấp2 Số đo|Độ cong|Bóng đổ
   │     │                            (Số đo=mật độ/cao/thon/thân/gốc/đốt · Độ cong=T→P/dọc+cụp 1 chiều/fold · Bóng đổ=đậm/cao bóng+màu 2 mặt+Vệt) +

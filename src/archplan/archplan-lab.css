@@ -1730,8 +1730,9 @@
   line-height: 1;
   cursor: pointer;
 }
-.ap-lab-float .ap-mix-brush-on {
-  background: #2f6b46; /* 🖌 đang vẽ — cùng xanh tab active */
+.ap-mix-brush-on {
+  /* 🖌 đang vẽ — cùng xanh tab active. KHÔNG scope .ap-lab-float: dùng cả Lab float lẫn mix board Z1 (stage 3) */
+  background: #2f6b46;
   border-color: #2f6b46;
   color: #fff;
 }

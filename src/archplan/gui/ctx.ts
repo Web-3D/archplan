@@ -8,10 +8,13 @@ import type GUI from 'lil-gui'
 import type * as THREE from 'three'
 import type { GrassBlades } from 'threejs-modules/components/GrassBlades'
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
-import type { CoverageStats, SiteState, WaterConfig } from 'threejs-modules/site/state'
+import type { CoverageStats, GroundLayer, SiteState, WaterConfig } from 'threejs-modules/site/state'
 
 import type { GridOpts, GroundType, SunOpts } from '../scene/scene'
 import type { BuildingState, ShapeInstance } from '../state/state'
+
+// 🖌 Target của cọ vẽ mask mix: 1 zone (GroundLayer.mix) HOẶC nền lô G0 ('base' — site.groundMix).
+export type MixPaintTarget = GroundLayer | 'base'
 
 // Highlight 3D khi click tab GUI: flash viền wireframe vàng nhạt quanh phần đang chỉnh ~0.6s.
 // wall/open = 1 tường/lỗ (segIdx[/opIdx]); col = 1 cột (colIdx); còn lại = phần của shape (instId).
@@ -56,6 +59,17 @@ export interface APGuiCtx {
   // 🪨 LIVE drag slider STRUCTURAL path (frame/R/gap/seed…): rebuild CHỈ zone meshes (surface+path, throttle) —
   // KHÔNG đụng water-RTT/cỏ/nền. Buông → applySite(true) commit.
   applyZonesLive(): void
+  // 🖌 VẼ MASK MIX per-zone + G0 base (stage 3 — PhotoGroundMix.paint). Optional: builder khác/mock không cần.
+  // Target: GroundLayer = zone Z1+ (layer.mix) · 'base' = NỀN LÔ G0 (site.groundMix).
+  // setMixPaint(target, slot) = bật cọ slot đó (orbit khóa, loại trừ Move/Pick/Paint); (null, _) = thoát.
+  setMixPaint?(target: MixPaintTarget | null, slot: number): void
+  getMixPaint?(): { target: MixPaintTarget; slot: number } | null // target+slot đang vẽ — highlight 🖌
+  getMixBrush?(): { size: number; erase: boolean } // cọ hiện tại (board mở lại hiện đúng số)
+  setMixBrush?(sizeM: number, erase: boolean): void // bán kính m world + chế độ tẩy
+  clearMixPaint?(target: MixPaintTarget, slot: number): void // xóa kênh slot + persist
+  // Kéo slider mix (Ngưỡng/Macro/…) → đẩy uniform vào material sống — KHÔNG rebuild site (stage 3 hết khựng).
+  tuneMixLive?(target: MixPaintTarget): void
+  registerMixPaintSync?(fn: () => void): void // UI đăng ký redraw — bỏ highlight 🖌 khi mode tắt từ ngoài
   // 💧 Hiện VIỀN form định vị (mảng mờ mặt nền) khi KÉO slider Pos/Width/Depth — live preview vị trí+kích
   // thước KHÔNG rebuild (né leak reflector). Buông slider = applySite(true) commit + tự ẩn viền.
   previewWater(cfg: WaterConfig): void
