@@ -12,6 +12,12 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
+import {
+  colsOnSurface,
+  copyToPoints,
+  rowsOnSurface,
+  type SurfacePoint,
+} from '../ops/copy-to-points'
 import { arcLength, resampleCurve } from '../ops/resample'
 import { rectProfile, sweepInto } from '../ops/sweep'
 
@@ -84,6 +90,123 @@ const BOX_TRI = [
   3, 0, 4, 3, 4, 7, // cạnh 3-0
 ]
 
+// NGÓI ĐƠN VỊ CÓ ĐỘ DÀY: máng NGỬA (cung ~151° quanh ĐÁY vòng → lòng cong quay LÊN — NgQuan chốt 2026-06-10)
+// = VỎ 2 LỚP kín nước: tiết diện vành khuyên hở (cung ngoài + cung trong cách `t` theo bán kính + 2 rim mép)
+// extrude dọc Z + 2 VÀNH ĐẦU ống (lộ độ dày ở hàng hiên — "Dày ngói" nhìn thấy thật). Chuẩn hóa bbox x/y về 1
+// (z sẵn 1), đáy lòng máng y=0 → instance scale (cw, cong, ch). `t` = độ dày TƯƠNG ĐỐI (≈ dày/cỡ viên).
+function buildTileShell(t: number, a = Math.PI * 0.42, crown = false): THREE.BufferGeometry {
+  // a = NỬA cung máng: mặc định ~75.6° (viên âm — đè dẹt thêm bằng scale Cong ngói) · π/2 = nửa ống tròn đầy
+  // 180° (viên DƯƠNG, đúng ngói ống thật: "đường tròn D = bề rộng viên" — catalog Hải Long).
+  // crown = cung quanh ĐỈNH vòng (θ=π) → viên ÚP SẴN trong geometry (lưng lồi lên, rim ở đáy y=0) — KHÔNG
+  // lật bằng scale y âm nữa: shader instancing của three nhân mat3(instanceMatrix) THẲNG (không inverse-
+  // transpose) nên mirror lật normal chúi xuống → ống dương tối đen không ăn sáng (NgQuan soi ảnh 2026-06-10).
+  const M = 8 // số đoạn chia cung
+  const R = 0.5 / Math.sin(a) // bán kính sao cho x ∈ [−0.5, 0.5]
+  const th0 = crown ? Math.PI - a : -a // gốc cung: quanh đỉnh (úp) hay quanh đáy (ngửa)
+  const loop: THREE.Vector2[] = [] // vòng tiết diện kín: cung NGOÀI đi tới + cung TRONG đi lui
+  for (let k = 0; k <= M; k++) {
+    const th = th0 + (2 * a * k) / M
+    loop.push(new THREE.Vector2(R * Math.sin(th), R * (1 - Math.cos(th))))
+  }
+  for (let k = M; k >= 0; k--) {
+    const th = th0 + (2 * a * k) / M
+    loop.push(new THREE.Vector2((R - t) * Math.sin(th), R - (R - t) * Math.cos(th)))
+  }
+  const n = loop.length // = 2M+2
+  const pos: number[] = []
+  for (const z of [-0.5, 0.5]) for (const p of loop) pos.push(p.x, p.y, z)
+  const idx: number[] = []
+  for (let k = 0; k < n; k++) {
+    const k2 = (k + 1) % n // thành bên dọc Z: vỏ ngoài + vỏ trong + 2 rim mép (vòng kín tự đủ 4 dải)
+    idx.push(k, k2, n + k2, k, n + k2, n + k)
+  }
+  for (let k = 0; k < M; k++) {
+    const ii = n - 1 - k // điểm cung trong cùng θ với điểm cung ngoài k (trong đi lui)
+    idx.push(k, k + 1, ii - 1, k, ii - 1, ii) // vành đầu z=−0.5 (dải khuyên)
+    idx.push(n + k, n + ii - 1, n + k + 1, n + k, n + ii, n + ii - 1) // vành đầu z=+0.5
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  geo.setIndex(idx)
+  geo.computeVertexNormals()
+  geo.computeBoundingBox()
+  const bb = geo.boundingBox as THREE.Box3 // non-null: vừa compute
+  geo.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, 0)
+  geo.scale(1 / (bb.max.x - bb.min.x), 1 / (bb.max.y - bb.min.y), 1)
+  return geo
+}
+
+// NGÓI VẢY CÁ đơn vị: tấm PHẲNG đầu TRÒN (nửa đĩa + chữ nhật, dày `t`) — đầu tròn ở +Z = quay XUÔI DỐC khi
+// instance (mọi mặt sau khi thống nhất pháp tuyến RA NGOÀI: z instance = binormal = hướng XUỐNG dốc).
+// x/z ∈ [−0.5,0.5] sẵn, y ∈ [0,t] (instance y-scale = cw → dày thật ≈ Dày ngói).
+function buildScaleTile(t: number): THREE.BufferGeometry {
+  const M = 10 // số đoạn chia vòng đầu tròn
+  const loop: THREE.Vector2[] = [new THREE.Vector2(0.5, -0.5)] // (x,z) — góc PHÍA NÓC bên phải
+  for (let k = 0; k <= M; k++) {
+    const th = (Math.PI * k) / M
+    loop.push(new THREE.Vector2(0.5 * Math.cos(th), 0.5 * Math.sin(th))) // (0.5,0)→(0,+0.5)→(−0.5,0)
+  }
+  loop.push(new THREE.Vector2(-0.5, -0.5)) // góc phía nóc bên trái
+  const n = loop.length
+  const pos: number[] = []
+  for (const y of [0, t]) {
+    for (const p of loop) pos.push(p.x, y, p.y)
+    pos.push(0, y, 0.1) // tâm fan nắp (điểm trong — hình lồi nên fan hợp lệ)
+  }
+  const idx: number[] = []
+  const c0 = n // tâm nắp dưới · ring trên bắt đầu n+1 · tâm nắp trên = 2n+1
+  const b1 = n + 1
+  for (let k = 0; k < n; k++) {
+    const k2 = (k + 1) % n
+    idx.push(k, k2, b1 + k2, k, b1 + k2, b1 + k) // thành bên (viền dày — lộ độ dày ở mép vảy)
+    idx.push(c0, k2, k) // nắp dưới
+    idx.push(b1 + n, b1 + k, b1 + k2) // nắp trên
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  geo.setIndex(idx)
+  geo.computeVertexNormals()
+  return geo
+}
+
+// Opts setTiles đã resolve đủ field — tách khỏi setTiles (eslint complexity đếm cả ?? lẫn default param).
+interface TileOpts {
+  type: string
+  curve: number
+  thick: number
+  flat: number
+  dgw: number
+  capTex: string
+  clips: THREE.Plane[][]
+}
+function tileOpts(o: Partial<TileOpts>): TileOpts {
+  return {
+    type: o.type ?? 'amduong',
+    curve: o.curve ?? 0.32, // độ sâu lòng máng (hệ số cao mép / bề ngang viên)
+    thick: o.thick ?? 0.015,
+    flat: o.flat ?? 0, // số mặt CUỐI mảng surfs là MẶT PHẲNG (peak) → máng 1 MẢNH xuyên suốt
+    dgw: o.dgw ?? 0.6, // tiết diện ngang ống dương (× viên âm)
+    capTex: o.capTex ?? 'none', // texture mặt đĩa câu đầu — CHỖ CẮM: khi kho có texture, load map theo key tại đây
+    clips: o.clips ?? [], // kéo cắt per-mặt (plane đứng dọc hip) — [] = mặt không cắt
+  }
+}
+
+// Ngữ cảnh dựng ngói cho 1 MẶT: material (có thể mang kéo cắt hip) + cờ mặt phẳng (1 mảnh) + cờ có kéo cắt.
+interface TileCtx {
+  mat: THREE.MeshStandardMaterial
+  oneRun: boolean // mặt PHẲNG (peak) → máng 1 mảnh xuyên suốt
+  clipped: boolean // có clipping plane hip → viên được tràn mép rồi bị cắt
+}
+
+// CẮT NGỌN đầu đao (NgQuan 2026-06-10 "ngói đâm xiên nhau"): inset 2 đầu hàng PHÌNH nhẹ ở các hàng thấp
+// (vùng mũi đao) → thảm lùi khỏi đúng mũi, hết 2 thảm xuyên nhau qua nếp gập (instancing không clip per-viên
+// được — lùi thảm + thanh sống che là cách khả thi, cũng là cách mái thật). Mức lùi GIẢM 1.25→0.5 sau khi
+// chuyển cột song song + thanh trụ (NgQuan soi ảnh: "đầu đao thiếu ngói" — bản cũ lùi quá tay, hói cả vùng).
+const tipInset =
+  (size: number) =>
+  (v: number): number =>
+    size * (0.15 + 0.5 * Math.max(0, 1 - v / 0.25))
+
 export class RoofPreview {
   private readonly renderer: THREE.WebGLRenderer
   private readonly scene = new THREE.Scene()
@@ -143,6 +266,14 @@ export class RoofPreview {
   private beamMesh: THREE.Mesh | null = null
   private eaveGeo: THREE.BufferGeometry | null = null // ĐƯỜNG HIÊN cong (起翘) — 4 cung nối A'B'C'D', võng giữa
   private eaveDash: THREE.LineSegments | null = null
+  private tileGroup: THREE.Group | null = null // lớp NGÓI (InstancedMesh/mặt) + thanh trụ sống — op #3 Copy to Points
+  private tileUnitGeo: THREE.BufferGeometry | null = null // ngói ĐƠN VỊ (máng NGỬA bbox 1×1×1) — dùng chung mọi instance
+  private tileDgGeo: THREE.BufferGeometry | null = null // viên DƯƠNG (nửa ống 180°) — dựng lại cùng tileUnitGeo
+  private tileCapGeo: THREE.BufferGeometry | null = null // ĐĨA TRÒN bịt đầu ống dương hàng hiên (câu đầu) — tĩnh
+  private tileMat: THREE.MeshStandardMaterial | null = null // đất nung
+  private readonly tileClipMats: THREE.MeshStandardMaterial[] = [] // clone tileMat + clippingPlanes hip (theo regen)
+  private tileRailMat: THREE.MeshStandardMaterial | null = null // gỗ — thanh trụ hộp dọc hip/WX (thay ngói bò)
+  private tileEdgeMat: THREE.MeshStandardMaterial | null = null // diềm sóng mép dày dưới hiên (vàng lớp dày)
   private readonly decor: THREE.Object3D[] = [] // trục + lưới + nhãn trục (tĩnh, dispose ở cuối)
   private hemi: THREE.HemisphereLight | null = null // đèn nền — settings đổi độ sáng
   private key: THREE.DirectionalLight | null = null // đèn chiếu chính — settings đổi độ sáng
@@ -500,6 +631,7 @@ export class RoofPreview {
       flatShading: true,
     })
     this.frameMesh = new THREE.Mesh(this.frameGeo, this.frameMat)
+    this.frameMesh.visible = false // NgQuan 2026-06-10: BỎ khung EFGH — vòng nóc lòi xuyên mặt mái. Giữ code chờ thiết kế lại (pattern hipMesh ẩn)
     this.scene.add(this.frameMesh)
   }
 
@@ -874,7 +1006,8 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
   }
 
   // KHUNG GỖ KLMNEFGH (timber): đáy KLMN (chiếu nóc↓y=0) + nóc EFHG + 4 trụ. 12 thanh tiết diện vuông FRAME_SIZE.
-  // INSET vào trong nửa tiết diện → mặt NGOÀI thanh trùng mép nóc base (không lấn ra ngoài mép nóc).
+  // INSET vào trong nửa tiết diện → mặt NGOÀI thanh trùng mép nóc base. ⚠️ MESH ĐANG ẨN (NgQuan 2026-06-10 bỏ
+  // khung — lòi xuyên mặt mái); geometry vẫn cập nhật để bật lại được khi thiết kế lại.
   setFrame(verts: LabeledPoint[]): void {
     if (this.isDisposed || !this.frameGeo || verts.length < 8) return
     const noc = [verts[4], verts[5], verts[7], verts[6]] // vòng nóc E-F-H-G
@@ -944,7 +1077,9 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     heights: number[],
     seg: number,
     curve: number,
-    tipCurl: number
+    tipCurl: number,
+    w = BEAM_SIZE,
+    h = BEAM_SIZE
   ): void {
     if (this.isDisposed || !this.beamMesh || verts.length < 8) return
     const n = Math.max(1, Math.min(MAX_RAFTER_SEG, Math.round(seg)))
@@ -952,7 +1087,7 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     const cz = this._baseCenterZ(verts)
     const pos: number[] = []
     const idx: number[] = []
-    const profile = rectProfile(BEAM_SIZE, BEAM_SIZE, true) // mép trên ôm spine (thay dropY của hộp cũ)
+    const profile = rectProfile(w, h, true) // tiết diện NGANG×CAO theo 2 slider (NgQuan 2026-06-10); mép trên ôm spine
     for (let c = 0; c < 4; c++) {
       const base = verts[c]
       const noc = verts[NOC_OF_BASE[c]]
@@ -1203,6 +1338,308 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     }
   }
 
+  // Geo viên ngói cho cỡ/dày/LOẠI hiện tại — dựng LẠI mỗi setTiles (độ dày là tham số HÌNH, không scale instance được).
+  // Loại amduong dựng KÈM viên dương (nửa ống 180°, dày tương đối theo bề rộng dương = dgw·viên âm).
+  private _rebuildTileGeo(
+    size: number,
+    thick: number,
+    type: string,
+    dgw: number
+  ): THREE.BufferGeometry {
+    this.tileUnitGeo?.dispose()
+    this.tileDgGeo?.dispose()
+    this.tileDgGeo = null
+    const t = Math.min(0.45, Math.max(0.02, thick / Math.max(size, 0.01)))
+    this.tileUnitGeo = type === 'vayca' ? buildScaleTile(t) : buildTileShell(t)
+    if (type !== 'vayca')
+      this.tileDgGeo = buildTileShell(
+        Math.min(0.45, Math.max(0.02, thick / Math.max(dgw * size, 0.01))),
+        Math.PI / 2,
+        true // ÚP sẵn trong geometry (crown) — không mirror scale → normal/ánh sáng đúng
+      )
+    return this.tileUnitGeo
+  }
+
+  // Material ngói + thanh trụ + đĩa bịt đầu ống — dựng 1 LẦN (geo viên dựng lại mỗi setTiles vì độ dày đổi được).
+  private _initTiles(): void {
+    this.renderer.localClippingEnabled = true // kéo cắt ngói tại hip (clippingPlanes per-material) — bật khi có ngói
+    this.tileMat = new THREE.MeshStandardMaterial({
+      color: 0xc26b49, // đất nung SÁNG (NgQuan 2026-06-10: 0x9c4a2f cũ "hơi tối")
+      roughness: 0.8,
+      side: THREE.DoubleSide, // vỏ máng — thấy cả mặt dưới khi nhìn ngược dốc
+    })
+    this.tileRailMat = new THREE.MeshStandardMaterial({ color: 0x8a6240, roughness: 0.8 }) // gỗ — khớp khung KLMN
+    this.tileEdgeMat = new THREE.MeshStandardMaterial({
+      color: 0xe2cf96, // vàng đất — cùng họ lớp độ dày (underMat) nhưng đặc
+      roughness: 0.9,
+      side: THREE.DoubleSide, // dải mỏng — nhìn được cả 2 phía
+    })
+    // Đĩa câu đầu CÓ ĐỘ DÀY (trụ dẹt D=1 × dày 0.16) — viền dày gạch quanh mặt, hết cảm giác "nhựa" của đĩa
+    // phẳng (NgQuan 2026-06-10). rotateX → trục dày dọc Z = trục ống khi instance (mặt đĩa quay ra xuôi dốc).
+    this.tileCapGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.16, 20)
+    this.tileCapGeo.rotateX(Math.PI / 2)
+  }
+
+  // Dọn TOÀN BỘ tài nguyên ngói (buffer instance + geo âm/dương/đĩa + 2 mat) — chỉ gọi từ dispose().
+  private _disposeTiles(): void {
+    this._clearTiles()
+    this.tileUnitGeo?.dispose()
+    this.tileDgGeo?.dispose()
+    this.tileCapGeo?.dispose()
+    this.tileMat?.dispose()
+    this.tileRailMat?.dispose()
+    this.tileEdgeMat?.dispose()
+  }
+
+  // Gỡ lớp ngói khỏi scene + giải phóng buffer instance + geo thanh trụ (geo/mat đơn vị GIỮ LẠI — dùng chung
+  // giữa các lần regen; geo InstancedMesh = unit geo chung nên KHÔNG dispose — check InstancedMesh trước).
+  private _clearTiles(): void {
+    for (const m of this.tileClipMats) m.dispose() // clone material mang kéo cắt — theo regen
+    this.tileClipMats.length = 0
+    if (!this.tileGroup) return
+    this.scene.remove(this.tileGroup)
+    for (const c of this.tileGroup.children) {
+      if (c instanceof THREE.InstancedMesh) c.dispose()
+      else if (c instanceof THREE.Mesh) c.geometry.dispose() // thanh trụ sống — geo dựng mới mỗi regen
+    }
+    this.tileGroup = null
+  }
+
+  // Lớp NGÓI instanced (op #3 Copy to Points): rải THEO HÀNG chiều dài thật (rowsOnSurface — số viên đếm RIÊNG
+  // từng hàng như thợ lợp → viên cỡ đều tuyệt đối, vùng cung góc nhận ít viên đúng cỡ thay vì nhiều viên bé chen/đè)
+  // + chừa inset 2 đầu hàng (không thò qua sống) + THANH TRỤ hộp dọc `rails` (hip + đỉnh WX). size ≤ 0 → tắt.
+  setTiles(
+    surfs: ((u: number, v: number) => THREE.Vector3)[],
+    size: number,
+    rails: ((t: number) => THREE.Vector3)[] = [],
+    opts: Partial<TileOpts> = {}
+  ): void {
+    if (this.isDisposed) return
+    this._clearTiles()
+    if (size <= 0) return
+    this._mountTiles(surfs, size, rails, tileOpts(opts))
+  }
+
+  // Dựng group ngói sau khi opts đã resolve — tách khỏi setTiles (complexity). Mặt có kéo cắt (clips[i])
+  // nhận CLONE material mang 2 clipping plane hip riêng của nó (dispose theo regen ở _clearTiles).
+  private _mountTiles(
+    surfs: ((u: number, v: number) => THREE.Vector3)[],
+    size: number,
+    rails: ((t: number) => THREE.Vector3)[],
+    o: {
+      type: string
+      curve: number
+      thick: number
+      flat: number
+      dgw: number
+      clips: THREE.Plane[][]
+    }
+  ): void {
+    if (!this.tileMat) this._initTiles() // material 1 lần
+    const geo = this._rebuildTileGeo(size, o.thick, o.type, o.dgw)
+    const group = new THREE.Group()
+    for (let i = 0; i < surfs.length; i++) {
+      const cp = o.clips[i] ?? []
+      let mat = this.tileMat as THREE.MeshStandardMaterial
+      if (cp.length > 0) {
+        mat = mat.clone() // material riêng mặt này — mang kéo cắt hip
+        mat.clippingPlanes = cp
+        this.tileClipMats.push(mat)
+      }
+      this._addTilesFor(group, o, geo, surfs[i], size, {
+        mat,
+        oneRun: i >= surfs.length - o.flat,
+        clipped: cp.length > 0,
+      })
+    }
+    if (rails.length > 0) group.add(this._buildRails(rails, size))
+    this.scene.add(group)
+    this.tileGroup = group
+  }
+
+  // Chọn builder theo LOẠI ngói cho 1 mặt — tách khỏi setTiles (complexity).
+  // ctx.mat = material của mặt (có thể mang kéo cắt hip) · oneRun = mặt PHẲNG (peak) · clipped = có kéo cắt.
+  private _addTilesFor(
+    group: THREE.Group,
+    o: { type: string; curve: number; dgw: number },
+    geo: THREE.BufferGeometry,
+    surf: (u: number, v: number) => THREE.Vector3,
+    size: number,
+    ctx: TileCtx
+  ): void {
+    if (o.type === 'vayca') this._addScaleTiles(group, geo, surf, size, ctx)
+    else this._addYinYang(group, geo, surf, size, o, ctx)
+  }
+
+  // VẢY CÁ: tấm phẳng đầu tròn SO LE nửa viên, hàng dày (bước 0.55 viên) + viên dài ~2 hàng → hàng trên che
+  // nửa trên hàng dưới, chỉ LÓ phần đầu tròn = lớp vảy đúng ảnh mẫu. "Cong ngói" không tác động (vảy phẳng).
+  private _addScaleTiles(
+    group: THREE.Group,
+    geo: THREE.BufferGeometry,
+    surf: (u: number, v: number) => THREE.Vector3,
+    size: number,
+    ctx: TileCtx
+  ): void {
+    const lv = arcLength((t) => surf(0.5, t)).length
+    const nv = Math.min(64, Math.max(2, Math.round(lv / (size * 0.55))))
+    const pts = rowsOnSurface(surf, nv, size, { stagger: 0.5, inset: tipInset(size) })
+    const sv = new THREE.Vector3()
+    group.add(
+      copyToPoints(geo, ctx.mat, pts, {
+        scale: (p) => sv.set(p.cw, p.cw, p.ch * 1.9), // y=cw → dày thật (unit y = dày/cỡ) · dài ~2 hàng
+      })
+    )
+  }
+
+  // ÂM DƯƠNG (tỉ lệ CỠ TRUNG thật — catalog: âm 220×200×8 võng~0.15 · dương ống D=0.6 rộng âm, slider chỉnh):
+  // lớp ÂM máng chữ U ngửa lưới nửa-bước; lớp DƯƠNG nửa ống 180° ÚP đè KHE (lưới seam). Có kéo cắt (clipped):
+  // viên TRÀN qua hip rồi bị plane CẮT NGANG ("đường hip là cái kéo" — NgQuan) → khỏi cắt ngọn thủ công,
+  // cột thẳng đều tới sát sống. oneRun (mặt PHẲNG peak) = 1 mảnh xuyên suốt · mặt cong = chia hàng mí 1.25.
+  private _addYinYang(
+    group: THREE.Group,
+    geo: THREE.BufferGeometry,
+    surf: (u: number, v: number) => THREE.Vector3,
+    size: number,
+    o: { curve: number; dgw: number },
+    ctx: TileCtx
+  ): void {
+    const lv = arcLength((t) => surf(0.5, t)).length
+    const nv = ctx.oneRun ? 1 : Math.min(48, Math.max(2, Math.round(lv / (size * 0.8))))
+    const zMul = ctx.oneRun ? 1.02 : 1.25 // 1 mảnh: phủ đúng chiều dài mặt · chia hàng: mí chồng dọc
+    const inset = ctx.clipped ? 0 : tipInset(size) // có kéo → khỏi lùi thủ công, plane cắt
+    const pts = colsOnSurface(surf, nv, size, { inset, overhang: ctx.clipped })
+    const zAm = ctx.oneRun ? zMul : zMul - 0.06 // base: viên ÂM cũng THỤT như ống dương — vành đầu không lộ lên mặt đĩa
+    const sv = new THREE.Vector3()
+    group.add(
+      copyToPoints(geo, ctx.mat, pts, {
+        scale: (p) => sv.set(p.cw, p.cw * o.curve, p.ch * zAm), // x = 1 ô local → mép chạm mép
+      })
+    )
+    this._addDuong(group, surf, size, o, ctx, { nv, zMul })
+    if (!ctx.oneRun) this._addWaveFascia(group, surf, size, o.curve) // diềm sóng mép dày — chỉ hiên base
+  }
+
+  // DIỀM SÓNG mép dày dưới hiên (NgQuan 2026-06-10 "độ dày mép dưới mái bám và uốn lượn theo sóng âm dương"):
+  // dải ĐỨNG treo từ đường hiên xuống, đáy NHẤP NHÔ chu kỳ = 1 viên, ĐÚNG PHA lưới cột (sâu nhất dưới ống
+  // dương tại offset nguyên k·viên từ tâm — cùng công thức lưới seam, nông nhất giữa viên âm) → mép độ dày
+  // của mái nhìn như bám theo sóng ngói. 8 mẫu/viên (đủ mịn — lưới mặt mái thưa hơn viên nên không vẽ nổi sóng).
+  private _addWaveFascia(
+    group: THREE.Group,
+    surf: (u: number, v: number) => THREE.Vector3,
+    size: number,
+    curveK: number
+  ): void {
+    const al = arcLength((t) => surf(t, 0))
+    const len = al.length
+    const margin = size * 0.1
+    if (len < 2 * margin + size) return
+    const n = Math.min(720, Math.max(8, Math.ceil(((len - 2 * margin) / size) * 8)))
+    const top = 0.015 // mép trên CHUI VÀO lớp ngói (NgQuan 2026-06-10 "cho sát lên thêm" — hết khe hở dưới viên)
+    const h0 = 0.012 + size * 0.08 // phần treo tối thiểu (rút ngắn — cả dải dâng lên)
+    const amp = size * curveK * 0.9 // biên độ sóng ≈ cao mép viên âm
+    const pos: number[] = []
+    const idx: number[] = []
+    for (let i = 0; i <= n; i++) {
+      const s = margin + ((len - 2 * margin) * i) / n
+      const p = surf(al.tAt(s / len), 0)
+      const wave = 0.5 * (1 + Math.cos((2 * Math.PI * (s - len / 2)) / size)) // =1 tại lưới seam (ống dương)
+      pos.push(p.x, p.y + top, p.z, p.x, p.y + top - h0 - amp * wave, p.z) // trên sát ngói · đáy treo lượn sóng
+    }
+    for (let i = 0; i < n; i++) {
+      const a2 = i * 2
+      idx.push(a2, a2 + 1, a2 + 3, a2, a2 + 3, a2 + 2)
+    }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    geo.setIndex(idx)
+    geo.computeVertexNormals()
+    group.add(new THREE.Mesh(geo, this.tileEdgeMat as THREE.MeshStandardMaterial))
+  }
+
+  // Lớp DƯƠNG: nửa ống 180° rộng dgw·viên (slider "Tiết diện"), cao = NỬA rộng (ống tròn), ÚP (scale y ÂM =
+  // lật gương — DoubleSide nên shading vẫn đúng), lưới SEAM đè khe, ĐỘI dọc normal: rim ống = 0.8·cong·cw
+  // (cắn thấp hơn mép âm cong·cw). Hàng HIÊN chân base bịt ĐĨA TRÒN (câu đầu).
+  private _addDuong(
+    group: THREE.Group,
+    surf: (u: number, v: number) => THREE.Vector3,
+    size: number,
+    o: { curve: number; dgw: number },
+    ctx: TileCtx,
+    r: { nv: number; zMul: number }
+  ): void {
+    if (!this.tileDgGeo) return
+    const inset = ctx.clipped ? 0 : tipInset(size)
+    const dg = colsOnSurface(surf, r.nv, size, { inset, overhang: ctx.clipped, seam: true })
+    const sv = new THREE.Vector3()
+    const w = o.dgw // tiết diện ngang ống (× viên âm)
+    // Base: ống THỤT 0.06ch so với viên âm → vành đầu ống không đồng phẳng với ĐĨA bịt (hết lấp lánh đè Z —
+    // NgQuan soi ảnh 2026-06-10); geo đã ÚP sẵn (crown) nên scale y DƯƠNG → ăn sáng bình thường.
+    const zd = r.zMul - (ctx.oneRun ? 0 : 0.06)
+    group.add(
+      copyToPoints(this.tileDgGeo, ctx.mat, dg, {
+        scale: (p) => sv.set(p.cw * w, p.cw * w * 0.5, p.ch * zd), // cao = nửa rộng (ống tròn)
+        lift: (p) => 0.8 * o.curve * p.cw, // rim ống (đáy geo) đè mép âm, thấp hơn mép âm chút
+      })
+    )
+    if (!ctx.oneRun) this._addDuongCaps(group, dg, o, ctx, r) // chỉ chân BASE mới bịt (NgQuan 2026-06-10)
+  }
+
+  // ĐĨA TRÒN bịt đầu ống dương HÀNG HIÊN (câu đầu 瓦当 như mái thật): đặt tại đầu XUÔI DỐC của ống hàng thấp
+  // nhất, mặt đĩa ⊥ trục ống (basis z = binormal = xuôi dốc), tâm ở mức rim ống, D = 1.1 bề rộng ống (treo trùm).
+  private _addDuongCaps(
+    group: THREE.Group,
+    dg: SurfacePoint[],
+    o: { curve: number; dgw: number },
+    ctx: TileCtx,
+    r: { nv: number; zMul: number }
+  ): void {
+    const vMin = 0.5 / r.nv + 1e-6
+    const zv = new THREE.Vector3()
+    const ends: SurfacePoint[] = []
+    for (const p of dg) {
+      if (p.v > vMin) continue // chỉ hàng hiên
+      zv.crossVectors(p.tanU, p.nrm).normalize() // xuôi dốc
+      ends.push({ ...p, pos: p.pos.clone().addScaledVector(zv, p.ch * r.zMul * 0.5) })
+    }
+    const sv = new THREE.Vector3()
+    const d = o.dgw * 1.1 // D đĩa = 1.1 × bề rộng ống
+    group.add(
+      copyToPoints(this.tileCapGeo as THREE.BufferGeometry, ctx.mat, ends, {
+        scale: (p) => sv.set(p.cw * d, p.cw * d, p.cw * d), // scale ĐỀU cả trục dày → viền đĩa ~0.16·D
+        lift: (p) => 0.8 * o.curve * p.cw, // tâm đĩa ở mức rim ống
+      })
+    )
+  }
+
+  // THANH TRỤ HỘP dọc sống (4 hip + đỉnh WX peak): tiết diện chữ nhật HẸP đứng, đáy ôm sống (chìm nhẹ — không hở
+  // khe ở đoạn cong), sweep op #2 dọc đường — THAY ngói bò (NgQuan 2026-06-10: hip không lợp, để thanh trụ kiểu
+  // khung gỗ, sau liền mạch lên peak; nóc base khỏi cần — khung EFGH đã lấn mép che). Bề ngang theo cỡ ngói.
+  private _buildRails(rails: ((t: number) => THREE.Vector3)[], size: number): THREE.Mesh {
+    const w = Math.max(0.035, size * 0.3) // hẹp — ngói to thanh to theo, sàn 3.5cm
+    const h = w * 2.2 // chữ nhật ĐỨNG (cao > ngang)
+    const sink = 0.015
+    const profile = [
+      new THREE.Vector2(-w / 2, -sink),
+      new THREE.Vector2(w / 2, -sink),
+      new THREE.Vector2(w / 2, h - sink),
+      new THREE.Vector2(-w / 2, h - sink),
+    ]
+    const pos: number[] = []
+    const idx: number[] = []
+    const seg = 32
+    for (const curve of rails) {
+      if (curve(0).distanceTo(curve(1)) < 0.05) continue // đường suy biến (WX khi ridge≈0) → bỏ
+      const spine: THREE.Vector3[] = []
+      for (let i = 0; i <= seg; i++) spine.push(curve(i / seg))
+      sweepInto(pos, idx, spine, profile, {}) // caps mặc định bịt 2 đầu
+    }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    geo.setIndex(idx)
+    geo.computeVertexNormals()
+    return new THREE.Mesh(geo, this.tileRailMat as THREE.MeshStandardMaterial)
+  }
+
   // Khớp buffer render với kích thước HIỂN THỊ canvas (rộng×cao theo CSS) + aspect. Bỏ qua khi ẩn (client = 0).
   private _syncSize(): void {
     const cw = this.canvas.clientWidth
@@ -1292,6 +1729,7 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
       this._disposeMat(this.bladeMesh.material)
     }
     this._disposeApex()
+    this._disposeTiles() // buffer instance + geo/mat ngói
     if (this.mesh) this.mesh.geometry.dispose()
     this.mat.dispose()
     this.underMat?.dispose()

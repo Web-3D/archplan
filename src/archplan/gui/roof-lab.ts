@@ -12,7 +12,7 @@
 
 import * as THREE from 'three'
 
-import { arcLength, resampleCurve } from '../ops/resample'
+import { arcLength } from '../ops/resample'
 import {
   type LabeledPoint,
   MAX_CORNER_SEG,
@@ -45,6 +45,14 @@ export interface RoofLabParams {
   hipMidY: number // ĐÈ HIP: dịch Y của I (±m) → nâng/hạ sống hip cục bộ quanh I (tent, 2 đầu dính). 0 = phẳng.
   rafterSeg: number // XÀ GÓC A'K: số đốt RIÊNG (gấp đôi, 1..24) — mịn hơn mặt
   rafterCurve: number // XÀ GÓC A'K: độ cong RIÊNG (0.6..1.2) — tách khỏi cong mặt
+  tileSize: number // CỠ NGÓI (m, bề ngang viên) — op #3 Copy to Points rải ngói instanced bám mặt. 0 = tắt (như hipArea)
+  tileCurve: number // CONG NGÓI (0.05..0.7) — độ sâu lòng máng (hệ số cao mép so với bề ngang viên)
+  tileThick: number // DÀY NGÓI (m) — độ dày vỏ viên (lộ ở vành đầu); mái cũng ÉP XUỐNG đoạn này nằm dưới đáy ngói
+  tileType: string // LOẠI NGÓI (tab): 'amduong' = âm ngửa cột thẳng + dương úp cài khe · 'vayca' = vảy cá so le
+  tileDgW: number // TIẾT DIỆN NGANG ống DƯƠNG (× bề rộng viên âm, 0.3..1) — D ống thật 120/200 = 0.6
+  tileCapTex: string // TEXTURE mặt đĩa câu đầu ('none' = trơn) — select cắm dây sẵn, texture thả vào kho sau
+  rafterW: number // XÀ GÓC: bề NGANG tiết diện (m) — cùng rafterH chỉnh diện tích dày/mỏng
+  rafterH: number // XÀ GÓC: bề CAO tiết diện (m)
 }
 
 // ⭐ MÁI CHUẨN — hình dáng GỐC (frustum chia tọa độ A–V) để bắt đầu mọi dạng mái. Mở Mái = state này.
@@ -67,6 +75,14 @@ export const DEFAULT_ROOF: RoofLabParams = {
   hipMidY: 0, // Đè hip = 0 → sống phẳng (mái chuẩn giữ nguyên)
   rafterSeg: 24, // Xà góc: số đốt riêng (gấp đôi đốt góc đao)
   rafterCurve: 1, // Xà góc: độ cong riêng mặc định 1 (NgQuan chốt 2026-06-08; slider 0.6..1.2)
+  tileSize: 0.2, // Cỡ ngói = CỠ TRUNG THẬT (viên âm rộng 200mm — catalog Hải Long, NgQuan chốt 2026-06-10)
+  tileCurve: 0.15, // Cong ngói = võng/rộng viên âm thật (~30mm/200mm)
+  tileThick: 0.01, // Dày ngói = 8–10mm thật
+  tileType: 'amduong', // Loại ngói mặc định: âm dương (mái đao truyền thống)
+  tileDgW: 0.6, // Tiết diện ống dương = 0.6 viên âm (D120/200 cỡ trung thật)
+  tileCapTex: 'none', // Mặt đĩa câu đầu trơn — chờ texture trang trí
+  rafterW: 0.04, // Xà góc ngang 4cm (= BEAM_SIZE cũ)
+  rafterH: 0.04, // Xà góc cao 4cm
 }
 
 // 🔪 Lưỡi dao = mặt cắt. transform (nghiêng X/Y/Z + vị trí) định vị; hình do bladeSDF (editor) quyết.
@@ -251,14 +267,14 @@ function qbez(P0: THREE.Vector3, P1: THREE.Vector3, P2: THREE.Vector3, t: number
     .addScaledVector(P2, t * t)
 }
 
-// Biên HIÊN của 1 slope: cung góc(tip1→i1) + ĐOẠN PHẲNG i1→i2 (y=0) + cung góc(i2→tip2). 3n+1 điểm. Khớp setEave.
-function eaveBoundary(
+// Biên HIÊN dạng HÀM LIÊN TỤC u∈[0,1]: cung góc (u≤⅓, đốt đều arc-length) + ĐOẠN PHẲNG (⅓..⅔, y=0) + cung góc (≥⅔).
+// eaveBoundary (lưới mặt) + slopeSurface (ngói op #3) cùng dùng → 1 nguồn sự thật control point, không drift.
+function eaveFn(
   v: LabeledPoint[],
   h: number[],
   s: SlopeDef,
-  n: number,
   curve: number
-): THREE.Vector3[] {
+): (u: number) => THREE.Vector3 {
   const tip1 = cornerVec(v, s.c1)
   tip1.y += h[s.c1]
   const tip2 = cornerVec(v, s.c2)
@@ -267,11 +283,26 @@ function eaveBoundary(
   const in2 = new THREE.Vector3(v[s.i2[0]].x, 0, v[s.i2[1]].z)
   const ctrl1 = midVec(in1, tip1).lerp(cornerVec(v, s.c1), curve)
   const ctrl2 = midVec(in2, tip2).lerp(cornerVec(v, s.c2), curve)
+  const a1 = arcLength((t) => qbez(tip1, ctrl1, in1, t)) // bảng arc-length dựng 1 LẦN trong closure
+  const a2 = arcLength((t) => qbez(in2, ctrl2, tip2, t))
+  return (u) => {
+    if (u <= 1 / 3) return a1.pointAt(u * 3)
+    if (u <= 2 / 3) return new THREE.Vector3().lerpVectors(in1, in2, u * 3 - 1)
+    return a2.pointAt(u * 3 - 2)
+  }
+}
+
+// Biên HIÊN rời rạc của 1 slope = lấy mẫu eaveFn 3n+1 điểm (n đốt mỗi đoạn — khớp setEave như cũ).
+function eaveBoundary(
+  v: LabeledPoint[],
+  h: number[],
+  s: SlopeDef,
+  n: number,
+  curve: number
+): THREE.Vector3[] {
+  const f = eaveFn(v, h, s, curve)
   const pts: THREE.Vector3[] = []
-  pts.push(...resampleCurve((t) => qbez(tip1, ctrl1, in1, t), n)) // cung góc 1 — đốt ĐỀU theo chiều dài (op Resample)
-  for (let i = 1; i <= n; i++) pts.push(new THREE.Vector3().lerpVectors(in1, in2, i / n)) // phẳng
-  const arc2 = resampleCurve((t) => qbez(in2, ctrl2, tip2, t), n) // cung góc 2 — đốt đều
-  for (let i = 1; i <= n; i++) pts.push(arc2[i])
+  for (let i = 0; i <= 3 * n; i++) pts.push(f(i / (3 * n)))
   return pts
 }
 
@@ -289,8 +320,26 @@ function hipTent(t: number, midT: number): number {
   return t < midT ? t / midT : (1 - t) / (1 - midT)
 }
 
-// Biên HIP cong: tip (eave, v=0) → noc (v=1), control kéo về góc đáy `ground` theo curve. + ĐÈ Y tại I (midT) đoạn yOff.
-// n+1 điểm ĐỀU theo CHIỀU DÀI (op Resample) — f = fraction chiều dài; midT/tent/marker I đều theo f (nhất quán).
+// Biên HIP dạng HÀM LIÊN TỤC f∈[0,1] (fraction CHIỀU DÀI THẬT — op Resample): tip (eave) → noc, control kéo về
+// góc đáy `ground` theo curve. + ĐÈ Y tại I (midT) đoạn yOff (tent, 2 đầu dính). hipBoundary + slopeSurface cùng dùng.
+function hipFn(
+  tip: THREE.Vector3,
+  noc: THREE.Vector3,
+  ground: THREE.Vector3,
+  curve: number,
+  midT: number,
+  yOff: number
+): (f: number) => THREE.Vector3 {
+  const ctrl = midVec(tip, noc).lerp(ground, curve)
+  const al = arcLength((t) => qbez(tip, ctrl, noc, t))
+  return (f) => {
+    const p = al.pointAt(f) // f = fraction CHIỀU DÀI (đốt đều thật, không phải t Bézier)
+    if (yOff !== 0) p.y += yOff * hipTent(f, midT) // đè sống hip lên/xuống quanh I
+    return p
+  }
+}
+
+// Biên HIP rời rạc = lấy mẫu hipFn n+1 điểm đều theo chiều dài.
 function hipBoundary(
   tip: THREE.Vector3,
   noc: THREE.Vector3,
@@ -300,15 +349,9 @@ function hipBoundary(
   midT: number,
   yOff: number
 ): THREE.Vector3[] {
-  const ctrl = midVec(tip, noc).lerp(ground, curve)
-  const al = arcLength((t) => qbez(tip, ctrl, noc, t))
+  const f = hipFn(tip, noc, ground, curve, midT, yOff)
   const pts: THREE.Vector3[] = []
-  for (let j = 0; j <= n; j++) {
-    const f = j / n // fraction CHIỀU DÀI (đốt đều thật, không phải t Bézier)
-    const p = al.pointAt(f)
-    if (yOff !== 0) p.y += yOff * hipTent(f, midT) // đè sống hip lên/xuống quanh I
-    pts.push(p)
-  }
+  for (let j = 0; j <= n; j++) pts.push(f(j / n))
   return pts
 }
 
@@ -362,6 +405,21 @@ function addCornerCurl(
 // (fix 2026-06-10: falloff tuyến tính cũ gập đúng tại X1/Y1 — NgQuan soi ảnh; tại đỉnh x=1 cũng phẳng → chỏm mượt).
 const smooth01 = (x: number): number => x * x * (3 - 2 * x)
 
+// Trạng thái CHÓP (cuộn mũi + vị trí I) dùng chung buildRoofSkin ↔ slopeSurfaces (ngói) — cùng 1 nguồn tham số.
+interface TipState {
+  center: THREE.Vector3 // tâm xz đáy mái — hướng cuộn "vào trong"
+  curl: number // độ cuộn mũi
+  midT: number // vị trí I (fraction chiều dài hip)
+  midY: number // đè hip Y tại I
+}
+
+// Dựng TipState từ 4 đỉnh đáy + 3 tham số chóp.
+function mkTip(v: LabeledPoint[], curl: number, midT: number, midY: number): TipState {
+  const cx = (v[0].x + v[1].x + v[2].x + v[3].x) / 4 // tâm xz mái (hướng "vào trong")
+  const cz = (v[0].z + v[1].z + v[2].z + v[3].z) / 4
+  return { center: new THREE.Vector3(cx, 0, cz), curl, midT, midY }
+}
+
 // CUỘN MŨI: vùng cuộn BÁM I + X1/Y1 cả 2 hướng — tắt dần tới I (v=midT) & X1/Y1 (u=midT/3, cung góc=1/3 cạnh hiên,
 // fraction midT từ A'). Kéo "Vị trí I" → vùng cuộn co/giãn đều theo cả 3 cạnh. Trọng số = smooth01(u)·smooth01(v)
 // (1 ở mũi → 0 ở biên, C1 cả 2 chiều); tại góc u=v=0 vẫn = 1 → marker A'/xà (_curledTip) KHÔNG đổi chỗ.
@@ -370,7 +428,7 @@ function tipCurlOffset(
   v: number,
   c1: THREE.Vector3,
   c2: THREE.Vector3,
-  tip: { center: THREE.Vector3; curl: number; midT: number }
+  tip: TipState
 ): THREE.Vector3 {
   const off = new THREE.Vector3()
   if (tip.curl <= 0 || v >= tip.midT) return off
@@ -393,7 +451,7 @@ function buildSlope(
   n: number,
   m: number,
   curve: number,
-  tip: { center: THREE.Vector3; curl: number; midT: number; midY: number }
+  tip: TipState
 ): void {
   const bottom = eaveBoundary(v, h, s, n, curve)
   const top = nocBoundary(v, s, bottom.length)
@@ -463,34 +521,33 @@ function vertexNormalsByPosition(pos: number[], idx: number[]): THREE.Vector3[] 
   return out
 }
 
-// Hệ số ĐỘ DÀY theo vị trí: càng gần 1 trong 4 đỉnh góc `tips` càng MỎNG (minF tại góc → 1 ngoài bán kính R).
-function nearTipFactor(px: number, py: number, pz: number, tips: THREE.Vector3[]): number {
+// Hệ số ĐỘ DÀY theo k/c tới MÉP HIÊN (vành đáy `rim`, mảng xyz phẳng): càng gần mép càng DẸT (minF tại mép
+// → 1 ngoài bán kính R). Thay nearTipFactor cũ (chỉ thuôn 4 mũi) — mép hiên đi QUA cả 4 mũi nên bao luôn
+// (NgQuan 2026-06-10: "độ dày mái gần tới mép chân base càng dẹt lại").
+function edgeThinFactor(px: number, py: number, pz: number, rim: number[]): number {
   let d2 = Infinity
-  for (const tp of tips) {
-    const dx = px - tp.x
-    const dy = py - tp.y
-    const dz = pz - tp.z
-    d2 = Math.min(d2, dx * dx + dy * dy + dz * dz)
+  for (let i = 0; i < rim.length; i += 3) {
+    const dx = px - rim[i]
+    const dy = py - rim[i + 1]
+    const dz = pz - rim[i + 2]
+    const q = dx * dx + dy * dy + dz * dz
+    if (q < d2) d2 = q
   }
-  const minF = 0.2 // độ dày tại mũi = 20% · R = bán kính thuôn (m)
-  const R = 1.0
+  const minF = 0.12 // độ dày tại mép hiên còn 12%
+  const R = 0.9 // bán kính thuôn (m)
   return minF + (1 - minF) * Math.min(1, Math.sqrt(d2) / R)
 }
 
-// SOLIDIFY mặt cong: lớp TRONG = đỉnh ngoài đẩy vào ⊥ mặt đoạn t·(mỏng dần về góc) — normal gộp theo vị trí (kín seam)
-// + đảo winding; bịt VÀNH HIÊN (cạnh hở) nối ngoài↔trong. Nóc/hip tự kín (đỉnh trùng → lớp trong cũng trùng).
-function solidify(
-  pos: number[],
-  idx: number[],
-  eave: number[][],
-  t: number,
-  tips: THREE.Vector3[]
-): void {
+// SOLIDIFY mặt cong: lớp TRONG = đỉnh ngoài đẩy vào ⊥ mặt đoạn t·(DẸT dần về mép hiên) — normal gộp theo vị trí
+// (kín seam) + đảo winding; bịt VÀNH HIÊN (cạnh hở) nối ngoài↔trong. Nóc/hip tự kín (đỉnh trùng → trong cũng trùng).
+function solidify(pos: number[], idx: number[], eave: number[][], t: number): void {
   const outer = pos.length / 3
   const nrm = vertexNormalsByPosition(pos, idx)
+  const rim: number[] = [] // điểm vành hiên (1 đầu mỗi cạnh — cạnh kế phủ đầu còn lại)
+  for (const [a] of eave) rim.push(pos[a * 3], pos[a * 3 + 1], pos[a * 3 + 2])
   for (let v = 0; v < outer; v++) {
     const i = v * 3
-    const tt = t * nearTipFactor(pos[i], pos[i + 1], pos[i + 2], tips) // độ dày MỎNG DẦN về góc mái
+    const tt = t * edgeThinFactor(pos[i], pos[i + 1], pos[i + 2], rim) // độ dày DẸT DẦN về mép hiên
     pos.push(pos[i] - nrm[v].x * tt, pos[i + 1] - nrm[v].y * tt, pos[i + 2] - nrm[v].z * tt)
   }
   const triLen = idx.length
@@ -509,9 +566,114 @@ function buildSlopes(
   n: number,
   m: number,
   curve: number,
-  tip: { center: THREE.Vector3; curl: number; midT: number; midY: number }
+  tip: TipState
 ): void {
   for (const s of SLOPE_DEFS) buildSlope(pos, idx, eave, v, heights, s, n, m, curve, tip)
+}
+
+// MẶT SLOPE dạng HÀM LIÊN TỤC (u,v)→điểm — ĐÚNG công thức buildSlope (Coons 4 biên + cuộn mũi) nhưng không rời rạc:
+// op #3 Copy-to-Points lấy mẫu tự do trên hàm này → ngói bám khít mặt cong ở MỌI mật độ, không phụ thuộc lưới đốt.
+// Closure dựng bảng arc-length 1 LẦN — mỗi lần gọi chỉ còn binary search + nội suy.
+function slopeSurface(
+  v: LabeledPoint[],
+  h: number[],
+  s: SlopeDef,
+  curve: number,
+  tip: TipState
+): (u: number, vv: number) => THREE.Vector3 {
+  const bot = eaveFn(v, h, s, curve)
+  const top1 = cornerVec(v, s.n1)
+  const top2 = cornerVec(v, s.n2)
+  const left = hipFn(bot(0), top1, cornerVec(v, s.c1), curve, tip.midT, tip.midY)
+  const right = hipFn(bot(1), top2, cornerVec(v, s.c2), curve, tip.midT, tip.midY)
+  const corners = [bot(0), bot(1), top1, top2] // [P00,P10,P01,P11] — khớp buildSlope
+  const s0 = (u: number, vv: number): THREE.Vector3 =>
+    coonsAt(
+      bot(u),
+      new THREE.Vector3().lerpVectors(top1, top2, u),
+      left(vv),
+      right(vv),
+      corners,
+      u,
+      vv
+    ).add(tipCurlOffset(u, vv, corners[0], corners[1], tip))
+  // ĐẢO chiều u khi xuất: ∂u×∂v của tham số gốc (vòng đáy A→B→C→D) chỉ VÀO TRONG mái → frame ngói bị úp
+  // (NgQuan soi ảnh 2026-06-10: "peak cong ngược với base" — peak đã outward, base inward). Lật u → mọi mặt
+  // cùng quy ước pháp tuyến RA NGOÀI. Lưới buildSlope không ảnh hưởng (DoubleSide, tự tính normal theo vị trí).
+  return (u, vv) => s0(1 - u, vv)
+}
+
+// 4 hàm mặt slope (trước/phải/sau/trái) cho lớp NGÓI — cùng tham số với buildRoofSkin → ngói đồng bộ hình mái.
+export function slopeSurfaces(
+  v: LabeledPoint[],
+  heights: number[],
+  p: RoofLabParams
+): ((u: number, vv: number) => THREE.Vector3)[] {
+  const tip = mkTip(v, p.tipCurl, p.hipMidT, p.hipMidY)
+  return SLOPE_DEFS.map((s) => slopeSurface(v, heights, s, p.cornerCurve, tip))
+}
+
+// "ĐƯỜNG HIP LÀ CÁI KÉO CẮT NGÓI" (NgQuan 2026-06-10): 2 mặt phẳng cắt ĐỨNG dọc 2 hip mỗi slope — viên nào
+// tràn qua hip/mũi đao bị CẮT NGANG (clipping plane per-material, instancing không cắt từng viên được nhưng
+// plane cắt cả thảm theo fragment). Hình chiếu BẰNG của hip cong = đúng ĐOẠN THẲNG góc-đáy→góc-nóc (control
+// Bézier nằm trên đoạn này theo plan; cuộn mũi lệch không đáng kể) → plane đứng qua 2 điểm đó cắt chuẩn.
+export function slopeClipPlanes(v: LabeledPoint[]): THREE.Plane[][] {
+  return SLOPE_DEFS.map((s) => {
+    const cx = (v[s.c1].x + v[s.c2].x + v[s.n1].x + v[s.n2].x) / 4 // tâm plan slope = phía GIỮ
+    const cz = (v[s.c1].z + v[s.c2].z + v[s.n1].z + v[s.n2].z) / 4
+    const mk = (ci: number, ni: number): THREE.Plane => {
+      const px = v[ci].x
+      const pz = v[ci].z
+      const n = new THREE.Vector3(-(v[ni].z - pz), 0, v[ni].x - px).normalize() // ⊥ plan hip, nằm ngang
+      if (n.x * (cx - px) + n.z * (cz - pz) < 0) n.negate() // chĩa về tâm slope (phía dương = giữ)
+      return new THREE.Plane().setFromNormalAndCoplanarPoint(n, new THREE.Vector3(px, 0, pz))
+    }
+    return [mk(s.c1, s.n1), mk(s.c2, s.n2)]
+  })
+}
+
+// KHUNG TAM GIÁC 2 MẶT HỒI peak (NgQuan 2026-06-10, theo ảnh mẫu chùa): mỗi bên 3 thanh — đáy E-G / F-H +
+// 2 thanh xiên lên đỉnh W / X — NỐI LIỀN hệ thanh sống hip (cùng profile sweep _buildRails; hip kết thúc tại
+// E F G H, khung hồi tiếp lên đỉnh → kết cấu liền mạch).
+function peakFrameRails(v: LabeledPoint[], capHeight: number): ((t: number) => THREE.Vector3)[] {
+  const e = cornerVec(v, 4)
+  const f = cornerVec(v, 5)
+  const g = cornerVec(v, 6)
+  const h = cornerVec(v, 7)
+  const y = e.y + capHeight
+  const w = new THREE.Vector3(e.x, y, (e.z + g.z) / 2)
+  const x = new THREE.Vector3(f.x, y, (f.z + h.z) / 2)
+  const seg =
+    (a: THREE.Vector3, b: THREE.Vector3) =>
+    (t: number): THREE.Vector3 =>
+      new THREE.Vector3().lerpVectors(a, b, t)
+  return [seg(e, w), seg(g, w), seg(e, g), seg(f, x), seg(h, x), seg(f, h)]
+}
+
+// 2 MẶT NGHIÊNG peak dạng hàm (u,v) — bilinear EF→WX (trước) · GH→WX (sau): peak CŨNG lợp ngói (NgQuan 2026-06-10).
+// 2 mặt hồi EWG/FXH = TƯỜNG tương lai — KHÔNG lợp. W=(E.x, H+cap, giữa z) · X=(F.x, H+cap, giữa z) (khớp setCapBlock).
+export function peakSurfaces(
+  v: LabeledPoint[],
+  capHeight: number
+): ((u: number, vv: number) => THREE.Vector3)[] {
+  const e = cornerVec(v, 4)
+  const f = cornerVec(v, 5)
+  const g = cornerVec(v, 6)
+  const h = cornerVec(v, 7)
+  const y = e.y + capHeight
+  const w = new THREE.Vector3(e.x, y, (e.z + g.z) / 2)
+  const x = new THREE.Vector3(f.x, y, (f.z + h.z) / 2)
+  const quad =
+    (a: THREE.Vector3, b: THREE.Vector3, ra: THREE.Vector3, rb: THREE.Vector3) =>
+    (u: number, vv: number): THREE.Vector3 =>
+      new THREE.Vector3().lerpVectors(
+        new THREE.Vector3().lerpVectors(a, b, u), // chân (v=0): EF hoặc GH
+        new THREE.Vector3().lerpVectors(ra, rb, u), // đỉnh WX (v=1)
+        vv
+      )
+  // Mặt TRƯỚC đi F→E (kèm X→W) để pháp tuyến ∂u×∂v hướng RA NGOÀI+LÊN — đi E→F normal chúi xuống → ngói bị úp
+  // (NgQuan soi ảnh 2026-06-10: "ngói trên peak ngược"). Mặt sau G→H thuận sẵn.
+  return [quad(f, e, x, w), quad(g, h, w, x)]
 }
 
 // MÁI CONG hoàn chỉnh: 4 slope loft (cong theo góc nhấc h + độ cong) + CUỘN MŨI + nóc phẳng. Cao góc=0 → frustum phẳng.
@@ -525,29 +687,35 @@ export function buildRoofSkin(
   tipCurl = 0,
   hipSeg = 12,
   hipMidT = 0.5,
-  hipMidY = 0
+  hipMidY = 0,
+  drop = 0
 ): THREE.BufferGeometry {
   const extra = (Math.round(tipSeg) - 1) * 2 // đốt mũi: mật độ THÊM ở vùng mũi (cộng vào u)
   const n = clampVal(Math.round(hipSeg) + extra, 1, MAX_CORNER_SEG + 28) // đốt HIÊN/cung (u) = đốt góc đao + mũi
   const m = clampVal(2 * Math.round(hipSeg), 2, 24) // đốt HIP đủ (v) = 2·đốt góc đao (A′I1 = hipSeg)
-  const cx = (v[0].x + v[1].x + v[2].x + v[3].x) / 4 // tâm xz mái (hướng "vào trong")
-  const cz = (v[0].z + v[1].z + v[2].z + v[3].z) / 4
-  const tip = {
-    center: new THREE.Vector3(cx, 0, cz),
-    curl: tipCurl,
-    midT: hipMidT,
-    midY: hipMidY,
-  }
+  const tip = mkTip(v, tipCurl, hipMidT, hipMidY)
   const pos: number[] = []
   const idx: number[] = []
   const eave: number[][] = []
   buildSlopes(pos, idx, eave, v, heights, n, m, curve, tip)
   pushNoc(pos, idx, v)
+  dropSkin(pos, idx, drop) // ép mái xuống DƯỚI đáy ngói (mặt thiết kế = mặt ngói; drop = dày ngói + khe hở)
   const outerIdx = idx.length // mặt NGOÀI (4 slope + nóc) = group 0
-  // 4 đỉnh góc (đã nhấc) → tham chiếu cho độ dày MỎNG DẦN về góc
-  const tips = [0, 1, 2, 3].map((c) => new THREE.Vector3(v[c].x, v[c].y + heights[c], v[c].z))
-  if (thickness > 0) solidify(pos, idx, eave, thickness, tips) // lớp dày (trong + tường hiên) = group 1
+  if (thickness > 0) solidify(pos, idx, eave, thickness) // lớp dày (trong + tường hiên, dẹt về mép hiên) = group 1
   return assembleGeo(pos, idx, outerIdx)
+}
+
+// ÉP MÁI XUỐNG DƯỚI NGÓI (NgQuan 2026-06-10): hạ TOÀN BỘ lớp ngoài dọc pháp tuyến (gộp theo vị trí — seam kín)
+// đoạn `drop` → mặt thiết kế gốc = mặt ĐẶT NGÓI, mép trên khối dày ép sát đáy ngói, ngói lộ hẳn không bị mặt đè.
+function dropSkin(pos: number[], idx: number[], drop: number): void {
+  if (drop <= 0) return
+  const nrm = vertexNormalsByPosition(pos, idx)
+  for (let v = 0; v < nrm.length; v++) {
+    const i = v * 3
+    pos[i] -= nrm[v].x * drop
+    pos[i + 1] -= nrm[v].y * drop
+    pos[i + 2] -= nrm[v].z * drop
+  }
 }
 
 // Lắp BufferGeometry từ pos/idx + 2 group material (0..outerIdx = mặt ngoài nâu · phần dư = lớp dày vàng). Tách để giảm complexity.
@@ -702,6 +870,17 @@ function buildCornerRows(params: RoofLabParams, regen: () => void): HTMLElement 
       regen()
     }),
     sep(), // ↓ xà góc
+    buildRafterRows(params, regen),
+    sep(), // ↓ ngói (op #3 Copy to Points)
+    buildTileRows(params, regen)
+  )
+  return box
+}
+
+// XÀ GÓC: đốt + cong + TIẾT DIỆN dài/rộng (2 slider chỉnh diện tích dày mỏng — NgQuan 2026-06-10).
+function buildRafterRows(params: RoofLabParams, regen: () => void): HTMLElement {
+  const box = document.createElement('div')
+  box.append(
     sliderRow('Đốt xà', 1, MAX_RAFTER_SEG, 1, params.rafterSeg, (v) => {
       params.rafterSeg = v
       regen()
@@ -709,9 +888,89 @@ function buildCornerRows(params: RoofLabParams, regen: () => void): HTMLElement 
     sliderRow('Cong xà', 0.6, 1.2, 0.05, params.rafterCurve, (v) => {
       params.rafterCurve = v
       regen()
+    }),
+    sliderRow('Xà ngang (m)', 0.02, 0.12, 0.005, params.rafterW, (v) => {
+      params.rafterW = v
+      regen()
+    }),
+    sliderRow('Xà cao (m)', 0.02, 0.2, 0.005, params.rafterH, (v) => {
+      params.rafterH = v
+      regen()
     })
   )
   return box
+}
+
+// 2 TAB loại ngói: Âm dương | Vảy cá — bấm đổi params.tileType + regen, tab đang chọn tô đậm.
+function buildTileTabs(params: RoofLabParams, regen: () => void): HTMLElement {
+  const tabs = document.createElement('div')
+  tabs.className = 'ap-roof-tabs'
+  const btns: HTMLButtonElement[] = []
+  for (const [key, label] of [
+    ['amduong', 'Âm dương'],
+    ['vayca', 'Vảy cá'],
+  ] as const) {
+    const b = document.createElement('button')
+    b.className = 'ap-roof-tab'
+    b.textContent = label
+    b.classList.toggle('ap-roof-tab-on', params.tileType === key)
+    b.addEventListener('click', () => {
+      params.tileType = key
+      for (const o of btns) o.classList.toggle('ap-roof-tab-on', o === b)
+      regen()
+    })
+    btns.push(b)
+    tabs.appendChild(b)
+  }
+  return tabs
+}
+
+// 🧱 NGÓI (op #3): tab loại + 2 PHẦN RÕ — slider viên ÂM (cỡ/cong/dày) · slider viên DƯƠNG (tiết diện ngang).
+// (NgQuan 2026-06-10 "chia luôn làm 2 phần rõ"). Tách khỏi buildCornerRows.
+function buildTileRows(params: RoofLabParams, regen: () => void): HTMLElement {
+  const box = document.createElement('div')
+  box.append(
+    buildTileTabs(params, regen),
+    mkColTitle('◡ Viên âm (máng)'),
+    sliderRow('Cỡ ngói (m)', 0, 0.6, 0.05, params.tileSize, (v) => {
+      params.tileSize = v
+      regen()
+    }),
+    sliderRow('Cong ngói', 0.05, 0.7, 0.05, params.tileCurve, (v) => {
+      params.tileCurve = v
+      regen()
+    }),
+    sliderRow('Dày ngói (m)', 0.005, 0.05, 0.005, params.tileThick, (v) => {
+      params.tileThick = v
+      regen()
+    }),
+    mkColTitle('◠ Viên dương (ống úp)'),
+    sliderRow('Tiết diện (×âm)', 0.3, 1, 0.05, params.tileDgW, (v) => {
+      params.tileDgW = v
+      regen()
+    }),
+    mkCapTexRow(params, regen)
+  )
+  return box
+}
+
+// SELECT texture MẶT ĐĨA câu đầu — cắm dây sẵn (NgQuan 2026-06-10 "sẽ thêm texture sau"): chọn key → param
+// tileCapTex chảy tới preview (chỗ áp map khi texture vào kho). Hiện chỉ có 'Trơn'.
+function mkCapTexRow(params: RoofLabParams, regen: () => void): HTMLElement {
+  const row = document.createElement('div')
+  row.className = 'ap-roof-coordpick' // tái dùng style hàng select gọn
+  const sel = document.createElement('select')
+  sel.className = 'ap-roof-coordsel'
+  sel.appendChild(new Option('Mặt đĩa: trơn', 'none'))
+  sel.appendChild(new Option('(thả texture vào kho rồi thêm option)', '', false, false))
+  ;(sel.options[1] as HTMLOptionElement).disabled = true
+  sel.value = params.tileCapTex
+  sel.addEventListener('change', () => {
+    params.tileCapTex = sel.value
+    regen()
+  })
+  row.appendChild(sel)
+  return row
 }
 
 // 2 cột bo viền cạnh nhau (vd Base | Xà sống) trong cột controls hẹp.
@@ -1141,7 +1400,7 @@ function updateApexDecor(
   const hs = [apex.hA, apex.hB, apex.hC, apex.hD]
   const curl = p.tipCurl // cuộn mũi → marker/xà bám đúng đỉnh mái đã cuộn
   preview.setApex(verts, hs, curl) // 4 marker A'B'C'D' tại ĐỈNH ĐÃ CUỘN (chạm đỉnh mái)
-  preview.setCornerBeams(verts, hs, p.rafterSeg, p.rafterCurve, curl) // 4 xà góc: đốt + cong RIÊNG → đỉnh cuộn
+  preview.setCornerBeams(verts, hs, p.rafterSeg, p.rafterCurve, curl, p.rafterW, p.rafterH) // 4 xà: đốt+cong+tiết diện
   preview.setEave(verts, hs, p.hipSeg, p.cornerCurve) // đường hiên cong nối A'B'C'D' (起翘) — đốt = đốt góc đao
   preview.setHipBeams(verts, hs, p.hipArea, p.hipLen, p.hipSeg, p.cornerCurve, p.hipMidT, p.hipMidY) // I1–I4 trượt + đè Y
   preview.setJMids(verts, hs, p.rafterCurve, curl) // J1–J4 = trung điểm xà góc (cong xà riêng, đỉnh cuộn)
@@ -1156,9 +1415,32 @@ function updateApexDecor(
       p.tipCurl,
       p.hipSeg,
       p.hipMidT,
-      p.hipMidY
+      p.hipMidY,
+      p.tileSize > 0 ? p.tileThick + 0.005 : 0 // có ngói → ép mái xuống dưới đáy ngói (dày + 5mm khe)
     )
-  ) // MẶT mái CONG + solidify + cuộn mũi (bám I) + đè hip Y
+  ) // MẶT mái CONG + solidify + cuộn mũi (bám I) + đè hip Y + ép dưới ngói
+  // Lớp NGÓI (op #3): 4 slope + 2 mặt nghiêng peak (mặt hồi = tường, không lợp). Thanh trụ sống: 4 hip + đỉnh WX
+  // (thay ngói bò — NgQuan 2026-06-10; nóc base khỏi cần: khung gỗ EFGH đã lấn mép che chân peak).
+  const slopes = slopeSurfaces(verts, hs, p)
+  const peaks = p.capHeight > 0.05 ? peakSurfaces(verts, p.capHeight) : [] // peak sụp → khỏi lợp/thanh WX
+  const rails = slopes.map(
+    (s) =>
+      (t: number): THREE.Vector3 =>
+        s(0, t)
+  ) // 4 sống hip (biên u=0, có cuộn mũi)
+  if (peaks.length > 0) {
+    rails.push((t: number): THREE.Vector3 => peaks[0](t, 1)) // + thanh đỉnh WX
+    rails.push(...peakFrameRails(verts, p.capHeight)) // + khung tam giác 2 mặt hồi (nối liền hệ hip)
+  }
+  preview.setTiles([...slopes, ...peaks], p.tileSize, rails, {
+    curve: p.tileCurve, // độ sâu lòng máng
+    thick: p.tileThick, // độ dày vỏ viên
+    type: p.tileType, // 'amduong' | 'vayca' (tab)
+    flat: peaks.length, // 2 mặt peak = MẶT PHẲNG → máng 1 mảnh xuyên suốt đỉnh→chân
+    dgw: p.tileDgW, // tiết diện ngang ống dương (× viên âm)
+    capTex: p.tileCapTex, // texture mặt đĩa câu đầu (chỗ cắm — 'none' = trơn)
+    clips: [...slopeClipPlanes(verts), ...peaks.map(() => [])], // kéo cắt hip cho 4 slope; peak không cắt
+  })
 }
 
 // Gắn thí nghiệm mái vào Lab. verts = nguồn sự thật; slider → regen đối xứng; ô số → sửa đỉnh; lưỡi dao cắt shader.
@@ -1188,7 +1470,7 @@ export function setupRoofLab(
     preview.setExtension(verts) // O–V = cạnh KLMN kéo dài cắt biên đáy
     preview.setCapBlock(verts, params.capHeight) // peak GEFHWX (chân = nóc base) + cạnh đỉnh WX
     preview.setCornerGrid(verts, params.hipSeg) // lưới đốt góc đao tại D (Tầng 1) — đốt = đốt góc đao
-    preview.setFrame(verts) // khung gỗ KLMNEFGH (lăng trụ dưới nóc)
+    preview.setFrame(verts) // khung gỗ KLMNEFGH — ĐANG ẨN (NgQuan bỏ — lòi xuyên mái); geometry vẫn cập nhật
     coordEd.sync() // đồng bộ ô số (không dựng lại DOM)
   }
   const regen = (): void => {

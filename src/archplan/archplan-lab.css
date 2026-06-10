@@ -1917,6 +1917,27 @@
   margin: 7px 2px 5px;
   border-top: 1px dashed #cfd6d0;
 }
+/* 2 tab loại ngói (Âm dương | Vảy cá) trong nhóm 🧱 Ngói. */
+.ap-lab-float .ap-roof-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 2px 0 5px;
+}
+.ap-lab-float .ap-roof-tab {
+  flex: 1;
+  font-size: 9px;
+  padding: 3px 0;
+  background: #eef1ee;
+  border: 1px solid #cfd6d0;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #3a4a3e;
+}
+.ap-lab-float .ap-roof-tab-on {
+  background: #2f6b46;
+  border-color: #2f6b46;
+  color: #fff;
+}
 .ap-lab-float .ap-roof-check {
   display: flex;
   align-items: center;
