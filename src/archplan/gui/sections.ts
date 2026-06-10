@@ -598,11 +598,71 @@ export function buildColumnsSection(parent: GUI, inst: ShapeInstance, ctx: APGui
   return f
 }
 
+// Round N-gon: 6–24 mặt thon → KHÔNG trải N tab (tràn panel). Dropdown "Mặt #" + 1 folder của mặt
+// đang chọn + nút áp look sang tất cả. Mặt chọn nhớ qua activeTab (key wallSel:instId — sống qua
+// rebuild); 3D click mặt KHÁC → focus-action đổi chọn + rebuild GUI (anchor mặt mới tự đăng ký
+// trong buildWallFolder nên focus mở + flash đúng folder).
+function buildWallsCompact(f: GUI, inst: ShapeInstance, ctx: APGuiCtx): void {
+  const n = inst.segments.length
+  const cur = Math.min(ctx.getActiveTab(`wallSel:${inst.id}`), n - 1)
+  const sel = { facet: cur + 1 }
+  f.add(
+    sel,
+    'facet',
+    Array.from({ length: n }, (_, i) => i + 1)
+  )
+    .name('Mặt #')
+    .onChange((v: number) => {
+      ctx.setActiveTab(`wallSel:${inst.id}`, v - 1)
+      ctx.rebuild()
+    })
+  buildWallFolder(f, inst, cur, ctx).open()
+  f.add({ fn: () => applyLookAllFacets(inst, cur, ctx) }, 'fn').name('Áp mặt này → TẤT CẢ mặt')
+  for (let i = 0; i < n; i++) {
+    if (i === cur) continue
+    const idx = i
+    ctx.registerFocusAction(`wall:${inst.id}:${idx}`, () => {
+      ctx.setActiveTab(`wallSel:${inst.id}`, idx)
+      ctx.rebuild()
+    })
+  }
+}
+
+// Chép LOOK (cao tường + vật liệu + tham số material) của 1 mặt sang MỌI mặt — KHÔNG chép
+// openings/panels (cửa nhân bản N mặt = sai). Field list mirror copySegExtras (state.ts).
+function applyLookAllFacets(inst: ShapeInstance, srcIdx: number, ctx: APGuiCtx): void {
+  const src = inst.segments[srcIdx]
+  for (const s of inst.segments) {
+    if (s === src) continue
+    s.wallH = src.wallH
+    s.colorIndex = src.colorIndex
+    s.style = src.style
+    s.material = src.material
+    s.matScale = src.matScale
+    s.mortarColor = src.mortarColor
+    s.brickRelief = src.brickRelief
+    s.woodReveal = src.woodReveal
+    s.woodButt = src.woodButt
+    s.woodStepTilt = src.woodStepTilt
+    s.glassReflect = src.glassReflect
+    s.glassOpacity = src.glassOpacity
+    s.trucCell = src.trucCell
+    s.nanCell = src.nanCell
+    s.woodGrain = src.woodGrain
+    s.paintColor = src.paintColor
+  }
+  ctx.build()
+}
+
 export function buildWallsSection(parent: GUI, inst: ShapeInstance, ctx: APGuiCtx): GUI {
   const key = inst.shapeKey ?? ''
   const config = SHAPE_CONFIGS[key]
   const f = parent.addFolder(`Walls (${inst.segments.length})`)
   f.close()
+  if (key === 'round') {
+    buildWallsCompact(f, inst, ctx)
+    return f
+  }
   if (config) {
     // Mỗi tường = 1 tab ngang W-1..W-N (giống tab Struct/Roof/Walls cấp trên). Hướng gốc
     // (S/E/N/W từ config.wallLabels) đưa vào tooltip nút tab — không mất thông tin.

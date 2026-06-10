@@ -113,6 +113,7 @@ export class ManipulateTool {
   private _drag: DragSession | null = null
   private _splitActive = false // phiên kéo này dùng split-render (đa-shape) → translate/rebuild shape kéo, others static
   private _focusAnchors = new Map<string, GUI>()
+  private _focusActions = new Map<string, () => void>() // pre-action trước anchor (section gọn round)
 
   constructor(private readonly host: ManipulateHost) {}
 
@@ -144,8 +145,14 @@ export class ManipulateTool {
   registerFocus(key: string, folder: GUI): void {
     this._focusAnchors.set(key, folder)
   }
+  // Action chạy TRƯỚC khi tra anchor — section gọn (round: N mặt 1 folder) dùng để đổi mặt đang chọn
+  // + rebuild GUI; anchor mặt mới tự đăng ký trong rebuild nên tra anchor SAU action vẫn trúng folder.
+  registerFocusAction(key: string, fn: () => void): void {
+    this._focusActions.set(key, fn)
+  }
   clearFocus(): void {
     this._focusAnchors.clear()
+    this._focusActions.clear()
   }
   isDragging(): boolean {
     return this._drag !== null
@@ -247,7 +254,9 @@ export class ManipulateTool {
   // → cuộn vào tầm nhìn + flash. Public API lil-gui; chỉ phần tab chạm DOM (aria-controls).
   private _focusGuiFor(ud: PickUD): void {
     const key = this._focusKey(ud)
-    const folder = key ? this._focusAnchors.get(key) : undefined
+    if (!key) return
+    this._focusActions.get(key)?.() // section gọn (round): đổi mặt chọn + rebuild → anchor mới có ngay
+    const folder = this._focusAnchors.get(key)
     if (!folder) return
     for (let g: GUI | undefined = folder; g; g = g.parent) g.open()
     for (let n: HTMLElement | null = folder.domElement; n; n = n.parentElement) {

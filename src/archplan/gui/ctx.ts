@@ -95,6 +95,9 @@ export interface APGuiCtx {
   // 3D → GUI: đăng ký folder của 1 element (key 'wall:id:i' | 'col:id:i' | 'roof:id'…) để click
   // vật thể trong 3D mở + cuộn thẳng tới panel tương ứng. Folder builder gọi khi tạo folder.
   registerFocus(key: string, folder: GUI): void
+  // 3D → GUI biến thể cho section GỌN (round N mặt 1 folder): action chạy TRƯỚC khi tra anchor —
+  // đổi mặt đang chọn + rebuild GUI, anchor mặt mới tự đăng ký trong rebuild nên focus vẫn trúng.
+  registerFocusAction(key: string, fn: () => void): void
   // ⏳ Prefetch ASYNC mọi texture ground khi user MỞ dropdown Surface (mousedown) → bấm key nào cũng đã tải
   // sẵn, hiện tức thì (câu giờ chờ load). Optional — GUI builder không cần thì bỏ qua. Tự guard trùng-load.
   prefetchGroundTextures?(): void

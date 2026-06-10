@@ -58,6 +58,11 @@ ctx.registerFocus(`<key>:${inst.id}`, f)   // 1 dòng — xong
 `_focusGuiFor` tự lo phần còn lại: mở folder + mọi folder cha (`.open()`), kích hoạt mọi Tabs
 chứa nó qua `aria-controls`, cuộn vào tầm nhìn, flash `.ap-focus-flash`. **KHÔNG cần đụng Tabs.**
 
+**Section GỌN (N element 1 folder — vd Walls round 6–24 mặt):** folder chỉ tồn tại cho element
+ĐANG chọn → element khác đăng ký `ctx.registerFocusAction(key, fn)` thay vì folder: action chạy
+TRƯỚC khi tra anchor (đổi selection + `ctx.rebuild()` — anchor mới tự đăng ký trong rebuild nên
+focus vẫn mở + flash đúng folder). Anchor mẫu: `buildWallsCompact` (gui/sections.ts).
+
 Nếu tab đại diện 1 element kéo/sơn được → làm thêm **P / 🎨 / 🤚** ở mục 1.
 
 ---

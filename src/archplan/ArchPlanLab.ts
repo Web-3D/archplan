@@ -1760,7 +1760,15 @@ export class ArchPlanLab extends BaseWorld {
       undo: () => this._undo(),
       redo: () => this._redo(),
       highlightPart: (t) => this.highlight?.show(t),
+      ...this._focusCtx(),
+    }
+  }
+
+  // Focus (3D→GUI) delegates — tách như _floorCtx giữ _makeGuiCtx ≤50 dòng.
+  private _focusCtx(): Pick<APGuiCtx, 'registerFocus' | 'registerFocusAction'> {
+    return {
       registerFocus: (k, f) => this.manipulate?.registerFocus(k, f),
+      registerFocusAction: (k, fn) => this.manipulate?.registerFocusAction(k, fn),
     }
   }
 
