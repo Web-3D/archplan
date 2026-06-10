@@ -1694,6 +1694,53 @@
   width: 13px;
   color: #14431e; /* tên góc A–F nổi */
 }
+/* 🟫 Bảng trộn lớp (ground-lab): hàng gọn — select HẸP cố định (không tràn ngang), ✕ vuông nhỏ, lớp = block viền trái. */
+.ap-lab-float .ap-mix-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 3px 0;
+}
+.ap-lab-float .ap-mix-row > span {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: #3a4a3e;
+}
+.ap-lab-float .ap-mix-sel {
+  flex: 0 1 auto;
+  width: 122px;
+  max-width: 65%;
+  padding: 1px 2px;
+  border: 1px solid #c7cdc9;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #1a2a1a;
+  font: 9px ui-monospace, 'Cascadia Mono', monospace;
+}
+.ap-lab-float .ap-mix-x {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 1px solid #c7cdc9;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.55);
+  color: #7a3a3a;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ap-lab-float .ap-mix-layer {
+  margin: 4px 0;
+  padding-left: 6px;
+  border-left: 2px solid #d4dad6; /* gom select + Ngưỡng thành 1 block lớp */
+}
+.ap-lab-float .ap-mix-add {
+  width: 100%;
+  margin: 2px 0 6px;
+  font-size: 9px;
+}
+
 /* Tọa độ gọn 1 dòng: select (đỉnh·trục) + ô điền kế bên. */
 .ap-lab-float .ap-roof-coordpick {
   display: flex;

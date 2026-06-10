@@ -8,6 +8,7 @@
  * DISPOSE: dispose() — dispose experiment đang active.
  */
 
+import { setupGroundLab } from './ground-lab'
 import { setupParticleLab } from './particle-lab'
 import { setupRoofLab } from './roof-lab'
 
@@ -35,6 +36,11 @@ const EXPERIMENTS: LabExperiment[] = [
     id: 'particles',
     label: '✨ Particles',
     mount: (h) => setupParticleLab(h.previewHost, h.paramHost, h.docHost, h.settingsHost),
+  },
+  {
+    id: 'ground',
+    label: '🟫 Nền',
+    mount: (h) => setupGroundLab(h.previewHost, h.paramHost, h.docHost, h.settingsHost),
   },
 ]
 
