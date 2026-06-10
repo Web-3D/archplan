@@ -12,6 +12,9 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
+import { arcLength, resampleCurve } from '../ops/resample'
+import { rectProfile, sweepInto } from '../ops/sweep'
+
 const INIT = 220 // px — cạnh khởi tạo trước khi ResizeObserver đo canvas thật
 export const NORMAL_LEN = 3 // m — chiều dài pháp tuyến dựng từ đỉnh đáy (= max cao điểm di động A'B'C'D')
 export const MAX_CORNER_SEG = 12 // SỐ ĐỐT tối đa chia lưới góc đao (định cỡ buffer cornerGeo) — khớp max slider
@@ -500,17 +503,10 @@ export class RoofPreview {
     this.scene.add(this.frameMesh)
   }
 
-  // 4 XÀ GÓC cong TIMBER (rafter đao) — mỗi xà tối đa MAX_CORNER_SEG đốt hộp × 4 góc = 48 hộp × 8 đỉnh. Vị trí ở setCornerBeams.
+  // 4 XÀ GÓC cong TIMBER (rafter đao) — THÂN LIỀN op Sweep (ops/sweep.ts): geometry dựng LẠI mỗi setCornerBeams
+  // (dispose geo cũ, pattern như setGeometry mái) — không còn buffer hộp cố định. Chỉ tạo material + mesh vỏ ở đây.
   private _initCornerBeams(): void {
-    const maxBox = 4 * MAX_RAFTER_SEG // xà góc số đốt riêng (gấp đôi)
     this.beamGeo = new THREE.BufferGeometry()
-    this.beamGeo.setAttribute(
-      'position',
-      new THREE.Float32BufferAttribute(new Float32Array(maxBox * 8 * 3), 3)
-    )
-    const idx: number[] = []
-    for (let k = 0; k < maxBox; k++) for (const t of BOX_TRI) idx.push(t + k * 8)
-    this.beamGeo.setIndex(idx)
     this.beamMat = new THREE.MeshStandardMaterial({
       color: 0xc1440e, // cam đất = xà góc nổi bật
       roughness: 0.7,
@@ -940,8 +936,9 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     return (v[0].z + v[1].z + v[2].z + v[3].z) / 4
   }
 
-  // 4 XÀ GÓC cong TIMBER (rafter đao): mỗi xà = chuỗi `n` ĐỐT HỘP men theo Bézier. P0 = điểm khung K/L/N/M (y=0)
-  // → P2 = ĐỈNH ĐÃ CUỘN (chạm đỉnh mái cong). Control = trung điểm chord kéo về GÓC ĐÁY gốc theo `curve`. Thon dần về mũi.
+  // 4 XÀ GÓC cong TIMBER (rafter đao): THÂN LIỀN = op Sweep tiết diện vuông dọc spine Bézier đã resample (đốt đều).
+  // P0 = điểm khung K/L/N/M (y=0) → P2 = ĐỈNH ĐÃ CUỘN (chạm đỉnh mái cong). Control = trung điểm chord kéo về
+  // GÓC ĐÁY theo `curve`. Profile anchorTop (mặt trên ôm spine = xà nằm DƯỚI mái) + scale ramp THON DẦN 100%→20%.
   setCornerBeams(
     verts: LabeledPoint[],
     heights: number[],
@@ -949,12 +946,13 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     curve: number,
     tipCurl: number
   ): void {
-    if (this.isDisposed || !this.beamGeo || verts.length < 8) return
+    if (this.isDisposed || !this.beamMesh || verts.length < 8) return
     const n = Math.max(1, Math.min(MAX_RAFTER_SEG, Math.round(seg)))
     const cx = this._baseCenterX(verts)
     const cz = this._baseCenterZ(verts)
-    const attr = this.beamGeo.getAttribute('position') as THREE.BufferAttribute
-    let box = 0
+    const pos: number[] = []
+    const idx: number[] = []
+    const profile = rectProfile(BEAM_SIZE, BEAM_SIZE, true) // mép trên ôm spine (thay dropY của hộp cũ)
     for (let c = 0; c < 4; c++) {
       const base = verts[c]
       const noc = verts[NOC_OF_BASE[c]]
@@ -962,20 +960,20 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
       const P2 = this._curledTip(base, heights[c], cx, cz, tipCurl) // ĐỈNH ĐÃ CUỘN → chạm đỉnh mái
       const ground = new THREE.Vector3(base.x, base.y, base.z) // góc đáy gốc
       const ctrl = new THREE.Vector3().addVectors(P0, P2).multiplyScalar(0.5).lerp(ground, curve)
-      let prev = P0
-      for (let s = 1; s <= n; s++) {
-        const p = this._bezierAt(P0, ctrl, P2, s / n)
-        const half = (BEAM_SIZE / 2) * (1 - 0.8 * ((s - 0.5) / n)) // THON DẦN: dày ở khung K → mỏng (20%) ở góc A'
-        this._edgeBox(attr, box++, prev, p, half, half) // dropY = half → mặt trên xà SÁT mặt mái
-        prev = p
-      }
+      const spine = resampleCurve((t) => this._bezierAt(P0, ctrl, P2, t), n) // đốt ĐỀU (op Resample)
+      sweepInto(pos, idx, spine, profile, { scale: (f) => 1 - 0.8 * f }) // thon 100% ở K → 20% ở A'
     }
-    attr.needsUpdate = true
-    this.beamGeo.setDrawRange(0, box * BOX_TRI.length) // chỉ vẽ số hộp đã dùng (index cố định)
-    this.beamGeo.computeVertexNormals()
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    geo.setIndex(idx)
+    geo.computeVertexNormals()
+    this.beamMesh.geometry.dispose()
+    this.beamMesh.geometry = geo
+    this.beamGeo = geo
   }
 
-  // Lấy mẫu Bézier bậc 2 (P0,P1,P2) thành polyline `seg` đoạn (LineSegments) từ chỉ số `start`. Trả chỉ số kế.
+  // Lấy mẫu Bézier bậc 2 (P0,P1,P2) thành polyline `seg` đoạn ĐỀU theo chiều dài (op Resample — khít biên mặt
+  // đã resample) ghi vào LineSegments từ chỉ số `start`. Trả chỉ số kế.
   private _bezierLine(
     attr: THREE.BufferAttribute,
     start: number,
@@ -984,13 +982,11 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     P2: THREE.Vector3,
     seg: number
   ): number {
+    const pts = resampleCurve((t) => this._bezierAt(P0, P1, P2, t), seg)
     let i = start
-    let prev = P0
     for (let s = 1; s <= seg; s++) {
-      const p = this._bezierAt(P0, P1, P2, s / seg)
-      attr.setXYZ(i++, prev.x, prev.y, prev.z)
-      attr.setXYZ(i++, p.x, p.y, p.z)
-      prev = p
+      attr.setXYZ(i++, pts[s - 1].x, pts[s - 1].y, pts[s - 1].z)
+      attr.setXYZ(i++, pts[s].x, pts[s].y, pts[s].z)
     }
     return i
   }
@@ -1152,14 +1148,15 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
         .lerp(new THREE.Vector3(co.x, co.y, co.z), curve)
       const c1 = this._faceCentroid(verts, heights, HIP_FACES[c][0])
       const c2 = this._faceCentroid(verts, heights, HIP_FACES[c][1])
-      let prev = this._bezierAt(tip, ctrl, nocV, tStart)
+      const al = arcLength((t) => this._bezierAt(tip, ctrl, nocV, t)) // fraction CHIỀU DÀI — khớp lưới resample
+      let prev = al.pointAt(tStart)
       for (let s = 1; s <= n; s++) {
-        const p = this._bezierAt(tip, ctrl, nocV, tStart + (midT - tStart) * (s / n))
+        const p = al.pointAt(tStart + (midT - tStart) * (s / n))
         if (show) this._straddleSeg(attr, box, [prev, p], [c1, c2], side)
         box++
         prev = p
       }
-      const iPt = this._bezierAt(tip, ctrl, nocV, midT) // I trên hip (t=midT)
+      const iPt = al.pointAt(midT) // I trên hip (fraction chiều dài = midT)
       iPt.y += midY // ĐÈ Y: nâng/hạ I (tent đỉnh=1 tại midT) → khớp mặt hip đã đè
       this._placeHipMidAt(c, iPt, show)
     }
@@ -1181,7 +1178,7 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
       const P2 = this._curledTip(base, heights[c], cx, cz, tipCurl) // A' ĐÃ CUỘN (khớp tip rafter)
       const ground = new THREE.Vector3(base.x, base.y, base.z) // A góc đáy
       const ctrl = new THREE.Vector3().addVectors(P0, P2).multiplyScalar(0.5).lerp(ground, curve)
-      const j = this._bezierAt(P0, ctrl, P2, 0.5) // trung điểm TRÊN đường cong xà góc
+      const j = arcLength((t) => this._bezierAt(P0, ctrl, P2, t)).pointAt(0.5) // trung điểm THẬT theo chiều dài
       this.jMids[c].position.copy(j)
       this.jMidLabels[c].position.set(j.x, j.y + 0.22, j.z)
     }
@@ -1197,7 +1194,7 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     const ptV = new THREE.Vector3(verts[0].x, 0, verts[4].z) // V = (A.x, E.z) mép trái
     const arcAt = (inner: THREE.Vector3): THREE.Vector3 => {
       const ctrl = new THREE.Vector3().addVectors(inner, tip).multiplyScalar(0.5).lerp(a, curve)
-      return this._bezierAt(inner, ctrl, tip, 1 - midT) // bám I: cùng fraction từ A'
+      return arcLength((t) => this._bezierAt(inner, ctrl, tip, t)).pointAt(1 - midT) // bám I: fraction CHIỀU DÀI từ A'
     }
     const pts = [arcAt(ptO), arcAt(ptV)]
     for (let i = 0; i < 2; i++) {

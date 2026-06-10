@@ -12,6 +12,7 @@
 
 import * as THREE from 'three'
 
+import { arcLength, resampleCurve } from '../ops/resample'
 import {
   type LabeledPoint,
   MAX_CORNER_SEG,
@@ -267,9 +268,10 @@ function eaveBoundary(
   const ctrl1 = midVec(in1, tip1).lerp(cornerVec(v, s.c1), curve)
   const ctrl2 = midVec(in2, tip2).lerp(cornerVec(v, s.c2), curve)
   const pts: THREE.Vector3[] = []
-  for (let i = 0; i <= n; i++) pts.push(qbez(tip1, ctrl1, in1, i / n)) // cung góc 1
+  pts.push(...resampleCurve((t) => qbez(tip1, ctrl1, in1, t), n)) // cung góc 1 — đốt ĐỀU theo chiều dài (op Resample)
   for (let i = 1; i <= n; i++) pts.push(new THREE.Vector3().lerpVectors(in1, in2, i / n)) // phẳng
-  for (let i = 1; i <= n; i++) pts.push(qbez(in2, ctrl2, tip2, i / n)) // cung góc 2
+  const arc2 = resampleCurve((t) => qbez(in2, ctrl2, tip2, t), n) // cung góc 2 — đốt đều
+  for (let i = 1; i <= n; i++) pts.push(arc2[i])
   return pts
 }
 
@@ -287,7 +289,8 @@ function hipTent(t: number, midT: number): number {
   return t < midT ? t / midT : (1 - t) / (1 - midT)
 }
 
-// Biên HIP cong: tip (eave, v=0) → noc (v=1), control kéo về góc đáy `ground` theo curve. + ĐÈ Y tại I (midT) đoạn yOff. n+1 điểm.
+// Biên HIP cong: tip (eave, v=0) → noc (v=1), control kéo về góc đáy `ground` theo curve. + ĐÈ Y tại I (midT) đoạn yOff.
+// n+1 điểm ĐỀU theo CHIỀU DÀI (op Resample) — f = fraction chiều dài; midT/tent/marker I đều theo f (nhất quán).
 function hipBoundary(
   tip: THREE.Vector3,
   noc: THREE.Vector3,
@@ -298,11 +301,12 @@ function hipBoundary(
   yOff: number
 ): THREE.Vector3[] {
   const ctrl = midVec(tip, noc).lerp(ground, curve)
+  const al = arcLength((t) => qbez(tip, ctrl, noc, t))
   const pts: THREE.Vector3[] = []
   for (let j = 0; j <= n; j++) {
-    const t = j / n
-    const p = qbez(tip, ctrl, noc, t)
-    if (yOff !== 0) p.y += yOff * hipTent(t, midT) // đè sống hip lên/xuống quanh I
+    const f = j / n // fraction CHIỀU DÀI (đốt đều thật, không phải t Bézier)
+    const p = al.pointAt(f)
+    if (yOff !== 0) p.y += yOff * hipTent(f, midT) // đè sống hip lên/xuống quanh I
     pts.push(p)
   }
   return pts
@@ -354,8 +358,13 @@ function addCornerCurl(
   off.y += curl * f // và LÊN
 }
 
+// Smoothstep 3x²−2x³ — đạo hàm = 0 ở CẢ 2 đầu → falloff C1 liên tục, mặt KHÔNG gãy nếp tại biên vùng
+// (fix 2026-06-10: falloff tuyến tính cũ gập đúng tại X1/Y1 — NgQuan soi ảnh; tại đỉnh x=1 cũng phẳng → chỏm mượt).
+const smooth01 = (x: number): number => x * x * (3 - 2 * x)
+
 // CUỘN MŨI: vùng cuộn BÁM I + X1/Y1 cả 2 hướng — tắt dần tới I (v=midT) & X1/Y1 (u=midT/3, cung góc=1/3 cạnh hiên,
-// fraction midT từ A'). Kéo "Vị trí I" → vùng cuộn co/giãn đều theo cả 3 cạnh. f = trọng số (1 ở mũi → 0 ở biên vùng).
+// fraction midT từ A'). Kéo "Vị trí I" → vùng cuộn co/giãn đều theo cả 3 cạnh. Trọng số = smooth01(u)·smooth01(v)
+// (1 ở mũi → 0 ở biên, C1 cả 2 chiều); tại góc u=v=0 vẫn = 1 → marker A'/xà (_curledTip) KHÔNG đổi chỗ.
 function tipCurlOffset(
   u: number,
   v: number,
@@ -365,10 +374,10 @@ function tipCurlOffset(
 ): THREE.Vector3 {
   const off = new THREE.Vector3()
   if (tip.curl <= 0 || v >= tip.midT) return off
-  const fv = 1 - v / tip.midT // 1 ở mép hiên (v=0) → 0 ở I (v=midT)
+  const fv = smooth01(1 - v / tip.midT) // 1 ở mép hiên (v=0) → 0 MƯỢT tại I (v=midT)
   const uMid = tip.midT / 3 // X1/Y1: cung góc = 1/3 cạnh hiên, fraction midT từ A'
-  addCornerCurl(off, c1, tip.center, Math.max(0, 1 - u / uMid) * fv, tip.curl)
-  addCornerCurl(off, c2, tip.center, Math.max(0, 1 - (1 - u) / uMid) * fv, tip.curl)
+  addCornerCurl(off, c1, tip.center, smooth01(Math.max(0, 1 - u / uMid)) * fv, tip.curl)
+  addCornerCurl(off, c2, tip.center, smooth01(Math.max(0, 1 - (1 - u) / uMid)) * fv, tip.curl)
   return off
 }
 
