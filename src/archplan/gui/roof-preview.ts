@@ -12,6 +12,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { bevelProfile } from 'threejs-modules/ops/bevel'
+import { booleanGeometry } from 'threejs-modules/ops/boolean'
 import {
   colsOnSurface,
   copyToPoints,
@@ -196,6 +197,18 @@ function tileOpts(o: Partial<TileOpts>): TileOpts {
   }
 }
 
+// 🧱 1 TƯỜNG HỒI (mặt tam giác đứng EWG / FXH — op #6 Boolean): tam giác tại mặt phẳng x = tri[0].x,
+// đùn dày `dir` vào trong nhà. roof-lab tính điểm (gableWallSpecs), preview chỉ dựng.
+export interface GableWall {
+  tri: [THREE.Vector3, THREE.Vector3, THREE.Vector3] // [đáy trước, ĐỈNH W/X, đáy sau] — cùng x
+  dir: 1 | -1 // hướng đùn dày theo trục X (về tâm nhà)
+}
+export interface GableOpts {
+  thick: number // m — dày tường (≤0 = tắt)
+  winR: number // m — bán kính CỬA TRÒN khoét xuyên (op #6 subtract); ≤0 = tường đặc
+  winH: number // 0..1 — cao TÂM cửa theo chiều cao tam giác (0 = chân, 1 = đỉnh)
+}
+
 // Ngữ cảnh dựng ngói cho 1 MẶT: material (có thể mang kéo cắt hip) + cờ mặt phẳng (1 mảnh) + cờ có kéo cắt.
 interface TileCtx {
   mat: THREE.MeshStandardMaterial
@@ -279,6 +292,8 @@ export class RoofPreview {
   private readonly tileClipMats: THREE.MeshStandardMaterial[] = [] // clone tileMat + clippingPlanes hip (theo regen)
   private tileRailMat: THREE.MeshStandardMaterial | null = null // gỗ — thanh trụ hộp dọc hip/WX (thay ngói bò)
   private tileEdgeMat: THREE.MeshStandardMaterial | null = null // diềm sóng mép dày dưới hiên (vàng lớp dày)
+  private gableGroup: THREE.Group | null = null // 🧱 TƯỜNG HỒI EWG/FXH (op #6 Boolean khoét cửa tròn)
+  private gableMat: THREE.MeshStandardMaterial | null = null // vữa trắng ngà — tường hồi
   private scatterGroup: THREE.Group | null = null // CẢNH QUANH NHÀ (op #5 Scatter): đá + bụi cỏ instanced
   private rockGeo: THREE.BufferGeometry | null = null // đá đơn vị (icosahedron R0.5 low-poly, flat shading)
   private bushGeo: THREE.BufferGeometry | null = null // bụi cỏ đơn vị (chóp 6 cạnh, GỐC tại y=0)
@@ -1671,6 +1686,68 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     return new THREE.Mesh(geo, this.tileRailMat as THREE.MeshStandardMaterial)
   }
 
+  // ===== 🧱 TƯỜNG HỒI — op #6 Boolean (ops/boolean.ts wrap three-bvh-csg) =====
+
+  // 2 tường hồi EWG/FXH ("2 mặt hồi = tường tương lai" — NgQuan chốt hướng tường/cửa 2026-06-10):
+  // tam giác đứng đùn dày vào trong + CỬA TRÒN khoét xuyên bằng boolean subtract. walls=[] / thick≤0 = tắt.
+  setGableWalls(walls: GableWall[], opts: GableOpts): void {
+    if (this.isDisposed) return
+    this._clearGables()
+    if (walls.length === 0 || opts.thick <= 0) return
+    if (!this.gableMat) {
+      this.gableMat = new THREE.MeshStandardMaterial({ color: 0xe8e0cf, roughness: 0.95 }) // vữa trắng ngà
+    }
+    const group = new THREE.Group()
+    for (const w of walls) group.add(new THREE.Mesh(this._buildGableGeo(w, opts), this.gableMat))
+    this.scene.add(group)
+    this.gableGroup = group
+  }
+
+  // Geometry 1 tường hồi: Shape tam giác trong mặt (u,y) → ExtrudeGeometry dày `thick` → rotateY(dir·π/2)
+  // đặt đứng tại x = tri[0].x (rotation det +1 — KHÔNG lật solid, lật là boolean ra rác; u = −dir·z bù chiều
+  // quay để z world đúng). winR > 0 → khoét CỬA TRÒN: cylinder trục X xuyên tường, op #6 subtract.
+  private _buildGableGeo(w: GableWall, o: GableOpts): THREE.BufferGeometry {
+    const [a, b, c] = w.tri
+    const u = (p: THREE.Vector3): number => -w.dir * p.z
+    const shape = new THREE.Shape([
+      new THREE.Vector2(u(a), a.y),
+      new THREE.Vector2(u(b), b.y),
+      new THREE.Vector2(u(c), c.y),
+    ])
+    let geo: THREE.BufferGeometry = new THREE.ExtrudeGeometry(shape, {
+      depth: o.thick,
+      bevelEnabled: false,
+    })
+    geo.rotateY((w.dir * Math.PI) / 2)
+    geo.translate(a.x, 0, 0)
+    if (o.winR > 0) {
+      const cy = a.y + (b.y - a.y) * o.winH // cao tâm cửa theo chiều cao tam giác
+      const hole = new THREE.CylinderGeometry(o.winR, o.winR, o.thick * 3, 32)
+      hole.rotateZ(Math.PI / 2) // trục Y → X: xuyên qua bề dày tường
+      hole.translate(a.x + (w.dir * o.thick) / 2, cy, b.z) // tâm Z = đỉnh W/X (giữa cạnh đáy)
+      const cut = booleanGeometry(geo, hole, 'subtract')
+      geo.dispose()
+      hole.dispose()
+      geo = cut
+    }
+    return geo
+  }
+
+  private _clearGables(): void {
+    if (!this.gableGroup) return
+    this.scene.remove(this.gableGroup)
+    for (const c of this.gableGroup.children) {
+      if (c instanceof THREE.Mesh) c.geometry.dispose() // geo boolean/extrude dựng mới mỗi regen
+    }
+    this.gableGroup = null
+  }
+
+  // Dọn TOÀN BỘ tài nguyên tường hồi (geo + mat) — chỉ gọi từ dispose() (dispose chạm trần complexity).
+  private _disposeGables(): void {
+    this._clearGables()
+    this.gableMat?.dispose()
+  }
+
   // ===== CẢNH QUANH NHÀ — op #5 Scatter (ops/scatter.ts) =====
   // Rải ĐÁ + BỤI CỎ lên vành đất quanh footprint: sample plane XZ (y=0 = mặt lưới), mask LOẠI vùng dưới nhà
   // (|x|<hw & |z|<hd). count = tổng (35% đá / 65% cỏ); seed cố định → cùng bố cục mỗi regen (kéo slider khác
@@ -1863,6 +1940,7 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     }
     this._disposeApex()
     this._disposeTiles() // buffer instance + geo/mat ngói
+    this._disposeGables() // 🧱 tường hồi (op #6)
     this._disposeScatter() // cảnh quanh nhà (op #5)
     if (this.mesh) this.mesh.geometry.dispose()
     this.mat.dispose()

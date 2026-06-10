@@ -15,6 +15,7 @@ import { filletSpine } from 'threejs-modules/ops/bevel'
 import { arcLength } from 'threejs-modules/ops/resample'
 
 import {
+  type GableWall,
   type LabeledPoint,
   MAX_CORNER_SEG,
   MAX_RAFTER_SEG,
@@ -57,6 +58,9 @@ export interface RoofLabParams {
   timberBevel: number // VÁT CẠNH gỗ (op #4 — × cạnh nhỏ tiết diện, 0..0.45): xà góc + thanh sống/khung hồi
   scatterCount: number // CẢNH QUANH NHÀ (op #5 Scatter): tổng số đá + bụi cỏ rải quanh footprint. 0 = tắt
   scatterSeed: number // SEED scatter — đổi số = đổi bố cục rải (cùng seed cùng bố cục, tái lập được)
+  gableThick: number // 🧱 TƯỜNG HỒI EWG/FXH (op #6 Boolean): dày tường (m). 0 = tắt (mặt hồi hở như cũ)
+  gableWinR: number // 🧱 bán kính CỬA TRÒN khoét xuyên tường hồi (m). 0 = tường đặc không khoét
+  gableWinH: number // 🧱 cao TÂM cửa theo chiều cao tam giác hồi (0..1)
 }
 
 // ⭐ MÁI CHUẨN — hình dáng GỐC (frustum chia tọa độ A–V) để bắt đầu mọi dạng mái. Mở Mái = state này.
@@ -90,6 +94,9 @@ export const DEFAULT_ROOF: RoofLabParams = {
   timberBevel: 0.25, // Vát cạnh gỗ mặc định ¼ cạnh nhỏ — thấy ngay chất gỗ bo, kéo 0 về cạnh sắc cũ
   scatterCount: 0, // Cảnh quanh nhà TẮT mặc định — kéo slider để rải (không đổi cảnh chuẩn)
   scatterSeed: 7, // Seed mặc định
+  gableThick: 0, // Tường hồi TẮT mặc định (giữ mái chuẩn hở mặt hồi) — kéo slider để dựng
+  gableWinR: 0.35, // Cửa tròn mặc định R 35cm (cửa sổ tròn đầu hồi chùa) — hiệu lực khi tường bật
+  gableWinH: 0.45, // Tâm cửa ở 45% chiều cao tam giác hồi
 }
 
 // 🔪 Lưỡi dao = mặt cắt. transform (nghiêng X/Y/Z + vị trí) định vị; hình do bladeSDF (editor) quyết.
@@ -682,6 +689,24 @@ function peakFrameRails(v: LabeledPoint[], capHeight: number): ((t: number) => T
   ]
 }
 
+// 🧱 2 TƯỜNG HỒI EWG/FXH (op #6 Boolean — NgQuan chốt hướng tường/cửa 2026-06-10): tam giác đáy E-G / F-H
+// + đỉnh W/X (CÙNG công thức W/X với peakFrameRails/peakSurfaces — khung gối bo ôm đúng mép tường), đùn dày
+// vào TRONG (dir = phía mặt kia). Dựng + khoét cửa tròn ở roof-preview._buildGableGeo.
+function gableWallSpecs(v: LabeledPoint[], capHeight: number): GableWall[] {
+  const e = cornerVec(v, 4)
+  const f = cornerVec(v, 5)
+  const g = cornerVec(v, 6)
+  const h = cornerVec(v, 7)
+  const y = e.y + capHeight
+  const w = new THREE.Vector3(e.x, y, (e.z + g.z) / 2)
+  const x = new THREE.Vector3(f.x, y, (f.z + h.z) / 2)
+  const dirE: 1 | -1 = f.x > e.x ? 1 : -1 // đùn về phía mặt đối diện
+  return [
+    { tri: [e, w, g], dir: dirE },
+    { tri: [f, x, h], dir: dirE === 1 ? -1 : 1 },
+  ]
+}
+
 // 2 MẶT NGHIÊNG peak dạng hàm (u,v) — bilinear EF→WX (trước) · GH→WX (sau): peak CŨNG lợp ngói (NgQuan 2026-06-10).
 // 2 mặt hồi EWG/FXH = TƯỜNG tương lai — KHÔNG lợp. W=(E.x, H+cap, giữa z) · X=(F.x, H+cap, giữa z) (khớp setCapBlock).
 export function peakSurfaces(
@@ -865,9 +890,32 @@ function buildRoofParamCol(
     buildPeakRows(params, regen),
     buildApexRows(apex, updateApex),
     buildCornerRows(params, regen),
+    buildGableRows(params, regen), // op #6 Boolean — tường hồi EWG/FXH khoét cửa tròn
     buildSceneryRows(params, regen) // op #5 Scatter — đá + bụi cỏ quanh nhà
   )
   return col
+}
+
+// 🧱 TƯỜNG HỒI (op #6 Boolean — three-bvh-csg): bịt 2 mặt tam giác hồi EWG/FXH bằng tường dày, khoét
+// CỬA TRÒN xuyên (consumer đầu của ops/boolean.ts). Dày 0 = tắt; R 0 = tường đặc.
+function buildGableRows(params: RoofLabParams, regen: () => void): HTMLElement {
+  const box = document.createElement('div')
+  box.append(
+    mkColTitle('🧱 Tường hồi'),
+    sliderRow('Dày tường (m)', 0, 0.3, 0.01, params.gableThick, (v) => {
+      params.gableThick = v
+      regen()
+    }),
+    sliderRow('Cửa tròn R (m)', 0, 1, 0.05, params.gableWinR, (v) => {
+      params.gableWinR = v
+      regen()
+    }),
+    sliderRow('Cao cửa (×cao hồi)', 0.1, 0.9, 0.05, params.gableWinH, (v) => {
+      params.gableWinH = v
+      regen()
+    })
+  )
+  return box
 }
 
 // GÓC ĐAO (Tầng 1 — chia đốt): lưới đốt ô góc tại D = 2 tam giác slope DTG (mặt sau) + DUG (mặt trái), gặp ở sống DG.
@@ -1523,6 +1571,11 @@ function updateTileDecor(
     bevel: p.timberBevel, // vát cạnh thanh sống/khung hồi (op #4 — chung slider với xà góc)
     knots, // khối đấu gỗ tại W/X
   })
+  // 🧱 TƯỜNG HỒI (op #6 Boolean): chỉ khi peak còn đứng + dày > 0; cửa tròn khoét theo gableWinR/H
+  preview.setGableWalls(
+    peaks.length > 0 && p.gableThick > 0 ? gableWallSpecs(verts, p.capHeight) : [],
+    { thick: p.gableThick, winR: p.gableWinR, winH: p.gableWinH }
+  )
 }
 
 // Gắn thí nghiệm mái vào Lab. verts = nguồn sự thật; slider → regen đối xứng; ô số → sửa đỉnh; lưỡi dao cắt shader.
