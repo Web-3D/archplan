@@ -16,9 +16,11 @@ import type {
   GroundLayer,
   GroundMaterialKey,
   GroundMixParams,
+  PavingParams,
   StonePathParams,
   TerrainConfig,
   TerrainMound,
+  WallCurveParams,
   WaterConfig,
   WaterKind,
   WaterMaterialKey,
@@ -32,7 +34,9 @@ import {
   makeFence,
   makeGroundLayer,
   makeGroundMixParams,
+  makePavingParams,
   makeStonePathParams,
+  makeWallCurveParams,
   makeWater,
 } from 'threejs-modules/site/state'
 import { type TabItem, Tabs } from 'threejs-modules/ui/Tabs'
@@ -598,7 +602,8 @@ function buildGroundDomain(
   ensureCutGrayCss() // tô xám CHỈ tab "Khoét cut" + nội dung của nó (scoped) — G/Mảng add giữ nâu
   const reg: GReg = { tabs: [], mid: new Map(), inst: new Map() }
   let topTabs: Tabs | null = null
-  // Chọn tab giữa (add=0 · path=1 · cut=2) + instance Z/P/C của layer (tách khỏi navTo giữ complexity ≤10).
+  // Chọn tab giữa (add=0 · path=1 · paving=2 · wall=3 · cut=4) + instance Z/P/B/W/C của layer (tách khỏi navTo).
+  const MID_TAB = { add: 0, path: 1, paving: 2, wall: 3, cut: 4 } as const
   const selectMidInst = (
     layers: GroundLayer[],
     layer: GroundLayer,
@@ -607,7 +612,7 @@ function buildGroundDomain(
   ): void => {
     const kind = layer.zoneKind ?? 'surface'
     const part = zonePart(op, kind)
-    reg.mid.get(lv)?.select(op === 'cut' ? 2 : kind === 'path' ? 1 : 0, { trusted: false })
+    reg.mid.get(lv)?.select(MID_TAB[part.key as keyof typeof MID_TAB] ?? 0, { trusted: false })
     const sibs = layers.filter((l) => (l.level ?? 1) === lv && part.match(l))
     reg.inst.get(`${lv}:${part.key}`)?.select(Math.max(0, sibs.indexOf(layer)), { trusted: false })
   }
@@ -775,8 +780,9 @@ function pathSliderSpecs(p: StonePathParams): PathSlider[] {
   ]
 }
 
-// 🪨 Hàng XOAY path: kéo = tunePathRotLive (CHỈ set mesh.rotation.y — 0 rebuild, né water-RTT) / buông = applySite.
-function pathRotRow(ctx: APGuiCtx, p: StonePathParams, flatIdx: number): HTMLElement {
+// 🪨🧱 Hàng XOAY khung (path + paving dùng chung — chỉ cần field rot): kéo = tunePathRotLive (CHỈ set
+// mesh.rotation.y — 0 rebuild, né water-RTT) / buông = applySite.
+function pathRotRow(ctx: APGuiCtx, p: { rot: number }, flatIdx: number): HTMLElement {
   return sliderRow(
     'Rotate°',
     -180,
@@ -820,6 +826,181 @@ function buildPathZoneBody(
       )
     )
   pane.appendChild(pathRotRow(ctx, p, flatIdx)) // 🪨 xoay LIVE (transform, né rebuild)
+  pane.appendChild(
+    selectRow(
+      'Material',
+      STONE_MAT_OPTS,
+      p.material,
+      (v) => ((p.material = v), ctx.applySite(true))
+    )
+  )
+  pane.appendChild(
+    colorRow(
+      'Color',
+      p.color,
+      (hex, c) => ((p.color = hex), c ? ctx.applySite(true) : ctx.applyZonesLive())
+    )
+  )
+}
+
+// 🧱 Slider STRUCTURAL sân gạch paving-zone (cùng tuple PathSlider) — KÉO = applyZonesLive / buông = applySite.
+// Viên mm; Bond/Decay 0..1. KHÔNG gồm Rotate (live transform riêng — pathRotRow dùng chung).
+function pavingSliderSpecs(p: PavingParams): PathSlider[] {
+  return [
+    [
+      'Viên L',
+      0.05,
+      0.5,
+      0.005,
+      1000,
+      () => p.brickL / 1000,
+      (v) => (p.brickL = Math.round(v * 1000)),
+    ],
+    [
+      'Viên W',
+      0.05,
+      0.5,
+      0.005,
+      1000,
+      () => p.brickW / 1000,
+      (v) => (p.brickW = Math.round(v * 1000)),
+    ],
+    [
+      'Dày',
+      0.02,
+      0.15,
+      0.005,
+      1000,
+      () => p.brickH / 1000,
+      (v) => (p.brickH = Math.round(v * 1000)),
+    ],
+    [
+      'Khe',
+      0.002,
+      0.05,
+      0.001,
+      1000,
+      () => p.joint / 1000,
+      (v) => (p.joint = Math.round(v * 1000)),
+    ],
+    ['Bond (so le)', 0, 0.5, 0.05, 100, () => p.bond, (v) => (p.bond = v)],
+    ['Decay (cũ)', 0, 1, 0.05, 100, () => p.decay, (v) => (p.decay = v)],
+    ['Seed', 0, 999, 1, 1, () => p.seed, (v) => (p.seed = Math.round(v))],
+  ]
+}
+
+// 🧱 Thân pane PAVING-zone (Sân gạch — consumer op #3 BrickPaving): Frame W/D + viên/khe/bond/decay/seed +
+// Rotate live + Material + Color. Sân PHẲNG v1 (không Bám gò — khác path). Mirror buildPathZoneBody.
+function buildPavingZoneBody(
+  pane: HTMLElement,
+  ctx: APGuiCtx,
+  layer: GroundLayer,
+  flatIdx: number
+): void {
+  const p = (layer.paving ??= makePavingParams())
+  pane.appendChild(layerSlider(ctx, layer, 'length', 'Frame W m', 0.5, 40, 0.1, 1000))
+  pane.appendChild(layerSlider(ctx, layer, 'width', 'Frame D m', 0.5, 40, 0.1, 1000))
+  for (const [label, min, max, step, mf, get, set] of pavingSliderSpecs(p))
+    pane.appendChild(
+      sliderRow(
+        label,
+        min,
+        max,
+        step,
+        get(),
+        (v, c) => (set(v), c ? ctx.applySite(true) : ctx.applyZonesLive()),
+        mf
+      )
+    )
+  pane.appendChild(pathRotRow(ctx, p, flatIdx)) // 🧱 xoay LIVE (transform, né rebuild — dùng chung path)
+  pane.appendChild(
+    selectRow(
+      'Material',
+      STONE_MAT_OPTS,
+      p.material,
+      (v) => ((p.material = v), ctx.applySite(true))
+    )
+  )
+  pane.appendChild(
+    colorRow(
+      'Color',
+      p.color,
+      (hex, c) => ((p.color = hex), c ? ctx.applySite(true) : ctx.applyZonesLive())
+    )
+  )
+}
+
+// 🧱 Slider STRUCTURAL tường cong wall-zone (cùng tuple PathSlider) — KÉO = applyZonesLive / buông = applySite.
+// R/Cao/Dày/Viên theo m hiển thị (state mm); Góc quét độ; Decay 0..1. Rotate riêng (pathRotRow dùng chung).
+function wallSliderSpecs(p: WallCurveParams): PathSlider[] {
+  return [
+    ['R cung', 0.3, 20, 0.1, 1000, () => p.radius / 1000, (v) => (p.radius = Math.round(v * 1000))],
+    ['Góc quét°', 10, 360, 5, 1, () => p.sweep, (v) => (p.sweep = Math.round(v))],
+    ['Cao', 0.1, 3, 0.05, 1000, () => p.height / 1000, (v) => (p.height = Math.round(v * 1000))],
+    [
+      'Dày',
+      0.04,
+      0.4,
+      0.01,
+      1000,
+      () => p.thickness / 1000,
+      (v) => (p.thickness = Math.round(v * 1000)),
+    ],
+    [
+      'Viên L',
+      0.05,
+      0.5,
+      0.005,
+      1000,
+      () => p.brickL / 1000,
+      (v) => (p.brickL = Math.round(v * 1000)),
+    ],
+    [
+      'Viên H',
+      0.02,
+      0.2,
+      0.005,
+      1000,
+      () => p.brickH / 1000,
+      (v) => (p.brickH = Math.round(v * 1000)),
+    ],
+    [
+      'Khe',
+      0.002,
+      0.05,
+      0.001,
+      1000,
+      () => p.joint / 1000,
+      (v) => (p.joint = Math.round(v * 1000)),
+    ],
+    ['Decay (cũ)', 0, 1, 0.05, 100, () => p.decay, (v) => (p.decay = v)],
+    ['Seed', 0, 999, 1, 1, () => p.seed, (v) => (p.seed = Math.round(v))],
+  ]
+}
+
+// 🧱 Thân pane WALL-zone (Tường cong — CurvedBrickWall, op #1+#2+#3+#5): R/Góc quét/Cao/Dày + viên/khe/
+// decay/seed + Rotate live + Material + Color. TÂM cung = Pos X/Z (phần chung buildZonePane); KHÔNG có
+// Frame W/D (length/width zone không dùng cho cung). Mirror buildPathZoneBody.
+function buildWallZoneBody(
+  pane: HTMLElement,
+  ctx: APGuiCtx,
+  layer: GroundLayer,
+  flatIdx: number
+): void {
+  const p = (layer.wall ??= makeWallCurveParams())
+  for (const [label, min, max, step, mf, get, set] of wallSliderSpecs(p))
+    pane.appendChild(
+      sliderRow(
+        label,
+        min,
+        max,
+        step,
+        get(),
+        (v, c) => (set(v), c ? ctx.applySite(true) : ctx.applyZonesLive()),
+        mf
+      )
+    )
+  pane.appendChild(pathRotRow(ctx, p, flatIdx)) // 🧱 xoay cung LIVE (transform — dùng chung path/paving)
   pane.appendChild(
     selectRow(
       'Material',
@@ -1050,8 +1231,10 @@ function buildZonePane(
 ): HTMLElement {
   const pane = document.createElement('div')
   if (op === 'add') {
-    // loại zone CỐ ĐỊNH theo tab giữa (Mảng add = surface · Path đá = path) — hết dropdown Type
+    // loại zone CỐ ĐỊNH theo tab giữa (Mảng add=surface · Path đá · Sân gạch · Tường cong) — hết dropdown
     if (layer.zoneKind === 'path') buildPathZoneBody(pane, ctx, layer, flatIdx)
+    else if (layer.zoneKind === 'paving') buildPavingZoneBody(pane, ctx, layer, flatIdx)
+    else if (layer.zoneKind === 'wall') buildWallZoneBody(pane, ctx, layer, flatIdx)
     else buildSurfaceZoneBody(pane, ctx, layer, flatIdx, rebuild)
   } else {
     pane.appendChild(groundFormRow(ctx, layer)) // cut: chỉ hình + vị trí (không vật liệu/dày)
@@ -1082,15 +1265,18 @@ function nextZoneOffset(layers: GroundLayer[], lv: number, op: 'add' | 'cut'): n
 }
 
 // Phân hoạch instance theo tab giữa (NgQuan 2026-06-10 — Path RỜI zone): cut → C/`lv:cut` ·
-// add-surface → Z/`lv:add` · add-path → P/`lv:path`. match KHÔNG xét level (caller lọc level riêng).
+// add-surface → Z/`lv:add` · add-path → P/`lv:path` · add-paving → B/`lv:paving` (🧱 sân gạch) ·
+// add-wall → W/`lv:wall` (🧱 tường cong). match KHÔNG xét level (caller lọc level riêng).
+type ZoneKindUI = 'surface' | 'path' | 'paving' | 'wall'
+const ZONE_PRE: Record<ZoneKindUI, string> = { surface: 'Z', path: 'P', paving: 'B', wall: 'W' }
 function zonePart(
   op: 'add' | 'cut',
-  kind: 'surface' | 'path'
+  kind: ZoneKindUI
 ): { pre: string; key: string; match: (l: GroundLayer) => boolean } {
   if (op === 'cut') return { pre: 'C', key: 'cut', match: (l) => (l.op ?? 'add') === 'cut' }
   return {
-    pre: kind === 'path' ? 'P' : 'Z',
-    key: kind === 'path' ? 'path' : 'add',
+    pre: ZONE_PRE[kind],
+    key: kind === 'surface' ? 'add' : kind,
     match: (l) => (l.op ?? 'add') === 'add' && (l.zoneKind ?? 'surface') === kind,
   }
 }
@@ -1102,7 +1288,7 @@ function buildInstanceTabs(
   ctx: APGuiCtx,
   lv: number,
   op: 'add' | 'cut',
-  kind: 'surface' | 'path',
+  kind: ZoneKindUI,
   rebuild: (focusLayer?: number) => void,
   reg: GReg
 ): HTMLElement {
@@ -1129,6 +1315,8 @@ function buildInstanceTabs(
     })
     if (op === 'add') nl.zoneKind = kind // loại chốt LÚC TẠO theo ngăn
     if (op === 'add' && kind === 'path') nl.path = makeStonePathParams()
+    if (op === 'add' && kind === 'paving') nl.paving = makePavingParams() // 🧱 sân gạch
+    if (op === 'add' && kind === 'wall') nl.wall = makeWallCurveParams() // 🧱 tường cong
     layers.push(nl)
     rebuild(layers.length - 1) // focus zone/cut MỚI (né nhảy về G0)
     ctx.applySite(true)
@@ -1148,9 +1336,10 @@ function buildInstanceTabs(
   return host
 }
 
-// Pane 1 G-level = [Mảng add | Path đá | Khoét cut] (3 tab — Path RỜI zone, NgQuan 2026-06-10), mỗi tab =
-// instance tabs riêng (Z/P/C). MỌI level (kể cả G1) đều có cut (cut khoét zones CÙNG level → G1 cut lộ G0).
-// reg.mid[lv]=Tabs giữa cho navigate (add=0 · path=1 · cut=2).
+// Pane 1 G-level = [Mảng add | Path đá | Sân gạch | Tường cong | Khoét cut] (5 tab — Path RỜI zone
+// 2026-06-10, 🧱 Sân gạch + Tường cong consumer mạch tường gạch cùng ngày), mỗi tab = instance tabs riêng
+// (Z/P/B/W/C). MỌI level (kể cả G1) đều có cut (cut khoét zones CÙNG level → G1 cut lộ G0).
+// reg.mid[lv]=Tabs giữa cho navigate (add=0·path=1·paving=2·wall=3·cut=4).
 function buildLevelPane(
   ctx: APGuiCtx,
   lv: number,
@@ -1160,16 +1349,28 @@ function buildLevelPane(
   const host = document.createElement('div')
   const addPane = buildInstanceTabs(ctx, lv, 'add', 'surface', rebuild, reg)
   const pathPane = buildInstanceTabs(ctx, lv, 'add', 'path', rebuild, reg)
+  const pavingPane = buildInstanceTabs(ctx, lv, 'add', 'paving', rebuild, reg) // 🧱
+  const wallPane = buildInstanceTabs(ctx, lv, 'add', 'wall', rebuild, reg) // 🧱 tường cong
   const cutPane = buildInstanceTabs(ctx, lv, 'cut', 'surface', rebuild, reg)
   cutPane.classList.add('ap-cut-pane') // tô xám nội dung tab Khoét (C-tabs + zone panes)
-  host.append(addPane, pathPane, cutPane)
+  host.append(addPane, pathPane, pavingPane, wallPane, cutPane)
   const items: TabItem[] = [
     { label: 'Mảng add', panel: addPane, title: 'Mảng phủ material' },
     { label: 'Path đá', panel: pathPane, title: 'Đường đá rải StoneScatter' },
+    {
+      label: 'Sân gạch',
+      panel: pavingPane,
+      title: 'Sân gạch bond đều BrickPaving (op #3) + decay',
+    },
+    {
+      label: 'Tường cong',
+      panel: wallPane,
+      title: 'Tường gạch cong CurvedBrickWall (op #1+#2+#3) + decay',
+    },
     { label: 'Khoét cut', panel: cutPane, title: 'Khoét lộ level dưới' },
   ]
   const tabs = new Tabs(host, items, { classes: GROUND_TAB_CLASSES, injectCss: false })
-  ;(tabs.getTablist().children[2] as HTMLElement | undefined)?.classList.add('ap-cut-tabbtn') // nút "Khoét cut" → xám
+  ;(tabs.getTablist().children[4] as HTMLElement | undefined)?.classList.add('ap-cut-tabbtn') // nút "Khoét cut" → xám
   reg.tabs.push(tabs)
   reg.mid.set(lv, tabs) // navigate → tab giữa
   host.appendChild(removeGLevelRow(ctx, lv, rebuild)) // ✕ xoá CẢ G-level (dưới hàng tab giữa)
@@ -1466,16 +1667,17 @@ function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void
       )
     )
   }
-  // Wave size — RAW (không phải %). ĐẢO rippleScale (13−v) → kéo PHẢI = sóng TO (rippleScale thấp). Slider riêng.
+  // Wave size — RAW (không phải %). ĐẢO rippleScale: v≤12 = 13−v NHƯ CŨ (state cũ hiển thị đúng chỗ);
+  // v>12 = 1/(v−11) → rs PHÂN SỐ (0.5→~0.077, chu kỳ sóng tới ~13m) — NgQuan 2026-06-10 "tăng lên 24".
   host.appendChild(
     sliderRow(
       'Wave size',
       1,
-      12,
+      24,
       0.5,
-      13 - w.rippleScale,
+      w.rippleScale >= 1 ? 13 - w.rippleScale : 11 + 1 / w.rippleScale,
       (v, c) => {
-        const rs = 13 - v // size→rippleScale (cao=to → freq thấp)
+        const rs = v <= 12 ? 13 - v : 1 / (v - 11) // size→rippleScale (cao=to → freq thấp)
         w.rippleScale = rs
         ctx.tuneWater(w, (s) => s.setRippleScale(rs), c)
       },

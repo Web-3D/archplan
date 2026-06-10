@@ -2675,10 +2675,16 @@ export class ArchPlanLab extends BaseWorld {
     return [...keys]
   }
 
-  // 🪨 Gom key texture đá của các path-zone (groundLayers zoneKind='path', material≠none). Tách giữ complexity ≤10.
+  // 🪨🧱 Gom key texture đá của path/paving/wall-zone (material≠none) — cùng cache đá border hồ.
+  // Tách giữ complexity ≤10 (mỗi loại 1 dòng, helper chung).
   private _collectPathTexKeys(keys: Set<BorderTexKey>): void {
+    const add = (m: BorderTexKey | 'none' | undefined): void => {
+      if (m && m !== 'none') keys.add(m)
+    }
     for (const l of this.site.groundLayers ?? []) {
-      if (l.zoneKind === 'path' && l.path && l.path.material !== 'none') keys.add(l.path.material)
+      if (l.zoneKind === 'path') add(l.path?.material)
+      if (l.zoneKind === 'paving') add(l.paving?.material) // 🧱 sân gạch
+      if (l.zoneKind === 'wall') add(l.wall?.material) // 🧱 tường cong
     }
   }
 

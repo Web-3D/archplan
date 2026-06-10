@@ -72,7 +72,9 @@ ArchPlanLab (extends BaseWorld)
   │     │                            2026-06-10; target MixPaintTarget = GroundLayer | 'base' — G0 dùng site.groundMix, mask = nguyên lô): Nền chính + ≤4 slot
   │     │                            Ngưỡng + 🖌 VẼ MASK per-target (cọ ellipse m world raycast đúng mesh — zone theo groundLayerIdx, G0 theo isBaseGround;
   │     │                            Tẩy/Xóa nét, mode loại trừ Move/Pick, persist base64 128² autosave) + 6 slider chung — TẤT CẢ slider = uniform LIVE
-  │     │                            (tuneMixLive, không recompile)] ·
+  │     │                            (tuneMixLive, không recompile)] [G-level: 5 tab giữa MẢNG ADD (Z) | PATH ĐÁ (P — StoneScatter Poisson) |
+  │     │                            🧱 SÂN GẠCH (B — BrickPaving bond đều + decay, consumer op #3) | 🧱 TƯỜNG CONG (W — CurvedBrickWall cung R+góc quét,
+  │     │                            viên 2 mặt + decay, tổ hợp op #1+#2+#3+#5, 2026-06-10) | KHOÉT CUT (C); loại zone chốt LÚC TẠO] ·
   │     │                            Garden=🌿 THỰC VẬT 3D, LỒNG BẬC 2 (Grass|Tree, palette --gd-* OKLCH green ramp bg-1→bg-5): Grass = ô on/off
   │     │                            cỏ-3D (mọc nền bất kỳ) + SLIDER chi tiết cỏ (CHUYỂN từ Lab) → TAB cấp1 Lá đơn|Bụi cỏ; Lá đơn có cấp2 Số đo|Độ cong|Bóng đổ
   │     │                            (Số đo=mật độ/cao/thon/thân/gốc/đốt · Độ cong=T→P/dọc+cụp 1 chiều/fold · Bóng đổ=đậm/cao bóng+màu 2 mặt+Vệt) +
