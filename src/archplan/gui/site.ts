@@ -1176,6 +1176,39 @@ function buildBorderRows(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void
       if (c) ctx.applySite(true) // commit-only
     })
   )
+  // 🪨 2 slider riêng ĐÁ CUỘI (shape cong; rect = rào gỗ không áp): to-nhỏ xen kẽ + góc cạnh
+  if (w.shape !== 'rect') for (const el of stoneJitterRows(ctx, w)) host.appendChild(el)
+}
+
+// Đá cuội viền hồ: Đá to-nhỏ (bán kính lệch ±45%×v, bước xếp tự giãn theo viên) + Đá góc cạnh (đỉnh lệch
+// bán kính từ tâm — hết "tròn quá"). Commit-only như Border H — né reflector thrash lúc kéo.
+function stoneJitterRows(ctx: APGuiCtx, w: WaterConfig): HTMLElement[] {
+  return [
+    sliderRow(
+      'Đá to-nhỏ %',
+      0,
+      100,
+      5,
+      w.borderStoneVar,
+      (v, c) => {
+        w.borderStoneVar = Math.round(v)
+        if (c) ctx.applySite(true)
+      },
+      1
+    ),
+    sliderRow(
+      'Đá góc cạnh %',
+      0,
+      100,
+      5,
+      w.borderStoneJag,
+      (v, c) => {
+        w.borderStoneJag = Math.round(v)
+        if (c) ctx.applySite(true)
+      },
+      1
+    ),
+  ]
 }
 
 // Slider % Surface: [label, min%, max%, step, field-key 0–1]. Field = value/100. (rippleScale tách riêng — raw.)
