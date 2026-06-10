@@ -23,6 +23,8 @@ export interface WaterfallStructural {
   height: number
   arc: number
   mistCount: number
+  crestLength: number // m — đoạn mặt nước nằm ngang trên đỉnh (0 = tắt)
+  crestDepth: number // m — độ sâu dòng (drawdown võng về mép)
 }
 
 export const DEFAULT_STRUCTURAL: WaterfallStructural = {
@@ -30,6 +32,8 @@ export const DEFAULT_STRUCTURAL: WaterfallStructural = {
   height: 1.8,
   arc: 0.28,
   mistCount: 220,
+  crestLength: 1,
+  crestDepth: 0.08,
 }
 
 export class WaterfallPreview {
@@ -124,11 +128,13 @@ export class WaterfallPreview {
       new THREE.MeshStandardMaterial({ color: 0x5d7a4e, roughness: 1 })
     )
     ground.rotation.x = -Math.PI / 2
+    // tường nới sâu theo đoạn mặt ngang — crest nằm TRÊN nóc tường, không lơ lửng sau lưng
+    const wallDepth = Math.max(0.35, p.crestLength + 0.3)
     const wall = add(
-      new THREE.BoxGeometry(p.width + 1.2, p.height, 0.35),
+      new THREE.BoxGeometry(p.width + 1.2, p.height, wallDepth),
       new THREE.MeshStandardMaterial({ color: 0x8a8278, roughness: 0.95 })
     )
-    wall.position.set(0, p.height / 2, -0.18) // mặt trước tường tại z≈0
+    wall.position.set(0, p.height / 2, -wallDepth / 2 + 0.01) // mặt trước tường tại z≈0
     const pool = add(
       new THREE.CircleGeometry(Math.max(1.2, p.width * 0.75), 40),
       new THREE.MeshStandardMaterial({ color: 0x254a59, roughness: 0.35 })
