@@ -140,7 +140,6 @@ import { PMREMGenerator } from 'three/webgpu'
 import type { GrassBlades, GrassExcludeRect } from 'threejs-modules/components/GrassBlades'
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
 import { SkyGradient } from 'threejs-modules/components/SkyGradient' // 🌅 bầu trời gradient ngày↔đêm
-import type { StoneScatter } from 'threejs-modules/components/StoneScatter' // 🪨 lối đi lát đá Poisson
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
@@ -535,7 +534,7 @@ export class ArchPlanLab extends BaseWorld {
   // ngang). Kéo = dời mesh.position (0 rebuild); buông = gập vào offsetX/Z + _applySite. G0 base KHÔNG kéo.
   private _layerDrag: {
     idx: number
-    mesh: THREE.Mesh
+    mesh: THREE.Object3D // 🪨🧱 surface/path = Mesh; paving/wall = Group (CurvedBrickWall/BrickPaving) — chỉ dùng .position
     startOffX: number
     startOffZ: number
     startPt: THREE.Vector3
@@ -827,26 +826,49 @@ export class ArchPlanLab extends BaseWorld {
     else if (this._layerDrag) this._layerDragMove(e) // 🟫 kéo tầng ground
   }
 
+  // 🪨🧱 Resolve object raycast TRÚNG → object mang userData.groundLayerIdx. Surface/path = chính nó (idx trên
+  // mesh). Paving (BrickPaving) & wall (CurvedBrickWall) = getMesh() trả GROUP (idx trên Group, raycast trúng
+  // viên con KHÔNG có idx) → walk-up tới ancestor mang idx (dừng ở siteGroup). null = hit không thuộc tầng ground.
+  private _layerObjOf(o: THREE.Object3D): THREE.Object3D | null {
+    let n: THREE.Object3D | null = o
+    while (n && n !== this.siteGroup) {
+      if (typeof n.userData.groundLayerIdx === 'number') return n
+      n = n.parent
+    }
+    return null
+  }
+
+  // 🪨🧱 Hit tầng-ground GẦN NHẤT trong danh sách (resolve Group paving/wall) → {obj mang idx, hit}. null nếu trượt.
+  private _pickLayer(
+    hits: THREE.Intersection[]
+  ): { obj: THREE.Object3D; hit: THREE.Intersection } | null {
+    for (const h of hits) {
+      const obj = this._layerObjOf(h.object)
+      if (obj) return { obj, hit: h }
+    }
+    return null
+  }
+
   // 🟫 Move trúng 1 TẦNG ground (G1+, mesh có userData.groundLayerIdx) → bắt đầu kéo dời XZ. G0 base KHÔNG có
   // tag → bỏ qua (cố định). Trả false (không trúng tầng nào). Lưu offset gốc + điểm neo cho _layerDragMove.
   private _tryStartLayerDrag(e: PointerEvent): boolean {
     if (!this.site.show || !this.site.groundLayers?.length) return false
     this._ray.setFromCamera(this._ndc(e), this.camera)
     const hits = this._ray.intersectObjects(this.siteGroup.children, true)
-    const hit = hits.find((h) => typeof h.object.userData.groundLayerIdx === 'number')
-    if (!hit) return false
-    const idx = hit.object.userData.groundLayerIdx as number
+    const picked = this._pickLayer(hits) // 🪨🧱 resolve Group paving/wall → object mang idx
+    if (!picked) return false
+    const idx = picked.obj.userData.groundLayerIdx as number
     const layer = this.site.groundLayers[idx]
     if (!layer) return false
     this._setActiveCut(idx) // 🟫 kéo cut → hiện mảng xám lúc Move (add → ẩn cut); raycaster pick được dù đang ẩn
     this.canvas.setPointerCapture(e.pointerId)
     this._layerDrag = {
       idx,
-      mesh: hit.object as THREE.Mesh,
+      mesh: picked.obj,
       startOffX: layer.offsetX,
       startOffZ: layer.offsetZ,
-      startPt: hit.point.clone(),
-      startMeshPos: (hit.object as THREE.Mesh).position.clone(), // 🪨 path mesh giữ offset+baseY ở position
+      startPt: picked.hit.point.clone(),
+      startMeshPos: picked.obj.position.clone(), // 🪨 path/paving/wall giữ offset+baseY ở position (Group = world transform)
     }
     return true
   }
@@ -1072,11 +1094,11 @@ export class ArchPlanLab extends BaseWorld {
     if (!this.site.show || !this.site.groundLayers?.length) return false
     this._ray.setFromCamera(this._ndc(e), this.camera)
     const hits = this._ray.intersectObjects(this.siteGroup.children, true)
-    const hit = hits.find((h) => typeof h.object.userData.groundLayerIdx === 'number')
-    if (!hit) return false
+    const picked = this._pickLayer(hits) // 🪨🧱 resolve Group paving/wall → object mang idx (code1 focus)
+    if (!picked) return false
     const pHit = this._ray.intersectObjects(this.pickGroup.children, false)[0]
-    if (pHit && pHit.distance < hit.distance) return false // building element gần hơn → nhường
-    this._navigateToLayer(hit.object.userData.groundLayerIdx as number)
+    if (pHit && pHit.distance < picked.hit.distance) return false // building element gần hơn → nhường
+    this._navigateToLayer(picked.obj.userData.groundLayerIdx as number)
     return true
   }
 
@@ -3521,20 +3543,13 @@ export class ArchPlanLab extends BaseWorld {
   // zone = cache (resolveGroundMat, KHÔNG dispose); cut-patch material own → dispose tránh leak. Buông → _applySite clip sạch.
   private _rebuildGroundLayersLive(): void {
     if (!this.site.groundLayers?.length) return
-    const old = this.siteGroup.children.filter(
-      (o): o is THREE.Mesh => o instanceof THREE.Mesh && o.userData.groundLayerIdx !== undefined
-    )
-    for (const m of old) {
-      this.siteGroup.remove(m)
-      // 🪨 path-zone (StoneScatter) sở hữu geo+material + nằm trong siteShaders → dispose QUA field.dispose (né
-      // double-dispose geo + leak material); rút khỏi siteShaders. Surface zone → dispose geometry như cũ.
-      const sp = m.userData.stonePath as StoneScatter | undefined
-      if (sp) {
-        const si = this.siteShaders.indexOf(sp)
-        if (si >= 0) this.siteShaders.splice(si, 1)
-        sp.dispose()
-        continue
-      }
+    // surface/cut = Mesh; path = Mesh (StoneScatter); paving/wall = GROUP (BrickPaving/CurvedBrickWall) →
+    // KHÔNG lọc instanceof Mesh (kẻo Group lọt → live-rebuild nhân-đôi lúc kéo slider terrain/zone).
+    const old = this.siteGroup.children.filter((o) => o.userData.groundLayerIdx !== undefined)
+    for (const o of old) {
+      this.siteGroup.remove(o)
+      if (this._disposeLayerField(o)) continue // 🪨🧱 path/paving/wall = dispose QUA field (geo+mat+siteShaders)
+      const m = o as THREE.Mesh // còn lại = surface/cut Mesh thường → dispose geometry như cũ
       const gi = this.siteGeos.indexOf(m.geometry)
       if (gi >= 0) this.siteGeos.splice(gi, 1)
       m.geometry.dispose()
@@ -3550,6 +3565,20 @@ export class ArchPlanLab extends BaseWorld {
     this._applyCutVisibility() // cut-patch mới = ẩn; hiện lại mảng của layer active
   }
 
+  // 🪨🧱 Object zone sở hữu field (StoneScatter path · BrickPaving sân · CurvedBrickWall tường) trong siteShaders
+  // → dispose QUA field.dispose (né double-dispose geo + leak material) + rút khỏi siteShaders. true = đã xử lý
+  // (caller bỏ qua dispose geometry); false = surface/cut Mesh thường.
+  private _disposeLayerField(o: THREE.Object3D): boolean {
+    const field = (o.userData.stonePath ?? o.userData.brickPaving ?? o.userData.curvedWall) as
+      | { dispose(): void; setTime?(s: number): void }
+      | undefined
+    if (!field) return false
+    const si = this.siteShaders.indexOf(field)
+    if (si >= 0) this.siteShaders.splice(si, 1)
+    field.dispose()
+    return true
+  }
+
   // Gỡ 1 material khỏi siteMats + dispose (cut-patch own material lúc live-rebuild zones).
   private _disposeSiteMat(mat: THREE.Material): void {
     const mi = this.siteMats.indexOf(mat)
@@ -3557,10 +3586,11 @@ export class ArchPlanLab extends BaseWorld {
     mat.dispose()
   }
 
-  // 🪨 Mesh zone (add/cut/path) mang userData.groundLayerIdx=idx trong siteGroup (nhất đầu khớp). null nếu chưa render.
-  private _layerMeshByIdx(idx: number): THREE.Mesh | null {
+  // 🪨🧱 Object zone (surface/cut Mesh · path Mesh · paving/wall Group) mang userData.groundLayerIdx=idx trong
+  // siteGroup (nhất đầu khớp). null nếu chưa render. KHÔNG lọc instanceof Mesh → rotate-live grab được Group paving/wall.
+  private _layerMeshByIdx(idx: number): THREE.Object3D | null {
     for (const o of this.siteGroup.children) {
-      if (o instanceof THREE.Mesh && o.userData.groundLayerIdx === idx) return o
+      if (o.userData.groundLayerIdx === idx) return o
     }
     return null
   }
