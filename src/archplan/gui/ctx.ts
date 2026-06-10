@@ -7,9 +7,8 @@
 import type GUI from 'lil-gui'
 import type * as THREE from 'three'
 import type { GrassBlades } from 'threejs-modules/components/GrassBlades'
-import type { RockCluster } from 'threejs-modules/components/RockCluster'
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
-import type { CoverageStats, RockConfig, SiteState, WaterConfig } from 'threejs-modules/site/state'
+import type { CoverageStats, SiteState, WaterConfig } from 'threejs-modules/site/state'
 
 import type { GridOpts, GroundType, SunOpts } from '../scene/scene'
 import type { BuildingState, ShapeInstance } from '../state/state'
@@ -51,12 +50,6 @@ export interface APGuiCtx {
   tuneWater(cfg: WaterConfig, apply: (w: WaterSurface) => void, persist: boolean): void
   // 💧 Chọn pool active (= tab instance đang mở) → 3D drag/handle nhắm hồ này. Gọi khi đổi tab Pl.
   setActiveWater(cfg: WaterConfig): void
-  // 🪨 Tinh chỉnh cụm đá LIVE (vị trí/màu) trên RockCluster của ĐÚNG instance cfg — KHÔNG dựng lại geometry.
-  // No-op nếu cụm đó chưa render (tắt). cfg = config tab instance đang chỉnh.
-  tuneRock(cfg: RockConfig, apply: (r: RockCluster) => void, persist: boolean): void
-  // 🪨 LIVE drag slider STRUCTURAL đá (count/craggy/footprint…): rebuild CHỈ rock meshes (throttle) — KHÔNG đụng
-  // water-RTT/cỏ/nền (= chỗ tụt fps). Buông → applySite(true) commit (bám gò + autosave).
-  applyRocksLive(): void
   // 🪨 XOAY path-zone LIVE: CHỈ set mesh.rotation.y (transform thuần — KHÔNG rebuild gì → né water-RTT = tụt fps).
   // flatIdx = index trong groundLayers (mesh.userData.groundLayerIdx). Buông slider → applySite(true) commit.
   tunePathRotLive(flatIdx: number, rotDeg: number): void
