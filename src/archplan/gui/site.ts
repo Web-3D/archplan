@@ -15,6 +15,7 @@ import type {
   FenceConfig,
   GroundLayer,
   GroundMaterialKey,
+  GroundMixParams,
   StonePathParams,
   TerrainConfig,
   TerrainMound,
@@ -27,8 +28,10 @@ import {
   defaultTerrain,
   GROUND_THICK_MAX,
   GROUND_THICK_MIN,
+  isGroundTexKey,
   makeFence,
   makeGroundLayer,
+  makeGroundMixParams,
   makeStonePathParams,
   makeWater,
 } from 'threejs-modules/site/state'
@@ -808,7 +811,107 @@ function buildPathZoneBody(
   )
 }
 
-// 🟫 Thân pane SURFACE-zone: vật liệu + form + Length/Width + Thickness/Drape/Terrain (buildAddZoneExtras).
+// 🎨 Danh mục texture cho MIX (chỉ key TEXTURE — màu phẳng soil/gravel không mix được).
+const MIX_TEX_OPTS = GROUND_OPTS.filter(([, k]) => isGroundTexKey(k))
+
+// 🎨 1 SLOT lớp mix: select texture + Ngưỡng + ✕. Đổi texture/xóa = structural (bake vào graph) → applySite ngay;
+// Ngưỡng commit khi BUÔNG (bias bake → recompile material, không kéo live).
+function mkMixSlotRow(
+  ctx: APGuiCtx,
+  mix: GroundMixParams,
+  i: number,
+  redraw: () => void
+): HTMLElement {
+  const slot = mix.slots[i]
+  const box = document.createElement('div')
+  box.className = 'ap-mix-layer'
+  const head = document.createElement('div')
+  head.className = 'ap-mix-row'
+  const sel = document.createElement('select')
+  sel.className = 'ap-mix-sel'
+  for (const [label, k] of MIX_TEX_OPTS) sel.appendChild(new Option(label, k))
+  sel.value = slot.key
+  sel.addEventListener('change', () => {
+    slot.key = sel.value as GroundMaterialKey
+    ctx.applySite(true) // _groundMixFor tự load lazy ĐÚNG key thiếu — không prefetch cả kho (lag dropdown)
+  })
+  const del = document.createElement('button')
+  del.className = 'ap-mix-x'
+  del.textContent = '✕'
+  del.title = 'Xóa lớp mix này'
+  del.addEventListener('click', () => {
+    mix.slots.splice(i, 1)
+    redraw()
+    ctx.applySite(true)
+  })
+  head.append(sel, del)
+  box.append(
+    head,
+    sliderRow(
+      'Ngưỡng',
+      0,
+      1,
+      0.05,
+      slot.bias,
+      (v, c) => {
+        slot.bias = v
+        if (c) ctx.applySite(true)
+      },
+      1
+    )
+  )
+  return box
+}
+
+// 🎨 BẢNG TRỘN MIX per-zone (PhotoGroundMix — port bộ nền Lab): Nền chính + ≤4 slot + slider chung.
+// Slider chung = uniform live nhưng áp qua applySite (commit khi buông — cùng nhịp layerSlider).
+function buildMixBoard(pane: HTMLElement, ctx: APGuiCtx, mix: GroundMixParams): void {
+  const list = document.createElement('div')
+  const addBtn = addInstanceButton('lớp mix', () => {
+    mix.slots.push({ key: 'construction-gravel', bias: 0.55, seed: 13.7 + mix.slots.length * 18 })
+    redraw()
+    ctx.applySite(true)
+  })
+  const redraw = (): void => {
+    list.replaceChildren(...mix.slots.map((_, i) => mkMixSlotRow(ctx, mix, i, redraw)))
+    addBtn.disabled = mix.slots.length >= 4
+  }
+  // KHÔNG prefetch cả kho khi mở select (9 bộ × 4 map 2K decode = đứng hình) — _groundMixFor load lazy đúng key
+  pane.appendChild(
+    selectRow('Nền chính', MIX_TEX_OPTS, mix.base, (v) => {
+      mix.base = v
+      ctx.applySite(true)
+    })
+  )
+  redraw()
+  pane.append(list, addBtn)
+  const us: [string, number, number, number, keyof GroundMixParams][] = [
+    ['Theo cao độ', 0, 0.8, 0.05, 'heightK'], // height-lerp proxy — 0 = fade đều
+    ['Mềm biên', 0.01, 0.5, 0.01, 'maskSoft'],
+    ['Scale mask', 0.05, 3, 0.05, 'maskScale'], // 1/m world
+    ['Macro', 0, 1, 0.05, 'macro'],
+    ['Loang úa', 0, 1, 0.05, 'tint'],
+    ['Trộn xa', 0, 1, 0.05, 'farOn'],
+  ]
+  for (const [label, min, mx, step, key] of us)
+    pane.appendChild(
+      sliderRow(
+        label,
+        min,
+        mx,
+        step,
+        mix[key] as number,
+        (v, c) => {
+          ;(mix[key] as number) = v
+          if (c) ctx.applySite(true)
+        },
+        1
+      )
+    )
+}
+
+// 🟫 Thân pane SURFACE-zone: MIX NỀN (toggle — bật = bảng trộn Lab thay texture đơn) | select texture đơn,
+// + form + Length/Width + Thickness/Drape/Terrain (buildAddZoneExtras).
 function buildSurfaceZoneBody(
   pane: HTMLElement,
   ctx: APGuiCtx,
@@ -816,18 +919,31 @@ function buildSurfaceZoneBody(
   flatIdx: number,
   rebuild: (focus?: number) => void
 ): void {
+  // 🎨 NgQuan 2026-06-10: "bê bộ nền Lab vào thay texture trong Z1" — mix off vẫn giữ đường texture đơn (nhẹ)
   pane.appendChild(
-    selectRow(
-      'Surface',
-      GROUND_OPTS,
-      layer.material,
-      (v) => {
-        layer.material = v
-        ctx.applySite(true)
-      },
-      () => ctx.prefetchGroundTextures?.()
-    )
+    toggleRow('Mix nền (Lab)', layer.mix !== undefined, (on) => {
+      layer.mix = on
+        ? (layer.mix ??
+          makeGroundMixParams(isGroundTexKey(layer.material) ? layer.material : 'grass-o'))
+        : undefined
+      rebuild(flatIdx)
+      ctx.applySite(true)
+    })
   )
+  if (layer.mix) buildMixBoard(pane, ctx, layer.mix)
+  else
+    pane.appendChild(
+      selectRow(
+        'Surface',
+        GROUND_OPTS,
+        layer.material,
+        (v) => {
+          layer.material = v
+          ctx.applySite(true)
+        },
+        () => ctx.prefetchGroundTextures?.()
+      )
+    )
   pane.appendChild(groundFormRow(ctx, layer)) // circle=đường kính, ellipse=trục X
   pane.appendChild(layerSlider(ctx, layer, 'length', 'Length m', 0.5, 40, 0.1, 1000))
   pane.appendChild(layerSlider(ctx, layer, 'width', 'Width m', 0.5, 40, 0.1, 1000))

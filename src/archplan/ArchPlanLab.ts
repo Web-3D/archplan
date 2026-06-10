@@ -146,6 +146,7 @@ import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
 import { AsphaltGround } from 'threejs-modules/shaders/ground/AsphaltGround'
 import { PhotoGround, type PhotoGroundMaps } from 'threejs-modules/shaders/ground/PhotoGround' // 🌱 ground texture (+ 🪵 slab walnut: sàn ngang)
+import { PhotoGroundMix } from 'threejs-modules/shaders/ground/PhotoGroundMix' // 🎨 mix nền per-zone (port bộ nền Lab — TSL)
 import {
   TexturedSurface,
   type TexturedSurfaceMaps,
@@ -170,6 +171,7 @@ import {
   defaultSiteState,
   type FenceConfig,
   GROUND_PRESETS,
+  type GroundLayer,
   type GroundMaterialKey,
   isGroundTexKey,
   renderPuddles,
@@ -546,6 +548,10 @@ export class ArchPlanLab extends BaseWorld {
   // 🌱 Material PhotoGround CACHE 1 lần MỖI KEY (sống lab-lifetime) → bơm ctx.groundMatByKey: nhiều ground
   // (base + layer) cùng key DÙNG CHUNG → KHÔNG recompile NodeMaterial mỗi rebuild. Lab sở hữu → dispose onDispose.
   private _groundMat: Partial<Record<GroundMaterialKey, PhotoGround>> = {}
+
+  // 🎨 PhotoGroundMix CACHE per-ZONE (key = chính object GroundLayer — sống qua rebuild vì site.ts sửa tại chỗ):
+  // sig = base+slots (texture/bias/seed bake vào graph) — đổi sig = dựng lại material; uniform khác apply mỗi build.
+  private readonly _zoneMix = new Map<GroundLayer, { gmix: PhotoGroundMix; sig: string }>()
   // 🪨 Texture đá RÀO/VIỀN hồ: maps + TexturedSurface (triplanar) CACHE 1 lần/key (lab-lifetime) → bơm
   // ctx.borderMatByKey. Lab sở hữu maps + surf → dispose onDispose. Load ASYNC khi hồ dùng borderMaterial≠none.
   private _borderTex: Partial<
@@ -2562,6 +2568,8 @@ export class ArchPlanLab extends BaseWorld {
       if (photo) byKey[key] = photo.getMaterial()
     }
     if (Object.keys(byKey).length > 0) opts.groundMatByKey = byKey
+    this._pruneZoneMix() // 🎨 dọn cache mix của zone đã xóa
+    opts.groundMixMat = (layer) => this._groundMixFor(layer) // 🎨 zone bật mix → material PhotoGroundMix
     // 🪨 Material đá RÀO/VIỀN hồ (TexturedSurface) theo borderMaterial dùng → inject; chưa load → kick-off async.
     const borderByKey: NonNullable<SiteRenderOpts['borderMatByKey']> = {}
     for (const key of this._usedBorderTexKeys()) {
@@ -2635,6 +2643,65 @@ export class ArchPlanLab extends BaseWorld {
   private _applyTerrainDetail(): void {
     const d = this.site.terrain?.detail ?? 0
     for (const photo of Object.values(this._groundMat)) photo?.setDetail(d)
+  }
+
+  // 🎨 Material MIX cho 1 zone (layer.mix bật): maps đủ (base + slots, đều phải key TEXTURE) → PhotoGroundMix
+  // cache theo object layer; thiếu maps → kick-off load + null (zone rơi texture đơn tạm, load xong re-render).
+  private _groundMixFor(layer: GroundLayer): THREE.Material | null {
+    const mix = layer.mix
+    if (!mix) return null
+    const keys = [mix.base, ...mix.slots.map((s) => s.key)]
+    const sets: PhotoGroundMaps[] = []
+    for (const k of keys) {
+      if (!isGroundTexKey(k)) return null // key màu phẳng (soil/gravel…) — mix chỉ nhận texture
+      const maps = this._groundTex[k]
+      if (!maps) {
+        this._ensureGroundTex(k) // load xong: _siteSig='' + re-render → lượt sau đủ maps
+        return null
+      }
+      sets.push(maps)
+    }
+    const sig = JSON.stringify([keys, mix.slots.map((s) => [s.bias, s.seed])]) // bake vào graph → đổi = dựng lại
+    let hit = this._zoneMix.get(layer)
+    if (!hit || hit.sig !== sig) {
+      hit?.gmix.dispose()
+      const gmix = new PhotoGroundMix({
+        base: sets[0],
+        slots: mix.slots.map((s, i) => ({ maps: sets[i + 1], bias: s.bias, seed: s.seed })),
+        tileSizeMeters: GROUND_TEX_SPEC[mix.base]?.tile ?? 2,
+      })
+      hit = { gmix, sig }
+      this._zoneMix.set(layer, hit)
+    }
+    this._applyMixUniforms(hit.gmix, mix)
+    return hit.gmix.getMaterial()
+  }
+
+  // Đẩy bộ uniform LIVE của mix vào material (mỗi lần build site — rẻ, không recompile).
+  private _applyMixUniforms(g: PhotoGroundMix, m: NonNullable<GroundLayer['mix']>): void {
+    g.set('maskScale', m.maskScale)
+    g.set('maskSoft', m.maskSoft)
+    g.set('heightK', m.heightK)
+    g.set('macro', m.macro)
+    g.set('tint', m.tint)
+    g.set('bomb', m.bomb)
+    g.set('rotFree', m.rotFree)
+    g.set('seed', m.seed)
+    g.set('scaleJit', m.scaleJit)
+    g.set('margin', m.margin)
+    g.set('farOn', m.farOn)
+    g.set('farRange', m.farRange)
+  }
+
+  // Dọn cache mix của zone đã XÓA (layer không còn trong groundLayers) — gọi mỗi lần gom opts.
+  private _pruneZoneMix(): void {
+    const live = this.site.groundLayers ?? []
+    for (const k of [...this._zoneMix.keys()]) {
+      if (!live.includes(k)) {
+        this._zoneMix.get(k)?.gmix.dispose()
+        this._zoneMix.delete(k)
+      }
+    }
   }
 
   // Tập key ground dùng TEXTURE (unique) = base ground + mọi TẦNG layer chồng (lọc isGroundTexKey).
@@ -2906,6 +2973,8 @@ export class ArchPlanLab extends BaseWorld {
       this._groundMat[k]?.dispose() // 🌱 PhotoGround material MỖI key (cache lab-lifetime; KHÔNG đụng maps)
     }
     this._groundMat = {}
+    for (const v of this._zoneMix.values()) v.gmix.dispose() // 🎨 mix per-zone
+    this._zoneMix.clear()
     for (const k of Object.keys(this._groundTex) as GroundMaterialKey[]) {
       disposeSurfaceTextureSet(this._groundTex[k] ?? null) // 🌱🏜️ ground texture-set MỖI key (lab sở hữu)
     }
