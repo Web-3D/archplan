@@ -130,6 +130,7 @@ import planksRoughnessUrl from 'assets/textures/wood/Wooden_Plank/production/rou
 import { computeLocalBbox } from 'building-kit/build' // footprint nhà (m²) cho bảng số liệu lô
 import type { GroundDrop } from 'building-kit/parts/Structure' // vùng nền tụt (lòng hồ) → cột chống đâm đáy
 import { renderBuildingState } from 'building-kit/render/fromState' // renderer chung lõi (Phase 1b)
+import { LEAF_MAX_RAD } from 'building-kit/wallAssembly' // 🚪 C2: góc mở max cánh — live xoay pivot
 import { makeSurfaceMaterial, WallMaterialCache } from 'building-kit/wallMaterials' // material engine
 import type GUI from 'lil-gui'
 import * as THREE from 'three'
@@ -1855,12 +1856,24 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
-  // Focus (3D→GUI) delegates — tách như _floorCtx giữ _makeGuiCtx ≤50 dòng.
-  private _focusCtx(): Pick<APGuiCtx, 'registerFocus' | 'registerFocusAction'> {
+  // Focus (3D→GUI) + tune cánh cửa delegates — tách như _floorCtx giữ _makeGuiCtx ≤50 dòng.
+  private _focusCtx(): Pick<APGuiCtx, 'registerFocus' | 'registerFocusAction' | 'tuneLeafLive'> {
     return {
       registerFocus: (k, f) => this.manipulate?.registerFocus(k, f),
       registerFocusAction: (k, fn) => this.manipulate?.registerFocusAction(k, fn),
+      tuneLeafLive: (k, p) => this._tuneLeafLive(k, p),
     }
+  }
+
+  // 🚪 C2: kéo slider Mở % → xoay pivot cánh TRỰC TIẾP (transform thuần, 0 rebuild/recompile — đúng
+  // PERFORMANCE.md). Pivot mang userData {leafKey, leafBase, leafSign} gắn lúc assembleLeaves; buông
+  // slider = ctx.build() commit persist (rebuild đặt lại đúng góc từ state).
+  private _tuneLeafLive(key: string, openPct: number): void {
+    const rad = (Math.min(100, Math.max(0, openPct)) / 100) * LEAF_MAX_RAD
+    this.buildingGroup.traverse((o) => {
+      if (o.userData.leafKey === key)
+        o.rotation.y = (o.userData.leafBase as number) + (o.userData.leafSign as number) * rad
+    })
   }
 
   // 🗄️ Drawer phải: shell bền (tạo 1 lần) — tay kéo [»/«] trượt ẩn/hiện; body = cột cuộn chứa mọi gui.

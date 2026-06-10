@@ -63,6 +63,11 @@ chứa nó qua `aria-controls`, cuộn vào tầm nhìn, flash `.ap-focus-flash`
 TRƯỚC khi tra anchor (đổi selection + `ctx.rebuild()` — anchor mới tự đăng ký trong rebuild nên
 focus vẫn mở + flash đúng folder). Anchor mẫu: `buildWallsCompact` (gui/sections.ts).
 
+**LIVE transform thuần (0 rebuild) cho element có "độ mở/góc xoay":** mesh/pivot gắn
+`userData {<key>, base, sign}` lúc assemble → slider onChange gọi `ctx.tune<X>Live(key, v)` → Lab
+traverse group set transform trực tiếp; onFinishChange = `ctx.build()` commit persist. Mẫu:
+`tunePathRotLive` (xoay path-zone) · `tuneLeafLive` (🚪 cánh cửa C2 — `assembleLeaves` + `_tuneLeafLive`).
+
 Nếu tab đại diện 1 element kéo/sơn được → làm thêm **P / 🎨 / 🤚** ở mục 1.
 
 ---

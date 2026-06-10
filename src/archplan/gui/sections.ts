@@ -274,6 +274,7 @@ function buildOneOpening(
   live(opF.add(op, 'x', 0, xMax, 10).name('X'), ctx)
   live(opF.add(op, 'yOffset', -3000, 6000, 10).name('Y'), ctx)
   addFrameRows(opF, op, ctx)
+  addLeafRows(opF, op, ctx, `${inst.id}:${segIdx}:${opIdx}`)
   opF
     .add(
       {
@@ -313,6 +314,36 @@ function addFrameRows(opF: GUI, op: OpeningState, ctx: APGuiCtx): void {
   live(opF.add(op, 'frameW', 30, 200, 5).name('Bản khung'), ctx)
   live(opF.add(op, 'frameOut', 0, 60, 5).name('Nhô'), ctx)
   opF.addColor(op, 'frameColor').name('Màu khung').onChange(ctx.build)
+}
+
+// C2 CÁNH GỖ — chỉ kind door/loading_door + lỗ CHỮ NHẬT. Slider "Mở %" = LIVE xoay pivot qua
+// ctx.tuneLeafLive (transform thuần 0 rebuild — pattern tunePathRotLive); buông = ctx.build() commit.
+function addLeafRows(opF: GUI, op: OpeningState, ctx: APGuiCtx, key: string): void {
+  if (op.round || op.kind === 'window') return
+  op.leafType ??= 'none'
+  opF
+    .add(op, 'leafType', { 'Không cánh': 'none', 'Cánh gỗ': 'wood' })
+    .name('Cánh')
+    .onChange((v: string) => {
+      if (v !== 'none') {
+        op.leafDouble ??= false
+        op.leafOpen ??= 0
+        op.leafColor ??= 0x7a5a3a
+      }
+      ctx.rebuild()
+      ctx.build()
+    })
+  if (op.leafType === 'none') return
+  op.leafDouble ??= false
+  op.leafOpen ??= 0
+  op.leafColor ??= 0x7a5a3a
+  opF.add(op, 'leafDouble').name('Đôi (French)').onChange(ctx.build)
+  opF
+    .add(op, 'leafOpen', 0, 100, 1)
+    .name('Mở %')
+    .onChange((v: number) => ctx.tuneLeafLive(key, v))
+    .onFinishChange(ctx.build)
+  opF.addColor(op, 'leafColor').name('Màu cánh').onChange(ctx.build)
 }
 
 export function rebuildOpeningSubfolders(
