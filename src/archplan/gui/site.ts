@@ -569,16 +569,18 @@ function buildGroundDomain(
   ensureCutGrayCss() // tô xám CHỈ tab "Khoét cut" + nội dung của nó (scoped) — G/Mảng add giữ nâu
   const reg: GReg = { tabs: [], mid: new Map(), inst: new Map() }
   let topTabs: Tabs | null = null
-  // Chọn tab add/cut (mid) + instance Z/C của layer (tách khỏi navTo giữ complexity ≤10).
+  // Chọn tab giữa (add=0 · path=1 · cut=2) + instance Z/P/C của layer (tách khỏi navTo giữ complexity ≤10).
   const selectMidInst = (
     layers: GroundLayer[],
     layer: GroundLayer,
     lv: number,
     op: 'add' | 'cut'
   ): void => {
-    reg.mid.get(lv)?.select(Number(op === 'cut'), { trusted: false }) // G2+ add/cut (cut=1, add=0)
-    const sibs = layers.filter((l) => (l.level ?? 1) === lv && (l.op ?? 'add') === op)
-    reg.inst.get(`${lv}:${op}`)?.select(Math.max(0, sibs.indexOf(layer)), { trusted: false })
+    const kind = layer.zoneKind ?? 'surface'
+    const part = zonePart(op, kind)
+    reg.mid.get(lv)?.select(op === 'cut' ? 2 : kind === 'path' ? 1 : 0, { trusted: false })
+    const sibs = layers.filter((l) => (l.level ?? 1) === lv && part.match(l))
+    reg.inst.get(`${lv}:${part.key}`)?.select(Math.max(0, sibs.indexOf(layer)), { trusted: false })
   }
   const navTo = (idx: number): void => {
     const layers = ctx.site.groundLayers ?? []
@@ -709,28 +711,8 @@ function buildAddZoneExtras(
   )
 }
 
-// 🪨 Bộ chọn LOẠI zone add: Surface (lớp vật liệu) | Path (rải đá StoneScatter trong rect zone). Đổi → init path
-// nếu cần + rebuild pane (hiện đúng controls) + applySite. Chỉ op='add'.
-const ZONE_KIND_OPTS: [string, 'surface' | 'path'][] = [
-  ['Surface (vật liệu)', 'surface'],
-  ['Path (rải đá)', 'path'],
-]
-function zoneKindRow(
-  ctx: APGuiCtx,
-  layer: GroundLayer,
-  flatIdx: number,
-  rebuild: (focus?: number) => void
-): HTMLElement {
-  return selectRow('Type', ZONE_KIND_OPTS, layer.zoneKind ?? 'surface', (v) => {
-    layer.zoneKind = v
-    if (v === 'path') {
-      layer.path ??= makeStonePathParams()
-      if (layer.shape !== 'circle') layer.shape = 'rect' // path chỉ rect|circle (ellipse/free → rect)
-    }
-    rebuild(flatIdx) // dựng lại pane → hiện controls đúng loại
-    ctx.applySite(true)
-  })
-}
+// (zoneKindRow/ZONE_KIND_OPTS đã GỠ — NgQuan 2026-06-10 "path và surface không để select trong zone nữa":
+// loại zone chốt LÚC TẠO theo tab giữa [Mảng add | Path đá | Khoét cut], pane hết dropdown Type.)
 
 // 🪨 Form khung path: Chữ nhật | Tròn (= ellipse nội tiếp). DÙNG CHUNG GroundLayer.shape (chỉ rect|circle cho path).
 const PATH_FORM_OPTS: [string, 'rect' | 'circle'][] = [
@@ -861,7 +843,7 @@ function buildZonePane(
 ): HTMLElement {
   const pane = document.createElement('div')
   if (op === 'add') {
-    pane.appendChild(zoneKindRow(ctx, layer, flatIdx, rebuild)) // 🪨 Type: Surface | Path
+    // loại zone CỐ ĐỊNH theo tab giữa (Mảng add = surface · Path đá = path) — hết dropdown Type
     if (layer.zoneKind === 'path') buildPathZoneBody(pane, ctx, layer, flatIdx)
     else buildSurfaceZoneBody(pane, ctx, layer, flatIdx, rebuild)
   } else {
@@ -892,37 +874,55 @@ function nextZoneOffset(layers: GroundLayer[], lv: number, op: 'add' | 'cut'): n
   return last ? last.offsetX + last.length / 2 + NEW_ZONE_SIZE / 2 + 500 : 0
 }
 
-// Tabs instance zone/cut của 1 (level, op): Z1|Z2|＋ (add) hoặc C1|C2|＋ (cut). flatIdx = vị trí trong
-// site.groundLayers (splice/groundLayerIdx). ＋ → push layer mới (offset né chồng) + focus nó. reg.inst[lv:op]=Tabs.
+// Phân hoạch instance theo tab giữa (NgQuan 2026-06-10 — Path RỜI zone): cut → C/`lv:cut` ·
+// add-surface → Z/`lv:add` · add-path → P/`lv:path`. match KHÔNG xét level (caller lọc level riêng).
+function zonePart(
+  op: 'add' | 'cut',
+  kind: 'surface' | 'path'
+): { pre: string; key: string; match: (l: GroundLayer) => boolean } {
+  if (op === 'cut') return { pre: 'C', key: 'cut', match: (l) => (l.op ?? 'add') === 'cut' }
+  return {
+    pre: kind === 'path' ? 'P' : 'Z',
+    key: kind === 'path' ? 'path' : 'add',
+    match: (l) => (l.op ?? 'add') === 'add' && (l.zoneKind ?? 'surface') === kind,
+  }
+}
+
+// Tabs instance 1 ngăn (level, op, kind): Z1|Z2|＋ (surface) · P1|＋ (path) · C1|＋ (cut). flatIdx = vị trí
+// trong site.groundLayers (splice/groundLayerIdx). ＋ → push layer mới ĐÚNG LOẠI (kind chốt lúc tạo — pane
+// hết dropdown Type) + focus nó. reg.inst[lv:key]=Tabs.
 function buildInstanceTabs(
   ctx: APGuiCtx,
   lv: number,
   op: 'add' | 'cut',
+  kind: 'surface' | 'path',
   rebuild: (focusLayer?: number) => void,
   reg: GReg
 ): HTMLElement {
+  const part = zonePart(op, kind)
   const host = document.createElement('div')
   const layers = ctx.site.groundLayers ?? []
   const items: TabItem[] = []
   const flatIdxs: number[] = [] // tab-index → flatIdx (site.groundLayers) cho onChange → setActiveGroundLayer
   layers.forEach((layer, idx) => {
-    if ((layer.level ?? 1) !== lv || (layer.op ?? 'add') !== op) return
+    if ((layer.level ?? 1) !== lv || !part.match(layer)) return
     const n = items.length + 1
     const pane = buildZonePane(ctx, layer, idx, op, rebuild)
     host.appendChild(pane)
-    items.push({ label: `${op === 'add' ? 'Z' : 'C'}${n}`, panel: pane, title: `${op} ${n}` })
+    items.push({ label: `${part.pre}${n}`, panel: pane, title: `${part.key} ${n}` })
     flatIdxs.push(idx)
   })
-  const addBtn = addInstanceButton(op === 'add' ? 'zone' : 'cut', () => {
-    layers.push(
-      makeGroundLayer({
-        level: lv,
-        op,
-        offsetX: nextZoneOffset(layers, lv, op),
-        length: NEW_ZONE_SIZE,
-        width: NEW_ZONE_SIZE,
-      })
-    )
+  const addBtn = addInstanceButton(part.key === 'add' ? 'zone' : part.key, () => {
+    const nl = makeGroundLayer({
+      level: lv,
+      op,
+      offsetX: nextZoneOffset(layers, lv, op),
+      length: NEW_ZONE_SIZE,
+      width: NEW_ZONE_SIZE,
+    })
+    if (op === 'add') nl.zoneKind = kind // loại chốt LÚC TẠO theo ngăn
+    if (op === 'add' && kind === 'path') nl.path = makeStonePathParams()
+    layers.push(nl)
     rebuild(layers.length - 1) // focus zone/cut MỚI (né nhảy về G0)
     ctx.applySite(true)
   })
@@ -937,12 +937,13 @@ function buildInstanceTabs(
     },
   })
   reg.tabs.push(tabs)
-  reg.inst.set(`${lv}:${op}`, tabs) // navigate → instance
+  reg.inst.set(`${lv}:${part.key}`, tabs) // navigate → instance (key: add | path | cut)
   return host
 }
 
-// Pane 1 G-level = [Mảng add | Khoét cut] (2 tab), mỗi tab = instance tabs zone/cut. MỌI level (kể cả G1) đều có
-// cut (cut khoét zones CÙNG level → G1 cut lộ G0 base). reg.mid[lv]=Tabs add/cut cho navigate.
+// Pane 1 G-level = [Mảng add | Path đá | Khoét cut] (3 tab — Path RỜI zone, NgQuan 2026-06-10), mỗi tab =
+// instance tabs riêng (Z/P/C). MỌI level (kể cả G1) đều có cut (cut khoét zones CÙNG level → G1 cut lộ G0).
+// reg.mid[lv]=Tabs giữa cho navigate (add=0 · path=1 · cut=2).
 function buildLevelPane(
   ctx: APGuiCtx,
   lv: number,
@@ -950,19 +951,21 @@ function buildLevelPane(
   reg: GReg
 ): HTMLElement {
   const host = document.createElement('div')
-  const addPane = buildInstanceTabs(ctx, lv, 'add', rebuild, reg)
-  const cutPane = buildInstanceTabs(ctx, lv, 'cut', rebuild, reg)
+  const addPane = buildInstanceTabs(ctx, lv, 'add', 'surface', rebuild, reg)
+  const pathPane = buildInstanceTabs(ctx, lv, 'add', 'path', rebuild, reg)
+  const cutPane = buildInstanceTabs(ctx, lv, 'cut', 'surface', rebuild, reg)
   cutPane.classList.add('ap-cut-pane') // tô xám nội dung tab Khoét (C-tabs + zone panes)
-  host.append(addPane, cutPane)
+  host.append(addPane, pathPane, cutPane)
   const items: TabItem[] = [
     { label: 'Mảng add', panel: addPane, title: 'Mảng phủ material' },
+    { label: 'Path đá', panel: pathPane, title: 'Đường đá rải StoneScatter' },
     { label: 'Khoét cut', panel: cutPane, title: 'Khoét lộ level dưới' },
   ]
   const tabs = new Tabs(host, items, { classes: GROUND_TAB_CLASSES, injectCss: false })
-  ;(tabs.getTablist().children[1] as HTMLElement | undefined)?.classList.add('ap-cut-tabbtn') // nút "Khoét cut" → xám
+  ;(tabs.getTablist().children[2] as HTMLElement | undefined)?.classList.add('ap-cut-tabbtn') // nút "Khoét cut" → xám
   reg.tabs.push(tabs)
-  reg.mid.set(lv, tabs) // navigate → tab add/cut
-  host.appendChild(removeGLevelRow(ctx, lv, rebuild)) // ✕ xoá CẢ G-level (dưới add/cut tabs)
+  reg.mid.set(lv, tabs) // navigate → tab giữa
+  host.appendChild(removeGLevelRow(ctx, lv, rebuild)) // ✕ xoá CẢ G-level (dưới hàng tab giữa)
   return host
 }
 
