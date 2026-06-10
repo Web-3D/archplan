@@ -11,8 +11,9 @@
  */
 
 import * as THREE from 'three'
+import { filletSpine } from 'threejs-modules/ops/bevel'
+import { arcLength } from 'threejs-modules/ops/resample'
 
-import { arcLength } from '../ops/resample'
 import {
   type LabeledPoint,
   MAX_CORNER_SEG,
@@ -53,6 +54,9 @@ export interface RoofLabParams {
   tileCapTex: string // TEXTURE mặt đĩa câu đầu ('none' = trơn) — select cắm dây sẵn, texture thả vào kho sau
   rafterW: number // XÀ GÓC: bề NGANG tiết diện (m) — cùng rafterH chỉnh diện tích dày/mỏng
   rafterH: number // XÀ GÓC: bề CAO tiết diện (m)
+  timberBevel: number // VÁT CẠNH gỗ (op #4 — × cạnh nhỏ tiết diện, 0..0.45): xà góc + thanh sống/khung hồi
+  scatterCount: number // CẢNH QUANH NHÀ (op #5 Scatter): tổng số đá + bụi cỏ rải quanh footprint. 0 = tắt
+  scatterSeed: number // SEED scatter — đổi số = đổi bố cục rải (cùng seed cùng bố cục, tái lập được)
 }
 
 // ⭐ MÁI CHUẨN — hình dáng GỐC (frustum chia tọa độ A–V) để bắt đầu mọi dạng mái. Mở Mái = state này.
@@ -83,6 +87,9 @@ export const DEFAULT_ROOF: RoofLabParams = {
   tileCapTex: 'none', // Mặt đĩa câu đầu trơn — chờ texture trang trí
   rafterW: 0.04, // Xà góc ngang 4cm (= BEAM_SIZE cũ)
   rafterH: 0.04, // Xà góc cao 4cm
+  timberBevel: 0.25, // Vát cạnh gỗ mặc định ¼ cạnh nhỏ — thấy ngay chất gỗ bo, kéo 0 về cạnh sắc cũ
+  scatterCount: 0, // Cảnh quanh nhà TẮT mặc định — kéo slider để rải (không đổi cảnh chuẩn)
+  scatterSeed: 7, // Seed mặc định
 }
 
 // 🔪 Lưỡi dao = mặt cắt. transform (nghiêng X/Y/Z + vị trí) định vị; hình do bladeSDF (editor) quyết.
@@ -632,9 +639,27 @@ export function slopeClipPlanes(v: LabeledPoint[]): THREE.Plane[][] {
   })
 }
 
-// KHUNG TAM GIÁC 2 MẶT HỒI peak (NgQuan 2026-06-10, theo ảnh mẫu chùa): mỗi bên 3 thanh — đáy E-G / F-H +
-// 2 thanh xiên lên đỉnh W / X — NỐI LIỀN hệ thanh sống hip (cùng profile sweep _buildRails; hip kết thúc tại
-// E F G H, khung hồi tiếp lên đỉnh → kết cấu liền mạch).
+// Polyline → hàm (t)=>điểm theo FRACTION CHIỀU DÀI (nội suy tuyến tính theo cộng dồn đoạn) — _buildRails
+// lấy mẫu t đều → điểm rơi đều theo mét, cung bo của filletSpine nhận đủ mẫu.
+function polyFn(pts: THREE.Vector3[]): (t: number) => THREE.Vector3 {
+  const cum = [0]
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i].distanceTo(pts[i - 1]))
+  const total = cum[cum.length - 1]
+  return (t: number): THREE.Vector3 => {
+    const s = Math.min(1, Math.max(0, t)) * total
+    let i = 1
+    while (i < cum.length - 1 && cum[i] < s) i++
+    const span = cum[i] - cum[i - 1]
+    const f = span > 1e-12 ? (s - cum[i - 1]) / span : 0
+    return new THREE.Vector3().lerpVectors(pts[i - 1], pts[i], f)
+  }
+}
+
+// KHUNG TAM GIÁC 2 MẶT HỒI peak (NgQuan 2026-06-10, theo ảnh mẫu chùa): mỗi bên = đáy E-G / F-H +
+// 1 SPINE LIỀN E→W→G / F→X→H GỐI BO tại đỉnh (op #4 filletSpine — NgQuan "mối nối dính mượt vào nhau":
+// 2 thanh xiên rời cắm xuyên nhau tại W/X để lại vết ghép + khe chữ V → gộp 1 thân sweep qua cung bo,
+// mối nối biến mất). Đầu thanh đỉnh WX cắm vào gối bo do KHỐI ĐẤU che (knots — roof-preview _buildKnots).
+// NỐI LIỀN hệ thanh sống hip (cùng profile sweep _buildRails; hip kết thúc E F G H, khung tiếp lên đỉnh).
 function peakFrameRails(v: LabeledPoint[], capHeight: number): ((t: number) => THREE.Vector3)[] {
   const e = cornerVec(v, 4)
   const f = cornerVec(v, 5)
@@ -647,7 +672,14 @@ function peakFrameRails(v: LabeledPoint[], capHeight: number): ((t: number) => T
     (a: THREE.Vector3, b: THREE.Vector3) =>
     (t: number): THREE.Vector3 =>
       new THREE.Vector3().lerpVectors(a, b, t)
-  return [seg(e, w), seg(g, w), seg(e, g), seg(f, x), seg(h, x), seg(f, h)]
+  // R gối = 30% chân xiên ngắn, trần 0.35m — peak lùn r tự co (filletSpine còn kẹp 0.49×cạnh lần nữa)
+  const r = Math.min(0.35, 0.3 * Math.min(e.distanceTo(w), g.distanceTo(w)))
+  return [
+    polyFn(filletSpine([e, w, g], r, 6)),
+    polyFn(filletSpine([f, x, h], r, 6)),
+    seg(e, g),
+    seg(f, h),
+  ]
 }
 
 // 2 MẶT NGHIÊNG peak dạng hàm (u,v) — bilinear EF→WX (trước) · GH→WX (sau): peak CŨNG lợp ngói (NgQuan 2026-06-10).
@@ -832,7 +864,8 @@ function buildRoofParamCol(
     buildSharedRows(params, regen),
     buildPeakRows(params, regen),
     buildApexRows(apex, updateApex),
-    buildCornerRows(params, regen)
+    buildCornerRows(params, regen),
+    buildSceneryRows(params, regen) // op #5 Scatter — đá + bụi cỏ quanh nhà
   )
   return col
 }
@@ -895,6 +928,29 @@ function buildRafterRows(params: RoofLabParams, regen: () => void): HTMLElement 
     }),
     sliderRow('Xà cao (m)', 0.02, 0.2, 0.005, params.rafterH, (v) => {
       params.rafterH = v
+      regen()
+    }),
+    // op #4 Bevel-at-generation: vát góc TIẾT DIỆN trước khi sweep — ăn cả xà góc + thanh sống/khung hồi
+    sliderRow('Vát cạnh (×cạnh)', 0, 0.45, 0.05, params.timberBevel, (v) => {
+      params.timberBevel = v
+      regen()
+    })
+  )
+  return box
+}
+
+// 🌿 CẢNH QUANH NHÀ (op #5 Scatter): rải đá + bụi cỏ lên vành đất quanh footprint — sample đều theo diện
+// tích (MeshSurfaceSampler) + minDist bớt dính chùm + mask né vùng dưới nhà. Seed đổi = đổi bố cục.
+function buildSceneryRows(params: RoofLabParams, regen: () => void): HTMLElement {
+  const box = document.createElement('div')
+  box.append(
+    mkColTitle('🌿 Cảnh quanh nhà'),
+    sliderRow('Cây đá (số)', 0, 400, 20, params.scatterCount, (v) => {
+      params.scatterCount = v
+      regen()
+    }),
+    sliderRow('Seed', 1, 99, 1, params.scatterSeed, (v) => {
+      params.scatterSeed = v
       regen()
     })
   )
@@ -1400,7 +1456,17 @@ function updateApexDecor(
   const hs = [apex.hA, apex.hB, apex.hC, apex.hD]
   const curl = p.tipCurl // cuộn mũi → marker/xà bám đúng đỉnh mái đã cuộn
   preview.setApex(verts, hs, curl) // 4 marker A'B'C'D' tại ĐỈNH ĐÃ CUỘN (chạm đỉnh mái)
-  preview.setCornerBeams(verts, hs, p.rafterSeg, p.rafterCurve, curl, p.rafterW, p.rafterH) // 4 xà: đốt+cong+tiết diện
+  // 4 xà: đốt + cong + tiết diện + VÁT CẠNH (op #4 — vát lúc sinh profile)
+  preview.setCornerBeams(
+    verts,
+    hs,
+    p.rafterSeg,
+    p.rafterCurve,
+    curl,
+    p.rafterW,
+    p.rafterH,
+    p.timberBevel
+  )
   preview.setEave(verts, hs, p.hipSeg, p.cornerCurve) // đường hiên cong nối A'B'C'D' (起翘) — đốt = đốt góc đao
   preview.setHipBeams(verts, hs, p.hipArea, p.hipLen, p.hipSeg, p.cornerCurve, p.hipMidT, p.hipMidY) // I1–I4 trượt + đè Y
   preview.setJMids(verts, hs, p.rafterCurve, curl) // J1–J4 = trung điểm xà góc (cong xà riêng, đỉnh cuộn)
@@ -1419,8 +1485,19 @@ function updateApexDecor(
       p.tileSize > 0 ? p.tileThick + 0.005 : 0 // có ngói → ép mái xuống dưới đáy ngói (dày + 5mm khe)
     )
   ) // MẶT mái CONG + solidify + cuộn mũi (bám I) + đè hip Y + ép dưới ngói
-  // Lớp NGÓI (op #3): 4 slope + 2 mặt nghiêng peak (mặt hồi = tường, không lợp). Thanh trụ sống: 4 hip + đỉnh WX
-  // (thay ngói bò — NgQuan 2026-06-10; nóc base khỏi cần: khung gỗ EFGH đã lấn mép che chân peak).
+  updateTileDecor(preview, verts, hs, p) // lớp ngói + thanh sống (op #3/#4) — tách giữ gate 50 dòng
+  // CẢNH QUANH NHÀ (op #5 Scatter): vành đất quanh footprint, né nhà + biên hiên vươn ~0.4m
+  preview.setScatter(p.width / 2 + 0.4, p.depth / 2 + 0.4, p.scatterCount, p.scatterSeed)
+}
+
+// Lớp NGÓI (op #3): 4 slope + 2 mặt nghiêng peak (mặt hồi = tường, không lợp). Thanh trụ sống: 4 hip + đỉnh WX
+// (thay ngói bò — NgQuan 2026-06-10; nóc base khỏi cần: khung gỗ EFGH đã lấn mép che chân peak).
+function updateTileDecor(
+  preview: RoofPreview,
+  verts: LabeledPoint[],
+  hs: number[],
+  p: RoofLabParams
+): void {
   const slopes = slopeSurfaces(verts, hs, p)
   const peaks = p.capHeight > 0.05 ? peakSurfaces(verts, p.capHeight) : [] // peak sụp → khỏi lợp/thanh WX
   const rails = slopes.map(
@@ -1428,9 +1505,12 @@ function updateApexDecor(
       (t: number): THREE.Vector3 =>
         s(0, t)
   ) // 4 sống hip (biên u=0, có cuộn mũi)
+  let knots: THREE.Vector3[] = []
   if (peaks.length > 0) {
-    rails.push((t: number): THREE.Vector3 => peaks[0](t, 1)) // + thanh đỉnh WX
+    const ridge = (t: number): THREE.Vector3 => peaks[0](t, 1) // thanh đỉnh WX
+    rails.push(ridge)
     rails.push(...peakFrameRails(verts, p.capHeight)) // + khung tam giác 2 mặt hồi (nối liền hệ hip)
+    knots = [ridge(0), ridge(1)] // W + X: KHỐI ĐẤU che ngã ba (đầu WX cắm vào gối bo filletSpine)
   }
   preview.setTiles([...slopes, ...peaks], p.tileSize, rails, {
     curve: p.tileCurve, // độ sâu lòng máng
@@ -1440,6 +1520,8 @@ function updateApexDecor(
     dgw: p.tileDgW, // tiết diện ngang ống dương (× viên âm)
     capTex: p.tileCapTex, // texture mặt đĩa câu đầu (chỗ cắm — 'none' = trơn)
     clips: [...slopeClipPlanes(verts), ...peaks.map(() => [])], // kéo cắt hip cho 4 slope; peak không cắt
+    bevel: p.timberBevel, // vát cạnh thanh sống/khung hồi (op #4 — chung slider với xà góc)
+    knots, // khối đấu gỗ tại W/X
   })
 }
 

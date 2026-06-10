@@ -11,15 +11,16 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-
+import { bevelProfile } from 'threejs-modules/ops/bevel'
 import {
   colsOnSurface,
   copyToPoints,
   rowsOnSurface,
   type SurfacePoint,
-} from '../ops/copy-to-points'
-import { arcLength, resampleCurve } from '../ops/resample'
-import { rectProfile, sweepInto } from '../ops/sweep'
+} from 'threejs-modules/ops/copy-to-points'
+import { arcLength, resampleCurve } from 'threejs-modules/ops/resample'
+import { scatterOnMesh } from 'threejs-modules/ops/scatter'
+import { rectProfile, sweepInto } from 'threejs-modules/ops/sweep'
 
 const INIT = 220 // px — cạnh khởi tạo trước khi ResizeObserver đo canvas thật
 export const NORMAL_LEN = 3 // m — chiều dài pháp tuyến dựng từ đỉnh đáy (= max cao điểm di động A'B'C'D')
@@ -178,6 +179,8 @@ interface TileOpts {
   dgw: number
   capTex: string
   clips: THREE.Plane[][]
+  bevel: number // VÁT CẠNH thanh sống (op #4 — × cạnh ngang tiết diện): 0 = cạnh sắc
+  knots: THREE.Vector3[] // KHỐI ĐẤU gỗ tại ngã ba thanh (W/X) — che đầu thanh cắm vào gối bo filletSpine
 }
 function tileOpts(o: Partial<TileOpts>): TileOpts {
   return {
@@ -188,6 +191,8 @@ function tileOpts(o: Partial<TileOpts>): TileOpts {
     dgw: o.dgw ?? 0.6, // tiết diện ngang ống dương (× viên âm)
     capTex: o.capTex ?? 'none', // texture mặt đĩa câu đầu — CHỖ CẮM: khi kho có texture, load map theo key tại đây
     clips: o.clips ?? [], // kéo cắt per-mặt (plane đứng dọc hip) — [] = mặt không cắt
+    bevel: o.bevel ?? 0, // vát cạnh thanh sống (op #4 bevel-at-generation)
+    knots: o.knots ?? [], // khối đấu tại ngã ba thanh — [] = không có
   }
 }
 
@@ -274,6 +279,11 @@ export class RoofPreview {
   private readonly tileClipMats: THREE.MeshStandardMaterial[] = [] // clone tileMat + clippingPlanes hip (theo regen)
   private tileRailMat: THREE.MeshStandardMaterial | null = null // gỗ — thanh trụ hộp dọc hip/WX (thay ngói bò)
   private tileEdgeMat: THREE.MeshStandardMaterial | null = null // diềm sóng mép dày dưới hiên (vàng lớp dày)
+  private scatterGroup: THREE.Group | null = null // CẢNH QUANH NHÀ (op #5 Scatter): đá + bụi cỏ instanced
+  private rockGeo: THREE.BufferGeometry | null = null // đá đơn vị (icosahedron R0.5 low-poly, flat shading)
+  private bushGeo: THREE.BufferGeometry | null = null // bụi cỏ đơn vị (chóp 6 cạnh, GỐC tại y=0)
+  private rockMat: THREE.MeshStandardMaterial | null = null
+  private bushMat: THREE.MeshStandardMaterial | null = null
   private readonly decor: THREE.Object3D[] = [] // trục + lưới + nhãn trục (tĩnh, dispose ở cuối)
   private hemi: THREE.HemisphereLight | null = null // đèn nền — settings đổi độ sáng
   private key: THREE.DirectionalLight | null = null // đèn chiếu chính — settings đổi độ sáng
@@ -1079,7 +1089,8 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     curve: number,
     tipCurl: number,
     w = BEAM_SIZE,
-    h = BEAM_SIZE
+    h = BEAM_SIZE,
+    bevel = 0 // VÁT CẠNH (op #4 — × cạnh nhỏ tiết diện): vát ngay lúc sinh profile, hết cạnh sắc giả
   ): void {
     if (this.isDisposed || !this.beamMesh || verts.length < 8) return
     const n = Math.max(1, Math.min(MAX_RAFTER_SEG, Math.round(seg)))
@@ -1087,7 +1098,8 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     const cz = this._baseCenterZ(verts)
     const pos: number[] = []
     const idx: number[] = []
-    const profile = rectProfile(w, h, true) // tiết diện NGANG×CAO theo 2 slider (NgQuan 2026-06-10); mép trên ôm spine
+    // tiết diện NGANG×CAO theo 2 slider (NgQuan 2026-06-10); mép trên ôm spine; bo 2 đoạn cung mỗi góc
+    const profile = bevelProfile(rectProfile(w, h, true), bevel * Math.min(w, h), 2)
     for (let c = 0; c < 4; c++) {
       const base = verts[c]
       const noc = verts[NOC_OF_BASE[c]]
@@ -1426,14 +1438,7 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     surfs: ((u: number, v: number) => THREE.Vector3)[],
     size: number,
     rails: ((t: number) => THREE.Vector3)[],
-    o: {
-      type: string
-      curve: number
-      thick: number
-      flat: number
-      dgw: number
-      clips: THREE.Plane[][]
-    }
+    o: TileOpts
   ): void {
     if (!this.tileMat) this._initTiles() // material 1 lần
     const geo = this._rebuildTileGeo(size, o.thick, o.type, o.dgw)
@@ -1452,7 +1457,8 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
         clipped: cp.length > 0,
       })
     }
-    if (rails.length > 0) group.add(this._buildRails(rails, size))
+    if (rails.length > 0) group.add(this._buildRails(rails, size, o.bevel))
+    for (const k of o.knots) group.add(this._buildKnot(k, size)) // khối đấu che ngã ba W/X
     this.scene.add(group)
     this.tileGroup = group
   }
@@ -1614,19 +1620,27 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
   // THANH TRỤ HỘP dọc sống (4 hip + đỉnh WX peak): tiết diện chữ nhật HẸP đứng, đáy ôm sống (chìm nhẹ — không hở
   // khe ở đoạn cong), sweep op #2 dọc đường — THAY ngói bò (NgQuan 2026-06-10: hip không lợp, để thanh trụ kiểu
   // khung gỗ, sau liền mạch lên peak; nóc base khỏi cần — khung EFGH đã lấn mép che). Bề ngang theo cỡ ngói.
-  private _buildRails(rails: ((t: number) => THREE.Vector3)[], size: number): THREE.Mesh {
+  private _buildRails(
+    rails: ((t: number) => THREE.Vector3)[],
+    size: number,
+    bevel = 0 // vát cạnh (op #4 — × bề ngang thanh)
+  ): THREE.Mesh {
     const w = Math.max(0.035, size * 0.3) // hẹp — ngói to thanh to theo, sàn 3.5cm
     const h = w * 2.2 // chữ nhật ĐỨNG (cao > ngang)
     const sink = 0.015
-    const profile = [
-      new THREE.Vector2(-w / 2, -sink),
-      new THREE.Vector2(w / 2, -sink),
-      new THREE.Vector2(w / 2, h - sink),
-      new THREE.Vector2(-w / 2, h - sink),
-    ]
+    const profile = bevelProfile(
+      [
+        new THREE.Vector2(-w / 2, -sink),
+        new THREE.Vector2(w / 2, -sink),
+        new THREE.Vector2(w / 2, h - sink),
+        new THREE.Vector2(-w / 2, h - sink),
+      ],
+      bevel * w,
+      2
+    )
     const pos: number[] = []
     const idx: number[] = []
-    const seg = 32
+    const seg = 48 // 32→48: spine khung hồi giờ LIỀN 2 chân (dài gấp đôi) + cung bo gối cần đủ mẫu
     for (const curve of rails) {
       if (curve(0).distanceTo(curve(1)) < 0.05) continue // đường suy biến (WX khi ridge≈0) → bỏ
       const spine: THREE.Vector3[] = []
@@ -1638,6 +1652,125 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     geo.setIndex(idx)
     geo.computeVertexNormals()
     return new THREE.Mesh(geo, this.tileRailMat as THREE.MeshStandardMaterial)
+  }
+
+  // KHỐI ĐẤU gỗ (con đấu 斗) tại ngã ba thanh W/X: frustum VUÔNG loe lên (CylinderGeometry 4 cạnh xoay 45°
+  // cho mặt song song trục) — che đầu thanh đỉnh WX cắm vào gối bo filletSpine + điểm khung/hip gặp nhau.
+  // Mộng gỗ thật nối bằng đấu sắc nét, không hàn mượt kiểu smin (NgQuan chốt 2026-06-10). Cỡ theo thanh sống.
+  private _buildKnot(at: THREE.Vector3, size: number): THREE.Mesh {
+    const w = Math.max(0.035, size * 0.3) // cùng bề ngang thanh sống (_buildRails)
+    const geo = new THREE.CylinderGeometry(
+      (3.2 * w) / Math.SQRT2, // cạnh trên 3.2w (radius = cạnh/√2 với 4 cạnh)
+      (2.2 * w) / Math.SQRT2, // cạnh dưới 2.2w — loe lên kiểu đấu
+      3 * w,
+      4,
+      1
+    )
+    geo.rotateY(Math.PI / 4)
+    geo.translate(at.x, at.y + 0.9 * w, at.z) // trùm dải thân thanh (profile 0..2.2w trên spine)
+    return new THREE.Mesh(geo, this.tileRailMat as THREE.MeshStandardMaterial)
+  }
+
+  // ===== CẢNH QUANH NHÀ — op #5 Scatter (ops/scatter.ts) =====
+  // Rải ĐÁ + BỤI CỎ lên vành đất quanh footprint: sample plane XZ (y=0 = mặt lưới), mask LOẠI vùng dưới nhà
+  // (|x|<hw & |z|<hd). count = tổng (35% đá / 65% cỏ); seed cố định → cùng bố cục mỗi regen (kéo slider khác
+  // không nhấp nháy). count ≤ 0 → dọn sạch. Tầng 2 dùng lại copyToPoints (#3) — scatter chỉ là generator mới.
+  setScatter(hw: number, hd: number, count: number, seed: number): void {
+    if (this.isDisposed) return
+    this._clearScatter()
+    if (count <= 0) return
+    if (!this.rockGeo) this._initScatter()
+    const ring = 3.5 // bề rộng vành rải quanh nhà (m)
+    const plane = new THREE.PlaneGeometry((hw + ring) * 2, (hd + ring) * 2).rotateX(-Math.PI / 2)
+    const mask = (p: THREE.Vector3): boolean => Math.abs(p.x) > hw || Math.abs(p.z) > hd
+    const group = new THREE.Group()
+    this._addRocks(group, plane, Math.round(count * 0.35), seed, mask)
+    this._addBushes(group, plane, Math.round(count * 0.65), seed * 7 + 3, mask)
+    plane.dispose() // chỉ để sample — không vào scene
+    this.scene.add(group)
+    this.scatterGroup = group
+  }
+
+  // ĐÁ: cỡ ngang random (p.u 6–24cm) + đè dẹt random (p.v), lift theo cỡ → chôn chân tự nhiên (mỗi hòn lún khác).
+  private _addRocks(
+    group: THREE.Group,
+    plane: THREE.BufferGeometry,
+    n: number,
+    seed: number,
+    mask: (p: THREE.Vector3) => boolean
+  ): void {
+    const pts = scatterOnMesh(plane, n, { seed, minDist: 0.3, mask })
+    const sv = new THREE.Vector3()
+    group.add(
+      copyToPoints(
+        this.rockGeo as THREE.BufferGeometry,
+        this.rockMat as THREE.MeshStandardMaterial,
+        pts,
+        {
+          scale: (p) => {
+            const s = 0.06 + 0.18 * p.u
+            return sv.set(s, s * (0.5 + 0.4 * p.v), s)
+          },
+          lift: (p) => (0.06 + 0.18 * p.u) * 0.18, // tâm đá nổi ~⅔ trên mặt đất
+        }
+      )
+    )
+  }
+
+  // BỤI CỎ: chóp gốc y=0 — bề ngang (p.u) và chiều cao (p.v) random riêng; yaw random sẵn trong tanU scatter.
+  private _addBushes(
+    group: THREE.Group,
+    plane: THREE.BufferGeometry,
+    n: number,
+    seed: number,
+    mask: (p: THREE.Vector3) => boolean
+  ): void {
+    const pts = scatterOnMesh(plane, n, { seed, minDist: 0.45, mask })
+    const sv = new THREE.Vector3()
+    group.add(
+      copyToPoints(
+        this.bushGeo as THREE.BufferGeometry,
+        this.bushMat as THREE.MeshStandardMaterial,
+        pts,
+        { scale: (p) => sv.set(0.1 + 0.16 * p.u, 0.15 + 0.3 * p.v, 0.1 + 0.16 * p.u) }
+      )
+    )
+  }
+
+  // Geo/mat đơn vị cảnh — dựng 1 LẦN (instance scale lo biến thể, không dựng lại theo regen).
+  private _initScatter(): void {
+    this.rockGeo = new THREE.IcosahedronGeometry(0.5, 0)
+    this.bushGeo = new THREE.ConeGeometry(0.5, 1, 6)
+    this.bushGeo.translate(0, 0.5, 0) // gốc chóp tại y=0 — đặt lên mặt đất không cần lift
+    this.rockMat = new THREE.MeshStandardMaterial({
+      color: 0x9aa0a3,
+      roughness: 0.95,
+      flatShading: true, // lộ mặt phẳng low-poly — đá stylized
+    })
+    this.bushMat = new THREE.MeshStandardMaterial({
+      color: 0x6c9a52,
+      roughness: 0.9,
+      flatShading: true,
+    })
+  }
+
+  // Gỡ cảnh khỏi scene + giải phóng buffer instance (geo/mat đơn vị GIỮ — dùng chung giữa các regen).
+  private _clearScatter(): void {
+    if (!this.scatterGroup) return
+    this.scene.remove(this.scatterGroup)
+    for (const c of this.scatterGroup.children) {
+      if (c instanceof THREE.InstancedMesh) c.dispose()
+    }
+    this.scatterGroup = null
+  }
+
+  // Dọn TOÀN BỘ tài nguyên cảnh — chỉ gọi từ dispose().
+  private _disposeScatter(): void {
+    this._clearScatter()
+    this.rockGeo?.dispose()
+    this.bushGeo?.dispose()
+    this.rockMat?.dispose()
+    this.bushMat?.dispose()
   }
 
   // Khớp buffer render với kích thước HIỂN THỊ canvas (rộng×cao theo CSS) + aspect. Bỏ qua khi ẩn (client = 0).
@@ -1730,6 +1863,7 @@ float bladeSDF(vec3 p){ ${this.sdfBody} }`
     }
     this._disposeApex()
     this._disposeTiles() // buffer instance + geo/mat ngói
+    this._disposeScatter() // cảnh quanh nhà (op #5)
     if (this.mesh) this.mesh.geometry.dispose()
     this.mat.dispose()
     this.underMat?.dispose()
