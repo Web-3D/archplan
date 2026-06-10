@@ -72,6 +72,7 @@ const GROUND_OPTS: [string, GroundMaterialKey][] = [
 ]
 
 import type { APGuiCtx, MixPaintTarget } from './ctx'
+import { confirmPopup } from './roof-lab' // ↺ reset nét cọ mix — tái dùng popup confirm (ap-roof-confirm)
 import { buildGrassTweak } from './tweak' // 🌿 slider chi tiết cỏ — DỜI vào Garden ▸ Grass (preview ở lại tab Lab)
 
 // onChange(value, commit): commit=false khi kéo (live), true khi buông/đổi select/tick.
@@ -205,22 +206,8 @@ function colorRow(
   return row
 }
 
-// Bảng số liệu đối chiếu — refresh đọc ctx.siteStats() (cập nhật cả khi build nhà đổi footprint).
-function readout(ctx: APGuiCtx): { el: HTMLElement; refresh: () => void } {
-  const el = document.createElement('div')
-  el.className = 'ap-site-readout'
-  const refresh = (): void => {
-    const s = ctx.siteStats()
-    const warn = s.coveragePct > 60 ? ' ⚠️' : '' // >60% = phủ quá chuẩn Nhật (sân quá nhỏ)
-    el.innerHTML =
-      `<div><span>Lot</span><b>${s.lotArea.toFixed(1)} m²</b></div>` +
-      `<div><span>House</span><b>${s.footprintArea.toFixed(1)} m²</b></div>` +
-      `<div><span>Coverage</span><b>${s.coveragePct.toFixed(0)}%${warn}</b></div>` +
-      `<div><span>Garden</span><b>${s.gardenArea.toFixed(1)} m²</b></div>`
-  }
-  refresh()
-  return { el, refresh }
-}
+// (readout Lot/House/Coverage/Garden ĐÃ GỠ — NgQuan 2026-06-11. ctx.siteStats/registerSiteReadout giữ trong
+// interface + Lab plumbing optional-chain — vô hại, không gọi nữa.)
 
 // 🎨 Section surface G0: toggle "Mix nền (Lab)" — bật = bảng trộn PhotoGroundMix (target 'base',
 // site.groundMix); tắt = select texture đơn site.ground như cũ. Tự re-render khi toggle (swap select↔board).
@@ -305,6 +292,7 @@ function buildTerrainControls(
   showDetail: boolean
 ): void {
   const hdr = document.createElement('div')
+  hdr.className = 'ap-terrain-hdr' // divider tách khu mix nền ↔ khu terrain gò (ensureMixCss border-top)
   hdr.textContent = '🏔️ Terrain (gò sân vườn)'
   hdr.style.cssText = 'margin:7px 0 3px;font-weight:600;opacity:.85'
   body.append(
@@ -543,6 +531,40 @@ function ensureCutGrayCss(): void {
   document.head.appendChild(s)
 }
 
+// 🎨 CSS bảng trộn MIX trong hệ Ground (NgQuan 2026-06-11 "select gọn lại, bỏ button cọ/✕, tách khối").
+// Pattern = inject <style> id-guard scoped .ap-ground-domain (như ensureCutGrayCss) — KHÔNG sửa archplan-lab.css
+// (Factory-owned). Palette nâu --gr-* cascade từ .ap-scan-panel.ap-site-panel. Gồm: select gọn · block slot tách
+// slider · slot active (viền trái accent) · nút ↺ vuông · khu tab Z (instance add) TỐI hơn 1 nấc · divider terrain.
+function ensureMixCss(): void {
+  if (document.getElementById('ap-mix-css')) return
+  const s = document.createElement('style')
+  s.id = 'ap-mix-css'
+  const D = '.ap-ground-domain '
+  s.textContent =
+    `${D}.ap-mix-row{display:flex;align-items:center;gap:5px;margin:0}` +
+    `${D}.ap-mix-tag{flex:0 0 auto;width:15px;height:15px;display:flex;align-items:center;justify-content:center;` +
+    `font-size:8px;border-radius:3px;background:var(--gr-bg-1);border:1px solid var(--gr-bg-4);color:var(--gr-bg-5);cursor:pointer}` +
+    `${D}.ap-mix-sel{flex:1;min-width:0;padding:1px 3px;border:1px solid var(--gr-bg-4);border-radius:3px;` +
+    `background:var(--gr-bg-2);color:var(--gr-text);font:9px ui-monospace,'Cascadia Mono',monospace;cursor:pointer}` +
+    // khu slot = block tách bạch với 6 slider chung bên dưới (viền + nền nhẹ + bo)
+    `${D}.ap-mix-slots{margin:4px 0 6px;padding:4px;border:1px solid var(--gr-bg-3);border-radius:4px;background:rgba(62,47,28,.35)}` +
+    `${D}.ap-mix-layer{margin:3px 0;padding:3px 4px;border-left:2px solid transparent;border-radius:2px;cursor:pointer}` +
+    `${D}.ap-mix-layer.ap-mix-active{border-left-color:var(--gr-accent);background:rgba(181,138,60,.16)}` +
+    // hàng cọ + nút 🖌 chung + ↺ reset (vuông, đẩy cuối hàng Tẩy)
+    `${D}.ap-mix-brushrow{margin:2px 0 4px}` +
+    `${D}.ap-mix-brushtoggle{width:100%;padding:2px 0;font-size:9px;border:1px solid var(--gr-bg-4);` +
+    `border-radius:3px;background:var(--gr-bg-2);color:var(--gr-text);cursor:pointer}` +
+    `${D}.ap-mix-reset{flex:0 0 auto;margin-left:auto;width:18px;height:16px;padding:0;font-size:11px;line-height:1;` +
+    `border:1px solid var(--gr-bg-4);border-radius:3px;background:var(--gr-bg-2);color:var(--gr-text);cursor:pointer}` +
+    // divider tách khu mix nền ↔ khu terrain gò sân vườn (margin-top do inline style hdr lo)
+    `${D}.ap-terrain-hdr{border-top:1px solid var(--gr-bg-3);padding-top:6px}` +
+    // 🎨 khu tab Z (instance add: Z/P/B/W) TỐI hơn 1 nấc — lồng cấp như Garden (cut giữ xám riêng)
+    `${D}.ap-zone-itabs>.ap-fence-itabs>.ap-tab-btn{background:rgba(62,47,28,.55);border-color:rgba(181,138,60,.3);color:#c9a877}` +
+    `${D}.ap-zone-itabs>.ap-fence-itabs>.ap-tab-btn.ap-tab-active{background:var(--gr-bg-2);border-color:rgba(181,138,60,.55);border-bottom-color:transparent;color:var(--gr-text)}` +
+    `${D}.ap-zone-itabs>.ap-fence-isub{background:var(--gr-bg-2)}`
+  document.head.appendChild(s)
+}
+
 // Registry Tabs hệ Ground: tabs[] (dispose) + mid (level→Tabs add/cut) + inst (`lv:op`→Tabs Z/C) cho navigate
 // (code1 Focus: click 3D → chọn ĐÚNG G-level + add/cut + Z/C). Clear toàn bộ mỗi rebuild.
 interface GReg {
@@ -600,6 +622,7 @@ function buildGroundDomain(
   const host = document.createElement('div')
   host.classList.add('ap-ground-domain')
   ensureCutGrayCss() // tô xám CHỈ tab "Khoét cut" + nội dung của nó (scoped) — G/Mảng add giữ nâu
+  ensureMixCss() // 🎨 bảng trộn mix gọn (select/slot/cọ/↺) + khu tab Z tối 1 nấc (scoped .ap-ground-domain)
   const reg: GReg = { tabs: [], mid: new Map(), inst: new Map() }
   let topTabs: Tabs | null = null
   // Chọn tab giữa (add=0 · path=1 · paving=2 · wall=3 · cut=4) + instance Z/P/B/W/C của layer (tách khỏi navTo).
@@ -727,12 +750,7 @@ function buildAddZoneExtras(
   rebuild: (focus?: number) => void
 ): void {
   pane.appendChild(layerSlider(ctx, layer, 'thickness', 'Thickness cm', 1, 10, 0.5, 10))
-  pane.appendChild(
-    toggleRow('Drape (bám gò)', layer.drape ?? false, (on) => {
-      layer.drape = on
-      ctx.applySite(true)
-    })
-  )
+  // (Drape bám gò ĐÃ DỜI lên hàng đôi cạnh "Mix nền" — buildSurfaceZoneBody, NgQuan 2026-06-11)
   layer.terrain ??= defaultTerrain() // 🏔️ gò riêng zone (đảm bảo field)
   // live = applyTerrainLive (rebuild zone-only geo cell-drop, né water-RTT = tụt fps); buông = applySite clip sạch.
   buildTerrainControls(
@@ -1021,84 +1039,98 @@ function buildWallZoneBody(
 // 🎨 Danh mục texture cho MIX (chỉ key TEXTURE — màu phẳng soil/gravel không mix được).
 const MIX_TEX_OPTS = GROUND_OPTS.filter(([, k]) => isGroundTexKey(k))
 
-// 🖌 Nút cọ 1 slot: bật = ArchPlanLab vào mode vẽ mask slot này (orbit khóa, kéo chuột trên zone/nền 3D);
-// bấm lại = thoát; bấm slot khác = chuyển. Highlight qua redraw (getMixPaint là source of truth).
-// target = zone GroundLayer hoặc 'base' (nền lô G0).
-function mkMixBrushBtn(
+const DEL_SLOT = '__del' // option sentinel: chọn = xóa lớp (gộp nút ✕ cũ vào dropdown cho hàng gọn)
+
+// 🎨 select đổi key slot HOẶC xóa lớp (option sentinel '__del' — gộp nút ✕ cũ vào dropdown để hàng gọn).
+function onSlotSel(
   ctx: APGuiCtx,
-  target: MixPaintTarget,
+  mix: GroundMixParams,
   i: number,
+  sel: HTMLSelectElement,
   redraw: () => void
-): HTMLButtonElement {
-  const b = document.createElement('button')
-  b.className = 'ap-mix-x'
-  b.textContent = '🖌'
-  b.title = 'Vẽ mask lớp này lên mặt 3D (kéo chuột — orbit tạm khóa)'
-  const cur = ctx.getMixPaint?.()
-  if (cur?.target === target && cur.slot === i) b.classList.add('ap-mix-brush-on')
-  b.addEventListener('click', () => {
-    const c = ctx.getMixPaint?.()
-    const on = c?.target === target && c.slot === i
-    ctx.setMixPaint?.(on ? null : target, i)
+): void {
+  if (sel.value === DEL_SLOT) {
+    mix.slots.splice(i, 1)
     redraw()
-  })
-  return b
+    ctx.applySite(true)
+    return
+  }
+  mix.slots[i].key = sel.value as GroundMaterialKey
+  ctx.applySite(true) // _groundMixFor tự load lazy ĐÚNG key thiếu — không prefetch cả kho (lag dropdown)
 }
 
-// 🎨 1 SLOT lớp mix: select texture + 🖌 + ✕ + Ngưỡng. Đổi texture/xóa = structural (bake vào graph) →
-// applySite ngay; Ngưỡng = uniform LIVE (stage 3 — kéo mượt, buông mới commit autosave).
+// 🎨 1 SLOT lớp mix (NgQuan 2026-06-11 "bỏ button cọ + ✕"): tag số (click → chọn slot vẽ) + select texture
+// (kèm option ✕ Xóa lớp) + Ngưỡng. KHÔNG còn 🖌/✕ riêng. active=slot đang chọn (viền trái accent). Click cả
+// box = chọn slot (vẽ qua 🖌 chung hàng cọ); click select/slider stopPropagation (không nhảy chọn lại).
 function mkMixSlotRow(
   ctx: APGuiCtx,
   target: MixPaintTarget,
   mix: GroundMixParams,
   i: number,
-  redraw: () => void
+  active: boolean,
+  cb: { redraw: () => void; onPick: () => void }
 ): HTMLElement {
   const slot = mix.slots[i]
   const box = document.createElement('div')
-  box.className = 'ap-mix-layer'
+  box.className = active ? 'ap-mix-layer ap-mix-active' : 'ap-mix-layer'
+  box.addEventListener('click', cb.onPick)
   const head = document.createElement('div')
   head.className = 'ap-mix-row'
+  const tag = document.createElement('span')
+  tag.className = 'ap-mix-tag'
+  tag.textContent = String(i + 1)
+  tag.title = 'Chọn lớp này để vẽ mask (🖌 ở dưới)'
+  const paint = ctx.getMixPaint?.()
+  if (paint?.target === target && paint.slot === i) tag.classList.add('ap-mix-brush-on')
   const sel = document.createElement('select')
   sel.className = 'ap-mix-sel'
   for (const [label, k] of MIX_TEX_OPTS) sel.appendChild(new Option(label, k))
+  sel.appendChild(new Option('✕ Xóa lớp', DEL_SLOT))
   sel.value = slot.key
-  sel.addEventListener('change', () => {
-    slot.key = sel.value as GroundMaterialKey
-    ctx.applySite(true) // _groundMixFor tự load lazy ĐÚNG key thiếu — không prefetch cả kho (lag dropdown)
-  })
-  const del = document.createElement('button')
-  del.className = 'ap-mix-x'
-  del.textContent = '✕'
-  del.title = 'Xóa lớp mix này'
-  del.addEventListener('click', () => {
-    mix.slots.splice(i, 1)
-    redraw()
-    ctx.applySite(true)
-  })
-  head.append(sel, mkMixBrushBtn(ctx, target, i, redraw), del)
-  box.append(
-    head,
-    sliderRow(
-      'Ngưỡng',
-      0,
-      1,
-      0.05,
-      slot.bias,
-      (v, c) => {
-        slot.bias = v
-        ctx.tuneMixLive?.(target) // 🖌 stage 3: bias = uniform → kéo LIVE không recompile
-        if (c) ctx.applySite(true)
-      },
-      1
-    )
+  sel.addEventListener('click', (e) => e.stopPropagation())
+  sel.addEventListener('change', () => onSlotSel(ctx, mix, i, sel, cb.redraw))
+  head.append(tag, sel)
+  const sl = sliderRow(
+    'Ngưỡng',
+    0,
+    1,
+    0.05,
+    slot.bias,
+    (v, c) => {
+      slot.bias = v
+      ctx.tuneMixLive?.(target) // 🖌 stage 3: bias = uniform → kéo LIVE không recompile
+      if (c) ctx.applySite(true)
+    },
+    1
   )
+  sl.addEventListener('click', (e) => e.stopPropagation())
+  box.append(head, sl)
   return box
 }
 
-// 🖌 Hàng cọ chung của board (áp cho slot đang bật 🖌): Cỡ cọ (m world) + Tẩy + Xóa nét slot đang vẽ.
-function mkMixBrushRows(ctx: APGuiCtx, target: MixPaintTarget): HTMLElement[] {
+// 🖌 Hàng cọ chung: nút 🖌 BẬT/TẮT vẽ (lớp đang chọn) + Cỡ cọ + (Tẩy ‖ ↺ reset confirm cùng hàng). Trả
+// { rows, sync } — sync = cập nhật on-state nút 🖌 khi mode tắt từ ngoài (Move/Pick) hoặc redraw slot list.
+function mkMixBrushRows(
+  ctx: APGuiCtx,
+  target: MixPaintTarget,
+  getSlot: () => number
+): { rows: HTMLElement[]; sync: () => void } {
   const br = ctx.getMixBrush?.() ?? { size: 0.6, erase: false } // mở lại board hiện đúng số đang dùng
+  const brushRow = document.createElement('div')
+  brushRow.className = 'ap-mix-brushrow'
+  const brush = document.createElement('button')
+  brush.className = 'ap-mix-brushtoggle'
+  brush.textContent = '🖌 Vẽ lớp đang chọn'
+  brush.title = 'Bật/tắt vẽ mask cho lớp đang chọn (kéo chuột trên mặt 3D — orbit tạm khóa)'
+  const sync = (): void => {
+    brush.classList.toggle('ap-mix-brush-on', ctx.getMixPaint?.()?.target === target)
+  }
+  brush.addEventListener('click', () => {
+    const on = ctx.getMixPaint?.()?.target === target
+    ctx.setMixPaint?.(on ? null : target, getSlot())
+    sync()
+  })
+  brushRow.appendChild(brush)
   const size = sliderRow(
     'Cỡ cọ m',
     0.1,
@@ -1115,46 +1147,20 @@ function mkMixBrushRows(ctx: APGuiCtx, target: MixPaintTarget): HTMLElement[] {
     br.erase = on
     ctx.setMixBrush?.(br.size, br.erase)
   })
-  const clr = document.createElement('button')
-  clr.className = 'ap-mix-add'
-  clr.textContent = 'Xóa nét slot đang vẽ'
-  clr.title = 'Xóa toàn bộ nét cọ của slot đang bật 🖌 (mask fbm giữ nguyên)'
-  clr.addEventListener('click', () => {
-    const c = ctx.getMixPaint?.()
-    if (c && c.target === target) ctx.clearMixPaint?.(target, c.slot)
-  })
-  return [size, erase, clr]
+  const reset = document.createElement('button')
+  reset.className = 'ap-mix-reset'
+  reset.textContent = '↺'
+  reset.title = 'Xóa toàn bộ nét cọ của lớp đang chọn (mask fbm giữ nguyên)'
+  reset.addEventListener('click', () =>
+    confirmPopup(reset, 'Xóa nét cọ lớp đang chọn?', () => ctx.clearMixPaint?.(target, getSlot()))
+  )
+  erase.appendChild(reset) // ↺ ngang hàng ô Tẩy (margin-left:auto đẩy cuối)
+  return { rows: [brushRow, size, erase], sync }
 }
 
-// 🎨 BẢNG TRỘN MIX per-target (PhotoGroundMix — port bộ nền Lab; target = zone Z1+ HOẶC 'base' nền lô G0):
-// Nền chính + ≤4 slot (🖌 vẽ mask) + hàng cọ + slider chung. Stage 3: mọi slider = uniform LIVE
-// (tuneMixLive — kéo mượt), buông mới applySite commit.
-function buildMixBoard(
-  pane: HTMLElement,
-  ctx: APGuiCtx,
-  target: MixPaintTarget,
-  mix: GroundMixParams
-): void {
-  const list = document.createElement('div')
-  const addBtn = addInstanceButton('lớp mix', () => {
-    mix.slots.push({ key: 'construction-gravel', bias: 0.55, seed: 13.7 + mix.slots.length * 18 })
-    redraw()
-    ctx.applySite(true)
-  })
-  const redraw = (): void => {
-    list.replaceChildren(...mix.slots.map((_, i) => mkMixSlotRow(ctx, target, mix, i, redraw)))
-    addBtn.disabled = mix.slots.length >= 4
-  }
-  ctx.registerMixPaintSync?.(redraw) // 🖌 mode vẽ bị tắt từ ngoài (Move/Pick bật) → bỏ highlight nút cọ
-  // KHÔNG prefetch cả kho khi mở select (9 bộ × 4 map 2K decode = đứng hình) — _groundMixFor load lazy đúng key
-  pane.appendChild(
-    selectRow('Nền chính', MIX_TEX_OPTS, mix.base, (v) => {
-      mix.base = v
-      ctx.applySite(true)
-    })
-  )
-  redraw()
-  pane.append(list, addBtn, ...mkMixBrushRows(ctx, target))
+// 6 slider chung của board (height-lerp/biên/scale/macro/úa/xa) — uniform LIVE (tuneMixLive). Tách hàm giữ
+// buildMixBoard gọn (rule-50). Mỗi slider kéo = live, buông = applySite commit autosave.
+function mkMixSliders(ctx: APGuiCtx, target: MixPaintTarget, mix: GroundMixParams): HTMLElement[] {
   const us: [string, number, number, number, keyof GroundMixParams][] = [
     ['Theo cao độ', 0, 0.8, 0.05, 'heightK'], // height-lerp proxy — 0 = fade đều
     ['Mềm biên', 0.01, 0.5, 0.01, 'maskSoft'],
@@ -1163,22 +1169,68 @@ function buildMixBoard(
     ['Loang úa', 0, 1, 0.05, 'tint'],
     ['Trộn xa', 0, 1, 0.05, 'farOn'],
   ]
-  for (const [label, min, mx, step, key] of us)
-    pane.appendChild(
-      sliderRow(
-        label,
-        min,
-        mx,
-        step,
-        mix[key] as number,
-        (v, c) => {
-          ;(mix[key] as number) = v
-          ctx.tuneMixLive?.(target) // 🖌 stage 3: uniform live — kéo mượt không rebuild
-          if (c) ctx.applySite(true)
-        },
-        1
+  return us.map(([label, min, mx, step, key]) =>
+    sliderRow(
+      label,
+      min,
+      mx,
+      step,
+      mix[key] as number,
+      (v, c) => {
+        ;(mix[key] as number) = v
+        ctx.tuneMixLive?.(target) // 🖌 stage 3: uniform live — kéo mượt không rebuild
+        if (c) ctx.applySite(true)
+      },
+      1
+    )
+  )
+}
+
+// 🎨 BẢNG TRỘN MIX per-target (PhotoGroundMix — port bộ nền Lab; target = zone Z1+ HOẶC 'base' nền lô G0):
+// Nền chính + ≤4 slot (block tách) + hàng cọ (🖌 chung) + 6 slider chung. activeSlot = slot đang chọn (GUI-only,
+// closure sống qua redraw); 🖌 vẽ slot đó. Stage 3: mọi slider = uniform LIVE (tuneMixLive), buông applySite.
+function buildMixBoard(
+  pane: HTMLElement,
+  ctx: APGuiCtx,
+  target: MixPaintTarget,
+  mix: GroundMixParams
+): void {
+  let active = 0
+  let syncBrush = (): void => {}
+  const list = document.createElement('div')
+  list.className = 'ap-mix-slots' // block tách bạch với 6 slider chung bên dưới
+  const pick = (i: number): void => {
+    active = i
+    if (ctx.getMixPaint?.()?.target === target) ctx.setMixPaint?.(target, i) // đang vẽ → chuyển slot ngay
+    redraw()
+  }
+  const addBtn = addInstanceButton('lớp mix', () => {
+    mix.slots.push({ key: 'construction-gravel', bias: 0.55, seed: 13.7 + mix.slots.length * 18 })
+    redraw()
+    ctx.applySite(true)
+  })
+  function redraw(): void {
+    if (active >= mix.slots.length) active = Math.max(0, mix.slots.length - 1)
+    list.replaceChildren(
+      ...mix.slots.map((_, i) =>
+        mkMixSlotRow(ctx, target, mix, i, i === active, { redraw, onPick: () => pick(i) })
       )
     )
+    addBtn.disabled = mix.slots.length >= 4
+    syncBrush()
+  }
+  ctx.registerMixPaintSync?.(redraw) // 🖌 mode vẽ tắt từ ngoài (Move/Pick) → bỏ highlight tag + nút 🖌
+  // KHÔNG prefetch cả kho khi mở select (9 bộ × 4 map 2K decode = đứng hình) — _groundMixFor load lazy đúng key
+  pane.appendChild(
+    selectRow('Nền chính', MIX_TEX_OPTS, mix.base, (v) => {
+      mix.base = v
+      ctx.applySite(true)
+    })
+  )
+  redraw()
+  const brush = mkMixBrushRows(ctx, target, () => active)
+  syncBrush = brush.sync
+  pane.append(list, addBtn, ...brush.rows, ...mkMixSliders(ctx, target, mix))
 }
 
 // 🟫 Thân pane SURFACE-zone: MIX NỀN (toggle — bật = bảng trộn Lab thay texture đơn) | select texture đơn,
@@ -1190,8 +1242,11 @@ function buildSurfaceZoneBody(
   flatIdx: number,
   rebuild: (focus?: number) => void
 ): void {
-  // 🎨 NgQuan 2026-06-10: "bê bộ nền Lab vào thay texture trong Z1" — mix off vẫn giữ đường texture đơn (nhẹ)
-  pane.appendChild(
+  // 🎨 NgQuan 2026-06-10: "bê bộ nền Lab vào thay texture trong Z1" — mix off vẫn giữ đường texture đơn (nhẹ).
+  // 2026-06-11: Drape (bám gò) đẩy LÊN ngang hàng Mix nền (1 flex-row đôi — gỡ khỏi buildAddZoneExtras).
+  const dual = document.createElement('div')
+  dual.style.cssText = 'display:flex;gap:14px;flex-wrap:wrap;align-items:center'
+  dual.append(
     toggleRow('Mix nền (Lab)', layer.mix !== undefined, (on) => {
       layer.mix = on
         ? (layer.mix ??
@@ -1200,8 +1255,13 @@ function buildSurfaceZoneBody(
       if (!on && ctx.getMixPaint?.()?.target === layer) ctx.setMixPaint?.(null, 0) // 🖌 đang vẽ → thoát mode
       rebuild(flatIdx)
       ctx.applySite(true)
+    }),
+    toggleRow('Drape (bám gò)', layer.drape ?? false, (on) => {
+      layer.drape = on
+      ctx.applySite(true)
     })
   )
+  pane.appendChild(dual)
   if (layer.mix) buildMixBoard(pane, ctx, layer, layer.mix)
   else
     pane.appendChild(
@@ -1294,6 +1354,7 @@ function buildInstanceTabs(
 ): HTMLElement {
   const part = zonePart(op, kind)
   const host = document.createElement('div')
+  if (op === 'add') host.classList.add('ap-zone-itabs') // 🎨 khu tab Z/P/B/W tối 1 nấc (cut giữ xám ap-cut-pane)
   const layers = ctx.site.groundLayers ?? []
   const items: TabItem[] = []
   const flatIdxs: number[] = [] // tab-index → flatIdx (site.groundLayers) cho onChange → setActiveGroundLayer
@@ -2247,14 +2308,11 @@ export function setupSitePanel(
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-site-panel'
 
-  // Sub-tab "Ground": hàng INSTANCE-tab tầng surface (G0 base + G1/G2… layer chồng + ＋) — xếp lớp 3D. Bảng
-  // coverage (roEl) NẰM NGOÀI tabs (số liệu cả lô). KHÔNG còn cỏ-3D (đã tách sang Garden).
+  // Sub-tab "Ground": hàng INSTANCE-tab tầng surface (G0 base + G1/G2… layer chồng + ＋) — xếp lớp 3D.
+  // (Bảng Lot/House/Coverage/Garden ĐÃ GỠ — NgQuan 2026-06-11 "giờ không cần nữa"; refresh = noop cho caller.)
   const groundSub = document.createElement('div')
-  const { el: roEl, refresh } = readout(ctx)
-  ctx.registerSiteReadout(refresh)
-  const ground = buildGroundDomain(ctx, refresh)
+  const ground = buildGroundDomain(ctx, () => {})
   groundSub.appendChild(ground.panel)
-  groundSub.appendChild(roEl)
 
   // Sub-tab "Fence": hàng rào ĐA-LỚP (instance-tab F1/F2… + ＋).
   const fence = buildFenceDomain(ctx)

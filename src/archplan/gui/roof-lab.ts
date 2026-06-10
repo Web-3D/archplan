@@ -1197,7 +1197,8 @@ function mkBtn(label: string, onClick: () => void, title?: string): HTMLButtonEl
 }
 
 // Popup confirm nhỏ treo dưới `anchor` (vd nút 🗑): "msg" + [Hủy][Xóa]. Click ngoài / Hủy → đóng; Xóa → onYes().
-function confirmPopup(anchor: HTMLElement, msg: string, onYes: () => void): void {
+// EXPORT: site.ts (nút ↺ reset nét cọ mix) tái dùng — cùng look ap-roof-confirm, KHÔNG nhân bản.
+export function confirmPopup(anchor: HTMLElement, msg: string, onYes: () => void): void {
   const pop = document.createElement('div')
   pop.className = 'ap-roof-confirm'
   const m = document.createElement('div')
