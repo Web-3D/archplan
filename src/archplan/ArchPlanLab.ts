@@ -2323,7 +2323,11 @@ export class ArchPlanLab extends BaseWorld {
   private _onDimChange(inst: ShapeInstance): void {
     if (!inst.shapeKey) return
     const config = SHAPE_CONFIGS[inst.shapeKey]
+    const nBefore = inst.segments.length
     inst.segments = config.toSegments(inst.dims, inst.segments)
+    // round: slider Sides đổi SỐ tường → tab Walls phải dựng lại (chỉ khi commit — live giữ GUI
+    // nguyên kẻo destroy controller đang kéo)
+    if (inst.segments.length !== nBefore) this._rebuildGUI()
     this._buildScene()
   }
 

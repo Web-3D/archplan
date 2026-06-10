@@ -211,6 +211,7 @@ function mkShapeSelect(floorId: string, ctx: APGuiCtx): HTMLSelectElement {
     ['L', 'l-shape'],
     ['T', 't-shape'],
     ['U', 'u-shape'],
+    ['◯', 'round'],
     ['⚙', '__custom__'],
   ]
   for (const [text, val] of shapes) {
