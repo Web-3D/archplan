@@ -38,6 +38,14 @@ Làm đủ 4 — thiếu cái nào element thiếu tương tác đó:
 - Gắn 1 tường, trượt dọc → `_wallPlane` + chiếu tiếp tuyến (`dx·cosθ − dz·sinθ`), clamp `[0, len−w]`.
 - Trên mặt tường 2D (cửa) → `_wallPlane` + tiếp tuyến (x) + thẳng đứng (yOffset), clamp trong khung.
 
+**🧲 Shape Group (Move mode — `interaction/selection.ts`):**
+- **Shift+click** khối = thêm/bỏ vào nhóm ad-hoc (viền cyan ổn định; KHÔNG vào BuildingState — zero schema).
+- Kéo 1 khối **thuộc nhóm ≥2** → **ghost-drag**: bbox cả nhóm bay theo (0 rebuild, KHÔNG đụng split-render
+  KI-009), Ctrl = snap theo bbox **union** nhóm vs khối ngoài nhóm; buông = CÙNG 1 Δ-đã-round cộng vào
+  `posX/posZ` mọi khối (giữ tương đối tuyệt đối) + rebuild 1 lần. Kéo ELEMENT trong khối nhóm = đường thường.
+- **Esc** xả nhóm (click-trống KHÔNG xả) · rời Move mode = tự xả. Anchor: `_shiftToggleSelect` /
+  `_escClearSel` / `ManipulateTool._tryGroupGhost`+`_ghostMove`+`_commitGroup` / host `selectedIds`+`*GroupGhost`.
+
 ---
 
 ## 2. Thêm 1 TAB / section GUI mới

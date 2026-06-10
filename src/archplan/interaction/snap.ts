@@ -21,6 +21,23 @@ export interface AABB {
 // instAABB = instWorldAABB ở LÕI (build.ts) — NGUỒN DUY NHẤT (né drift KI-001). Cùng dùng cho đục-lỗ-shape-lồng.
 export const instAABB = instWorldAABB
 
+// Bao TẤT CẢ box thành 1 — bbox UNION của nhóm shape khi ghost-drag (snap cả nhóm như 1 khối lớn).
+export function unionAABB(list: AABB[]): AABB {
+  const u: AABB = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity }
+  for (const a of list) {
+    u.minX = Math.min(u.minX, a.minX)
+    u.maxX = Math.max(u.maxX, a.maxX)
+    u.minZ = Math.min(u.minZ, a.minZ)
+    u.maxZ = Math.max(u.maxZ, a.maxZ)
+  }
+  return u
+}
+
+// Dời AABB theo Δ (mét) — union nhóm tính ở vị-trí-gốc, dịch theo chuột rồi mới đo snap.
+export function shiftAABB(a: AABB, dx: number, dz: number): AABB {
+  return { minX: a.minX + dx, maxX: a.maxX + dx, minZ: a.minZ + dz, maxZ: a.maxZ + dz }
+}
+
 const overlap = (aLo: number, aHi: number, bLo: number, bHi: number): boolean =>
   aLo < bHi && aHi > bLo
 

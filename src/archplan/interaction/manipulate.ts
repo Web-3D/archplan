@@ -25,7 +25,8 @@ import type {
   ShapeInstance,
   StairState,
 } from '../state/state'
-import { instAABB, snapDelta } from './snap'
+import type { AABB } from './snap'
+import { instAABB, shiftAABB, snapDelta, unionAABB } from './snap'
 
 // userData gắn trên mỗi pick box (vô hình) — định danh element để paint/move.
 export type PickUD = { instId?: string; segIdx?: number; key?: string; opIdx?: number }
@@ -45,6 +46,11 @@ type DragSession =
       x0: number
       z0: number
       fast: boolean // 1 instance duy nhất → kéo = DỜI group (0 rebuild); nhiều instance = false → LOD-rebuild
+      // 🧲 Shape Group P2a: kéo khối THUỘC nhóm ≥2 → GHOST bbox cả nhóm bay theo (0 rebuild, 0 đụng
+      // split-render KI-009); buông = cộng Δ (gdx/gdz, đã gồm snap) vào posX/posZ TẤT CẢ + rebuild 1 lần.
+      group: string[] | null
+      gdx: number
+      gdz: number
     }
   | {
       kind: 'colz'
@@ -96,6 +102,11 @@ export interface ManipulateHost {
   rebuildDragShape(): void // kéo ELEMENT (cột/cửa/cầu thang) đa-shape: rebuild CHỈ shape chứa element (others static)
   endInstDragSplit(): void
   refreshGuiNumbers(): void
+  // 🧲 Shape Group (P1+P2a — interaction/selection.ts): nhóm ad-hoc chọn bằng Shift+click ở lab.
+  selectedIds(): string[] // [] = không có nhóm; kéo khối thuộc nhóm ≥2 → ghost-drag thay split
+  beginGroupGhost(): void
+  moveGroupGhost(dx: number, dz: number): void
+  endGroupGhost(): void // idempotent — cancelDrag/đổi mode gọi an toàn
 }
 
 export class ManipulateTool {
@@ -143,7 +154,15 @@ export class ManipulateTool {
     const split = this._splitActive
     this._splitActive = false
     this._drag = null
+    this.host.endGroupGhost() // ghost nhóm đang bay (nếu có) — gỡ, KHÔNG commit
     if (split) this.host.endInstDragSplit() // dọn dragGroup + full rebuild (kẻo shape đang kéo biến mất)
+  }
+
+  /** instId dưới con trỏ (pick layer) — lab dùng cho Shift+click chọn nhóm (chung raycast với Move). */
+  pickInstId(e: PointerEvent): string | null {
+    const hit = this._pickHit(e)
+    const id = hit ? (hit.object.userData as PickUD).instId : undefined
+    return typeof id === 'string' ? id : null
   }
 
   private _ndcOf(e: PointerEvent): THREE.Vector2 {
@@ -179,6 +198,7 @@ export class ManipulateTool {
     this._drag = this._makeDragSession(inst, ud, hit.point, hit.object.rotation.y)
     if (this._drag) {
       this.canvas.setPointerCapture(e.pointerId)
+      if (this._tryGroupGhost(inst)) return // 🧲 khối thuộc nhóm ≥2 → ghost-drag cả nhóm (không split)
       // ĐA-SHAPE → split-render 1 lần (shape khác static, shape chứa element đang kéo vào group riêng): kéo
       // SHAPE = translate group đó; kéo ELEMENT (cột/cửa/cầu thang) = rebuild CHỈ group đó → mượt bất kể số
       // shape. ('inst' fast = 1 shape duy nhất → giữ path dời-cả-group; split vô ích vì dragged = cả nhà.)
@@ -188,6 +208,18 @@ export class ManipulateTool {
         this._splitActive = true
       }
     }
+  }
+
+  // 🧲 Kéo KHỐI thuộc nhóm chọn ≥2 → ghost-drag cả nhóm (P2a): KHÔNG split, KHÔNG rebuild khi kéo —
+  // chỉ bbox ghost bay theo, commit khi buông. (Kéo ELEMENT trong khối thuộc nhóm vẫn đường thường.)
+  private _tryGroupGhost(inst: ShapeInstance): boolean {
+    const d = this._drag
+    if (!d || d.kind !== 'inst') return false
+    const sel = this.host.selectedIds()
+    if (sel.length < 2 || !sel.includes(inst.id)) return false
+    d.group = sel
+    this.host.beginGroupGhost()
+    return true
   }
 
   // Click thường (không Move): chỉ trỏ GUI tới panel của element, không kéo.
@@ -267,6 +299,9 @@ export class ManipulateTool {
       x0: inst.posX,
       z0: inst.posZ,
       fast: this.host.instanceCount() === 1,
+      group: null,
+      gdx: 0,
+      gdz: 0,
     }
   }
 
@@ -335,6 +370,10 @@ export class ManipulateTool {
     const dy = cur.y - d.start.y
     const dz = cur.z - d.start.z
     if (d.kind === 'inst') {
+      if (d.group) {
+        this._ghostMove(d, e, dx, dz) // 🧲 ghost nhóm — KHÔNG đụng posX/posZ thật; Δ chốt ở dragEnd
+        return
+      }
       d.inst.posX = d.x0 + dx * 1000
       d.inst.posZ = d.z0 + dz * 1000
       if (d.fast) {
@@ -364,6 +403,47 @@ export class ManipulateTool {
     else this._buildSceneLive()
   }
 
+  // Dời ghost nhóm theo chuột (+ Ctrl-snap union) — Δ cuối lưu vào session cho _commitGroup.
+  private _ghostMove(
+    d: Extract<DragSession, { kind: 'inst' }>,
+    e: PointerEvent,
+    dx: number,
+    dz: number
+  ): void {
+    let gx = dx
+    let gz = dz
+    if (e.ctrlKey && d.group) {
+      const s = this._groupSnap(d.group, d.inst.id, gx, gz)
+      gx += s.dx
+      gz += s.dz
+    }
+    d.gdx = gx
+    d.gdz = gz
+    this.host.moveGroupGhost(gx, gz)
+  }
+
+  // Snap NHÓM (Ctrl khi ghost-drag): union AABB cả nhóm (dịch theo Δ chuột) hít vào khối cùng tầng
+  // NGOÀI nhóm — cả cụm như 1 khối lớn. Không có khối ngoài / không trong tầm → {0,0} (kéo tự do).
+  private _groupSnap(
+    group: string[],
+    draggedId: string,
+    dx: number,
+    dz: number
+  ): { dx: number; dz: number } {
+    const boxes: AABB[] = []
+    for (const id of group) {
+      const inst = this.host.locateInst(id)
+      if (inst) boxes.push(instAABB(inst))
+    }
+    if (boxes.length === 0) return { dx: 0, dz: 0 }
+    const sibs = this.host
+      .siblingInstances(draggedId)
+      .filter((s) => !group.includes(s.id))
+      .map(instAABB)
+    if (sibs.length === 0) return { dx: 0, dz: 0 }
+    return snapDelta(shiftAABB(unionAABB(boxes), dx, dz), sibs, SNAP_FLUSH, SNAP_ALIGN)
+  }
+
   // Giữ Ctrl khi kéo khối: hít MẶT NGOÀI vào khối kề CÙNG TẦNG + canh thẳng mép (nam châm như game xây).
   // Sửa posX/posZ TRƯỚC rebuild (snap.ts pure). Không khối kề trong tầm → no-op (kéo tự do).
   private _applySnap(inst: ShapeInstance): void {
@@ -376,12 +456,34 @@ export class ManipulateTool {
 
   // Buông chuột: commit 1 lần (history + persist) + refresh số GUI (giữ Move mode + folder state).
   dragEnd(): void {
+    const d = this._drag
+    if (d && d.kind === 'inst' && d.group) {
+      this._drag = null
+      this._commitGroup(d.group, d.gdx, d.gdz)
+      return
+    }
     const split = this._splitActive
     this._splitActive = false
     this._drag = null
     if (split)
       this.host.endInstDragSplit() // split: dọn dragGroup + full rebuild merge commit (history/persist trong đó)
     else this._buildScene()
+    this.host.refreshGuiNumbers()
+  }
+
+  // 🧲 Commit ghost-drag nhóm: CÙNG 1 Δ đã-round cho mọi khối (vị trí tương đối giữ TUYỆT ĐỐI — round
+  // từng khối riêng sẽ trôi lệch 1mm) + rebuild đúng 1 lần (history/persist trong _buildScene).
+  private _commitGroup(group: string[], gdx: number, gdz: number): void {
+    this.host.endGroupGhost()
+    const mx = Math.round(gdx * 1000)
+    const mz = Math.round(gdz * 1000)
+    for (const id of group) {
+      const inst = this.host.locateInst(id)
+      if (!inst) continue
+      inst.posX += mx
+      inst.posZ += mz
+    }
+    this._buildScene()
     this.host.refreshGuiNumbers()
   }
 }

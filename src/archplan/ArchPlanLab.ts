@@ -191,6 +191,7 @@ import { type HighlightHost, HighlightOverlay } from './interaction/highlight' /
 import { type ManipulateHost, ManipulateTool } from './interaction/manipulate' // 🤚 Move + 🎯 Focus — tách monolith
 import { MoundTool, type MoundToolHost } from './interaction/moundDrag' // ⛰️ nặn gò terrain 3D (tâm + bán kính)
 import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 khay swatch atelier — tách monolith
+import { ShapeSelection } from './interaction/selection' // 🧲 Shape Group — chọn nhóm + ghost-drag
 import { SunGizmo, type SunGizmoHost } from './interaction/sunGizmo' // ☀ sun = vật thể kéo trong scene
 import { WaterTool, type WaterToolHost } from './interaction/waterDrag' // 💧 kéo hồ/đỉnh/viền 3D — tách monolith
 import {
@@ -480,6 +481,7 @@ export class ArchPlanLab extends BaseWorld {
   // Move tool (kéo element) + Focus (click→GUI) — tách ra interaction/manipulate.ts. moveMode + nút
   // GIỮ ở lab (điều phối 3 mode loại trừ); phiên kéo + map anchor folder nằm trong ManipulateTool.
   private manipulate: ManipulateTool | null = null
+  private shapeSel: ShapeSelection | null = null // 🧲 nhóm shape ad-hoc (Shift+click Move mode)
   private waterTool: WaterTool | null = null // 💧 kéo hồ/đỉnh/viền 3D (interaction/waterDrag.ts); lab giữ _siteWaters/_activeWater
   private groundTool: GroundTool | null = null // 🟫 nắn đỉnh/tay-cầm ground free (interaction/groundDrag.ts); lab giữ _activeLayerIdx
   private moundTool: MoundTool | null = null // ⛰️ nặn gò terrain 3D (interaction/moundDrag.ts); state = site.terrain.mounds[]
@@ -646,7 +648,7 @@ export class ArchPlanLab extends BaseWorld {
   private devHud: DevHud | null = null
   private _keysDown = new Set<string>()
   private readonly _onKeyDown = (e: KeyboardEvent): void => {
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+    if (this._isTypingTarget(e)) return
     if (e.code === 'Backquote' && !e.repeat) this.devHud?.toggle() // ` → bật/tắt HUD perf
     // F = bật/tắt Move tool 🤚 (_setMoveMode tự đồng bộ nút float góc trái). Guard tách ra _isPlainF.
     // (Z/C để trống → rơi vào _keysDown → _applyRotate xoay camera trái/phải khi GIỮ.)
@@ -655,6 +657,7 @@ export class ArchPlanLab extends BaseWorld {
       this._setMoveMode(!this.moveMode)
       return
     }
+    if (this._escClearSel(e)) return // 🧲 Esc (Move mode) = xả nhóm shape — click-trống KHÔNG xả
     // X trơn = thả/thu MENU 🎨 Palette (lưới swatch), KHÔNG phải popover tìm-kiếm-màu (né Ctrl/Meta/Alt+X).
     if (this._isPlainX(e)) {
       e.preventDefault()
@@ -668,6 +671,18 @@ export class ArchPlanLab extends BaseWorld {
       return
     }
     this._keysDown.add(e.code)
+  }
+  // Gõ trong input/textarea → phím tắt nhường (guard tách riêng cho gọn complexity _onKeyDown).
+  private _isTypingTarget(e: KeyboardEvent): boolean {
+    return e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
+  }
+  // 🧲 Esc trong Move mode + ĐANG có nhóm chọn → xả nhóm (true = đã xử). Guard kiểu _isPlainF.
+  private _escClearSel(e: KeyboardEvent): boolean {
+    if (e.code !== 'Escape' || !this.moveMode) return false
+    const sel = this.shapeSel
+    if (!sel || sel.size() === 0) return false
+    sel.clear()
+    return true
   }
   // F/X/R trơn (không Ctrl/Meta/Alt, không auto-repeat) = phím tắt. Né tổ hợp Ctrl/Cmd (vd Ctrl+F tìm, Ctrl+X cut).
   private _isPlainF(e: KeyboardEvent): boolean {
@@ -745,12 +760,22 @@ export class ArchPlanLab extends BaseWorld {
 
   // Move mode nhấn xuống: ưu tiên tool site (hồ/ground-free/gò) → cổng → element building. Giữ complexity ≤10.
   private _pointerDownMove(e: PointerEvent): void {
+    if (this._shiftToggleSelect(e)) return // 🧲 Shift+click = chọn/bỏ khối vào nhóm, không kéo gì khác
     if (this._tryStartSiteTool(e)) return // 💧🟫⛰️ trúng tool site → tool lo
     if (this._tryStartGateDrag(e)) return // 🚪 trúng cổng → trượt dọc cạnh rào
     this.manipulate?.dragStart(e) // Move tool: nhấn-giữ element building → kéo (focus GUI ngay khi nhấn)
     if (this.manipulate?.isDragging()) return // trúng building → manipulate lo
     this._tryStartLayerDrag(e) // 🟫 không trúng building → thử kéo TẦNG ground (G1+)
   }
+  // 🧲 Shift+click (Move mode) = toggle khối vào/khỏi nhóm — NUỐT event kể cả trượt (giữ Shift là "đang
+  // chọn", không để rơi xuống kéo khác gây bất ngờ). Pick chung raycast layer với Move (pickInstId).
+  private _shiftToggleSelect(e: PointerEvent): boolean {
+    if (!e.shiftKey) return false
+    const id = this.manipulate?.pickInstId(e) ?? null
+    if (id) this.shapeSel?.toggle(id)
+    return true
+  }
+
   private readonly _onPointerMove = (e: PointerEvent): void => {
     if (this.sunGizmo?.isDragging()) {
       this.sunGizmo.drag(e) // ☀ đang kéo sun → đổi hướng nắng theo vòm
@@ -938,6 +963,7 @@ export class ArchPlanLab extends BaseWorld {
   private _setMoveMode(on: boolean): void {
     this.moveMode = on
     this.manipulate?.cancelDrag()
+    if (!on) this.shapeSel?.clear() // nhóm chỉ sống trong Move mode — rời mode = xả (ad-hoc, không persist)
     for (const t of this._siteDragTools()) t.cancelDrag() // 💧🟫⛰️ huỷ kéo/nặn tool site đang dở + ẩn viền/đĩa
     this._gateDrag = null // huỷ kéo cổng đang dở
     this._layerDrag = null // 🟫 huỷ kéo tầng ground đang dở
@@ -1164,6 +1190,7 @@ export class ArchPlanLab extends BaseWorld {
     this.moundTool = new MoundTool(this._moundHost()) // ⛰️ nặn gò terrain 3D (tự add handle group vào scene)
     this.manipulate = new ManipulateTool(this._manipulateHost()) // trước _setupGUI: nhận registerFocus
     this.highlight = new HighlightOverlay(this._highlightHost())
+    this._initShapeSel() // 🧲 Shape Group (Shift+click chọn nhóm + ghost-drag)
     // 💧 Mặt nước ở WATER_REFLECT_LAYER (set per-rebuild) → camera chính + raycaster phải BẬT layer này (cộng
     // dồn) để vẫn thấy + click/kéo hồ; còn virtual-camera reflector (layer 0) thì né mặt nước → hết đơ-2-hồ.
     this.camera.layers.enable(WATER_REFLECT_LAYER)
@@ -1295,7 +1322,7 @@ export class ArchPlanLab extends BaseWorld {
       cancelAnimationFrame(this._siteRaf)
       this._siteRaf = 0
     }
-    this.highlight?.dispose()
+    this._disposeOverlays()
     this._pickMat?.dispose() // SPIKE brush: material chung của pick layer
     this._pickMat = null
     this.controls?.dispose()
@@ -1945,6 +1972,22 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
+  // Viền flash (highlight) + viền nhóm chọn (shapeSel) — gom 1 chỗ cho gọn complexity onDispose.
+  private _disposeOverlays(): void {
+    this.highlight?.dispose()
+    this.shapeSel?.dispose()
+    this.shapeSel = null
+  }
+
+  // 🧲 Shape Group — host dùng chung locator với highlight (locateInst trả {inst, fi} + instWallBase).
+  private _initShapeSel(): void {
+    this.shapeSel = new ShapeSelection({
+      scene: this.scene,
+      locateInst: (id) => this._locateInst(id),
+      instWallBase: (inst, fi) => this._instWallBase(inst, fi),
+    })
+  }
+
   // Host cho ManipulateTool: scene refs (stable) + callback locate/rebuild. Lab giữ pick layer + mode.
   private _manipulateHost(): ManipulateHost {
     return {
@@ -1963,6 +2006,11 @@ export class ArchPlanLab extends BaseWorld {
       rebuildDragShape: () => this._rebuildDragShapeLive(),
       endInstDragSplit: () => this._endInstDragSplit(),
       refreshGuiNumbers: () => this.gui?.controllersRecursive().forEach((c) => c.updateDisplay()),
+      // 🧲 Shape Group — delegate sang ShapeSelection (selection + ghost sống ở interaction/selection.ts)
+      selectedIds: () => this.shapeSel?.ids() ?? [],
+      beginGroupGhost: () => this.shapeSel?.beginGhost(),
+      moveGroupGhost: (dx, dz) => this.shapeSel?.moveGhost(dx, dz),
+      endGroupGhost: () => this.shapeSel?.endGhost(),
     }
   }
 
@@ -2367,6 +2415,7 @@ export class ArchPlanLab extends BaseWorld {
     this._prevState = JSON.stringify(this.state)
     this.store.autosave(this.state, this.site) // autosave mỗi build → reload/mở lại là ra nguyên thiết kế
     this._renderScene()
+    this.shapeSel?.refresh() // viền nhóm bám theo vị trí mới sau commit (kéo nhóm / chỉnh pos qua GUI)
   }
 
   // LIVE: kéo slider → dựng lại geometry NGAY để xem trực tiếp, gộp ≤1 lần/frame qua rAF. KHÔNG
