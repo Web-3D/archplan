@@ -9,6 +9,7 @@ import type { Controller } from 'lil-gui'
 
 import {
   defaultOpening,
+  FRAME_DEFAULTS,
   mkBalcony,
   mkSeg,
   type OpeningState,
@@ -272,6 +273,7 @@ function buildOneOpening(
   live(opF.add(op, 'h', 100, 6000, 10).name('Height'), ctx)
   live(opF.add(op, 'x', 0, xMax, 10).name('X'), ctx)
   live(opF.add(op, 'yOffset', -3000, 6000, 10).name('Y'), ctx)
+  addFrameRows(opF, op, ctx)
   opF
     .add(
       {
@@ -285,6 +287,32 @@ function buildOneOpening(
     )
     .name('✕ Remove')
   return opF
+}
+
+// C1 KHUNG BAO quanh lỗ: chọn style → fill FRAME_DEFAULTS vào field optional (save cũ không có field
+// = không khung). Slider Bản/Nhô + màu chỉ hiện khi có khung; đổi style → rebuild GUI hiện/ẩn hàng.
+function addFrameRows(opF: GUI, op: OpeningState, ctx: APGuiCtx): void {
+  op.frameStyle ??= 'none'
+  opF
+    .add(op, 'frameStyle', { Không: 'none', Gỗ: 'wood', Nhôm: 'alu', Thép: 'steel' })
+    .name('Khung')
+    .onChange((v: string) => {
+      if (v !== 'none') {
+        const d = FRAME_DEFAULTS[v as keyof typeof FRAME_DEFAULTS]
+        op.frameW = d.w
+        op.frameOut = d.out
+        op.frameColor = d.color
+      }
+      ctx.rebuild()
+      ctx.build()
+    })
+  if (op.frameStyle === 'none') return
+  op.frameW ??= 90
+  op.frameOut ??= 15
+  op.frameColor ??= 0x8a6a48
+  live(opF.add(op, 'frameW', 30, 200, 5).name('Bản khung'), ctx)
+  live(opF.add(op, 'frameOut', 0, 60, 5).name('Nhô'), ctx)
+  opF.addColor(op, 'frameColor').name('Màu khung').onChange(ctx.build)
 }
 
 export function rebuildOpeningSubfolders(
