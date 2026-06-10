@@ -1730,6 +1730,11 @@
   line-height: 1;
   cursor: pointer;
 }
+.ap-lab-float .ap-mix-brush-on {
+  background: #2f6b46; /* 🖌 đang vẽ — cùng xanh tab active */
+  border-color: #2f6b46;
+  color: #fff;
+}
 .ap-lab-float .ap-mix-layer {
   margin: 4px 0;
   padding-left: 6px;

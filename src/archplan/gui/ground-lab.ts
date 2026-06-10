@@ -1,43 +1,59 @@
 /**
  * VỊ TRÍ   — archplan/src/archplan/gui/ground-lab.ts
- * VAI TRÒ  — Thí nghiệm 🟫 NỀN trong 🧪 Lab: demo 3 kỹ thuật CHỐNG LẶP texture ground (NgQuan nêu bệnh 2026-06-10:
- *            texture tile lặp đều đặn, thiếu ngẫu nhiên). Shader trên plane 12×12 m, texture ground THẬT của app:
- *            ① TEXTURE BOMBING (iq stochastic tiling): mỗi Ô hash → xoay 90°×k + offset ngẫu nhiên, blend mép
- *            ② MACRO NOISE: noise tần số THẤP điều biến sáng/màu — phá cảm giác grid
- *            ③ BLEND 2 LỚP (cỏ ↔ sỏi) theo mask fbm — biến thiên lớn
- * LIÊN HỆ  — lab-experiments.ts (chip 🟫 Nền). sliderRow của tweak.ts. Texture: assets/textures grass_o +
- *            construction_grave (production/basecolor.jpg — PROTOCOL). Catalog: Factory/deferred/houdini-algorithms.md
- *            mục 8 (anti-tiling). Tham khảo: iquilezles.org/articles/texturerepetition.
+ * VAI TRÒ  — Thí nghiệm 🟫 NỀN trong 🧪 Lab — bản TỔNG KẾT (NgQuan 2026-06-10 "làm hết luôn"), đủ 6 trụ
+ *            so với nền AAA (UE Landscape/Unity Terrain/Quixel):
+ *            ① TEXTURE BOMBING (iq stochastic tiling): mỗi Ô hash → xoay + offset + jitter scale, blend mép
+ *            ② MACRO NOISE: fbm tần thấp sáng/tối + loang úa — phá cảm giác grid
+ *            ③ BẢNG TRỘN LỚP: nền + 4 slot, mask fbm/slot + NGƯỠNG; có HEIGHT-LERP (biên đi theo độ sáng
+ *               albedo = proxy cao độ — sỏi LẤN THEO VIÊN thay vì fade đều; height map thật = deferred)
+ *            ④ PAINTED MASK (ground-paint.ts): 🖌 vẽ tay mask per-slot — chủ đích như splat-paint UE
+ *            ⑤ ÁNH SÁNG + NORMAL: blend cả normal map (xoay theo ô bombing), đèn nắng az/el chỉnh được —
+ *               nền ăn đèn (chuẩn bị ngày/đêm khi port site.ts); tắt được để so unlit cũ
+ *            ⑥ TRỘN XA (dual-scale): xa pha bản scale khác theo khoảng cách camera — diệt lặp ở xa
+ * LIÊN HỆ  — lab-experiments.ts (chip 🟫 Nền) · ground-paint.ts (PaintMask) · sliderRow tweak.ts.
+ *            Texture: assets/textures/ground (PROTOCOL — basecolor + normal, 9 bộ verify 2026-06-10).
+ *            Catalog: Factory/deferred/houdini-algorithms.md mục 8. Tham khảo: iquilezles.org/articles/
+ *            texturerepetition · UE HeightLerp · hex-tiling (Mikkelsen) = nâng cấp deferred.
  *
- * CÁCH DÙNG: tick tắt "Bombing"/"Macro"/"2 lớp" để SO SÁNH bệnh lặp ↔ đã trị. Mặc định: bật hết (đã trị).
- * DISPOSE: dispose() — loop null + RO + controls + plane geo/mat + 2 texture + panel.
+ * CÁCH DÙNG: tắt/bật từng nhóm để so bệnh ↔ đã trị; 🖌 trên slot lớp = vẽ mask (orbit tạm khóa).
+ * DISPOSE: dispose() — loop + RO + controls + geo/mat + texture cache + PaintMask + panel.
  */
 
 import bgravelUrl from 'assets/textures/ground/beach_gravel/production/basecolor.jpg?url'
+import bgravelN from 'assets/textures/ground/beach_gravel/production/normal.jpg?url'
 import cobbleUrl from 'assets/textures/ground/cobblestone/production/basecolor.jpg?url'
+import cobbleN from 'assets/textures/ground/cobblestone/production/normal.jpg?url'
 import gravelUrl from 'assets/textures/ground/construction_grave/production/basecolor.jpg?url'
+import gravelN from 'assets/textures/ground/construction_grave/production/normal.jpg?url'
 import grassUrl from 'assets/textures/ground/grass_o/production/basecolor.jpg?url'
+import grassN from 'assets/textures/ground/grass_o/production/normal.jpg?url'
 import sandUrl from 'assets/textures/ground/rippled_sand/production/basecolor.jpg?url'
+import sandN from 'assets/textures/ground/rippled_sand/production/normal.jpg?url'
 import romanUrl from 'assets/textures/ground/roman_stone_floor/production/basecolor.jpg?url'
+import romanN from 'assets/textures/ground/roman_stone_floor/production/normal.jpg?url'
 import asphaltUrl from 'assets/textures/ground/rough_asphalt/production/basecolor.jpg?url'
+import asphaltN from 'assets/textures/ground/rough_asphalt/production/normal.jpg?url'
 import uncutUrl from 'assets/textures/ground/uncut-grass/production/basecolor.jpg?url'
+import uncutN from 'assets/textures/ground/uncut-grass/production/normal.jpg?url'
 import pavementUrl from 'assets/textures/ground/worn_pavement/production/basecolor.jpg?url'
+import pavementN from 'assets/textures/ground/worn_pavement/production/normal.jpg?url'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
+import { PaintMask } from './ground-paint'
 import { sliderRow } from './tweak'
 
-// Danh mục texture NỀN cho bảng trộn — đều có production/basecolor.jpg trong kho (verify 2026-06-10).
-const TEX_OPTIONS: { key: string; label: string; url: string }[] = [
-  { key: 'grass_o', label: 'Cỏ (grass_o)', url: grassUrl },
-  { key: 'uncut-grass', label: 'Cỏ rậm (uncut)', url: uncutUrl },
-  { key: 'construction_grave', label: 'Sỏi công trường', url: gravelUrl },
-  { key: 'beach_gravel', label: 'Sỏi biển', url: bgravelUrl },
-  { key: 'rippled_sand', label: 'Cát gợn', url: sandUrl },
-  { key: 'cobblestone', label: 'Đá lát cobble', url: cobbleUrl },
-  { key: 'roman_stone_floor', label: 'Sàn đá roman', url: romanUrl },
-  { key: 'worn_pavement', label: 'Vỉa hè mòn', url: pavementUrl },
-  { key: 'rough_asphalt', label: 'Nhựa đường', url: asphaltUrl },
+// Danh mục texture NỀN cho bảng trộn — đều có production/basecolor.jpg + normal.jpg (verify 2026-06-10).
+const TEX_OPTIONS: { key: string; label: string; url: string; nrm: string }[] = [
+  { key: 'grass_o', label: 'Cỏ (grass_o)', url: grassUrl, nrm: grassN },
+  { key: 'uncut-grass', label: 'Cỏ rậm (uncut)', url: uncutUrl, nrm: uncutN },
+  { key: 'construction_grave', label: 'Sỏi công trường', url: gravelUrl, nrm: gravelN },
+  { key: 'beach_gravel', label: 'Sỏi biển', url: bgravelUrl, nrm: bgravelN },
+  { key: 'rippled_sand', label: 'Cát gợn', url: sandUrl, nrm: sandN },
+  { key: 'cobblestone', label: 'Đá lát cobble', url: cobbleUrl, nrm: cobbleN },
+  { key: 'roman_stone_floor', label: 'Sàn đá roman', url: romanUrl, nrm: romanN },
+  { key: 'worn_pavement', label: 'Vỉa hè mòn', url: pavementUrl, nrm: pavementN },
+  { key: 'rough_asphalt', label: 'Nhựa đường', url: asphaltUrl, nrm: asphaltN },
 ]
 const MAX_MIX = 4 // số SLOT lớp động trong shader (uTexL0..3) — thêm slot = sửa cả FRAG
 
@@ -49,22 +65,29 @@ interface MixLayer {
 
 const VERT = /* glsl */ `
 varying vec2 vUv;
+varying vec3 vWorld;
 void main() {
   vUv = uv;
+  vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `
 
-// ① bombing: patternAt = bản sao texture XOAY 90°×k + OFFSET theo hash Ô; noTile = trộn 4 ô lân cận (mép smoothstep
-// rộng uMargin → không seam). ② macro: fbm tần thấp nhân vào màu. ③ blend 2 tex theo mask fbm (ngưỡng + mềm biên).
+// ① bombing: patAt = bản sao texture XOAY + OFFSET + jitter scale theo hash Ô — ALBEDO + NORMAL cùng phép
+//   biến đổi (normal tangent-space xoay bằng Mᵀ của ma trận uv → ánh sáng đúng từng ô); noTile = trộn 4 ô.
+// ③ layerMix: mask = fbm + CHÊNH ĐỘ SÁNG (height-lerp proxy: lum albedo ≈ cao độ — sỏi sáng LẤN THEO VIÊN)
+//   rồi max với mask VẼ TAY (kênh slot trong uMaskPaint). ⑤ đèn nắng + hemi trên normal đã blend.
+// ⑥ trộn xa: albedo pha bản scale uFarScale theo khoảng cách camera (normal giữ bản gần — xa không cần relief).
 const FRAG = /* glsl */ `
 precision highp float;
 varying vec2 vUv;
-uniform sampler2D uTexBase;
-uniform sampler2D uTexL0;
-uniform sampler2D uTexL1;
-uniform sampler2D uTexL2;
-uniform sampler2D uTexL3;
+varying vec3 vWorld;
+uniform sampler2D uTexBase;  uniform sampler2D uNrmBase;
+uniform sampler2D uTexL0;    uniform sampler2D uNrmL0;
+uniform sampler2D uTexL1;    uniform sampler2D uNrmL1;
+uniform sampler2D uTexL2;    uniform sampler2D uNrmL2;
+uniform sampler2D uTexL3;    uniform sampler2D uNrmL3;
+uniform sampler2D uMaskPaint;
 uniform float uOn[4];
 uniform float uBias[4];
 uniform float uRepeat;
@@ -79,6 +102,14 @@ uniform float uMacroScale;
 uniform float uTint;
 uniform float uMaskScale;
 uniform float uMaskSoft;
+uniform float uHeightK;
+uniform float uLightOn;
+uniform vec3  uSunDir;
+uniform float uSunI;
+uniform float uAmb;
+uniform float uNormalK;
+uniform float uFarOn;
+uniform float uFarRange;
 
 float hash21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 vec2 hash22(vec2 p) { float h = hash21(p); return vec2(h, hash21(p + h + 17.17)); }
@@ -95,44 +126,80 @@ float fbm(vec2 p) { // 3 octave ~0..0.9
   for (int i = 0; i < 3; i++) { s += a * vnoise(p); p *= 2.03; a *= 0.5; }
   return s;
 }
+float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 
-vec4 patternAt(sampler2D t, vec2 id, vec2 p) {
-  vec2 sid = id + uSeed * 0.1231; // Seed dịch không gian hash → bố cục ngẫu nhiên KHÁC (deterministic)
+// 1 Ô bombing: q = M·p·sc + offset; albedo sample thẳng, normal.xy xoay bằng Mᵀ (đưa vector trong ảnh
+// về không gian mặt — thiếu bước này đèn sẽ sai hướng ở ô xoay; scale đều bỏ qua, normalize ở cuối).
+void patAt(sampler2D tA, sampler2D tN, vec2 id, vec2 p, out vec4 A, out vec3 N) {
+  vec2 sid = id + uSeed * 0.1231; // Seed dịch không gian hash → bố cục KHÁC (deterministic)
   float h = hash21(sid);
-  float ang = mix(floor(h * 3.999) * 1.5707963 * uRotOn, h * 6.2831853, uFreeRot); // 90°×k ↔ góc TỰ DO
+  float ang = mix(floor(h * 3.999) * 1.5707963 * uRotOn, h * 6.2831853, uFreeRot); // 90°×k ↔ TỰ DO
   float cs = cos(ang); float sn = sin(ang);
-  float sc = 1.0 + (hash21(sid + 5.7) - 0.5) * 2.0 * uScaleJit; // jitter SCALE per ô (1 ± jit)
-  vec2 q = mat2(cs, -sn, sn, cs) * p * sc + hash22(sid) * 7.31; // xoay + scale + offset — texture wrap repeat
-  return texture2D(t, q);
+  float sc = 1.0 + (hash21(sid + 5.7) - 0.5) * 2.0 * uScaleJit;
+  mat2 M = mat2(cs, -sn, sn, cs);
+  vec2 q = M * p * sc + hash22(sid) * 7.31;
+  A = texture2D(tA, q);
+  vec3 n = texture2D(tN, q).xyz * 2.0 - 1.0;
+  N = vec3(n.x * cs + n.y * sn, -n.x * sn + n.y * cs, n.z); // Mᵀ·n.xy
 }
-vec4 noTile(sampler2D t, vec2 p) {
+// Trộn 4 ô lân cận (mép smoothstep rộng uMargin) — cả albedo lẫn normal cùng trọng số.
+void noTile(sampler2D tA, sampler2D tN, vec2 p, out vec4 A, out vec3 N) {
   vec2 s = p - 0.5;
   vec2 id = floor(s); vec2 f = fract(s);
-  vec2 w = smoothstep(0.5 - uMargin, 0.5 + uMargin, f); // mép trộn giữa 4 ô lân cận
-  vec4 c00 = patternAt(t, id, p);               vec4 c10 = patternAt(t, id + vec2(1, 0), p);
-  vec4 c01 = patternAt(t, id + vec2(0, 1), p);  vec4 c11 = patternAt(t, id + vec2(1, 1), p);
-  return mix(mix(c00, c10, w.x), mix(c01, c11, w.x), w.y);
+  vec2 w = smoothstep(0.5 - uMargin, 0.5 + uMargin, f);
+  vec4 a0; vec3 n0; patAt(tA, tN, id,               p, a0, n0);
+  vec4 a1; vec3 n1; patAt(tA, tN, id + vec2(1, 0), p, a1, n1);
+  vec4 a2; vec3 n2; patAt(tA, tN, id + vec2(0, 1), p, a2, n2);
+  vec4 a3; vec3 n3; patAt(tA, tN, id + vec2(1, 1), p, a3, n3);
+  A = mix(mix(a0, a1, w.x), mix(a2, a3, w.x), w.y);
+  N = mix(mix(n0, n1, w.x), mix(n2, n3, w.x), w.y);
 }
-vec4 ground(sampler2D t, vec2 p) { return mix(texture2D(t, p), noTile(t, p), uBomb); }
+// Bề mặt 1 texture tại p: pha thẳng↔bombing theo uBomb; ⑥ albedo pha thêm BẢN XA scale 0.23 theo
+// khoảng cách camera (chu kỳ lệch pha → hết lặp ở xa; normal giữ bản gần — relief xa không thấy).
+void ground(sampler2D tA, sampler2D tN, vec2 p, float far, out vec4 A, out vec3 N) {
+  vec4 ab; vec3 nb; noTile(tA, tN, p, ab, nb);
+  A = mix(texture2D(tA, p), ab, uBomb);
+  vec3 nFlat = texture2D(tN, p).xyz * 2.0 - 1.0;
+  N = mix(nFlat, nb, uBomb);
+  if (far > 0.001) {
+    vec4 af; vec3 nf; noTile(tA, tN, p * 0.23, af, nf);
+    A = mix(A, af, far);
+  }
+}
 
-// 1 LỚP trộn: đè texture lên màu hiện tại theo mask fbm (seed RIÊNG mỗi slot → loang khác chỗ). on=0 → giữ nguyên.
-vec4 layerMix(vec4 col, sampler2D t, vec2 p, float on, float bias, float seed) {
-  float msk = smoothstep(bias - uMaskSoft, bias + uMaskSoft, fbm(vUv * uMaskScale * 4.0 + seed));
-  return mix(col, ground(t, p), msk * on);
+// 1 LỚP trộn: raw fbm + CHÊNH lum(lớp − nền hiện tại)·uHeightK trước smoothstep (height-lerp proxy —
+// biên bám cấu trúc vật liệu), max với mask VẼ pv (chủ đích thắng loang). Slot tắt → thoát sớm.
+void layerMix(inout vec4 col, inout vec3 nrm, sampler2D tA, sampler2D tN, vec2 p,
+              float on, float bias, float seed, float pv, float far) {
+  if (on < 0.5) return;
+  vec4 A; vec3 N;
+  ground(tA, tN, p, far, A, N);
+  float raw = fbm(vUv * uMaskScale * 4.0 + seed) + (lum(A.rgb) - lum(col.rgb)) * uHeightK;
+  float m = max(smoothstep(bias - uMaskSoft, bias + uMaskSoft, raw), pv);
+  col = mix(col, A, m);
+  nrm = mix(nrm, N, m);
 }
 
 void main() {
-  vec2 p = vUv * uRepeat; // tọa độ theo Ô tile
-  vec4 col = ground(uTexBase, p); // NỀN CHÍNH (bảng trộn: select đổi được)
-  col = layerMix(col, uTexL0, p, uOn[0], uBias[0], 13.7); // 4 SLOT lớp động (＋ thêm / ✕ xóa)
-  col = layerMix(col, uTexL1, p, uOn[1], uBias[1], 31.7);
-  col = layerMix(col, uTexL2, p, uOn[2], uBias[2], 47.3);
-  col = layerMix(col, uTexL3, p, uOn[3], uBias[3], 71.1);
+  vec2 p = vUv * uRepeat;
+  float far = uFarOn * smoothstep(uFarRange * 0.45, uFarRange, length(cameraPosition - vWorld));
+  vec4 col; vec3 nrm;
+  ground(uTexBase, uNrmBase, p, far, col, nrm); // NỀN CHÍNH
+  vec4 P = texture2D(uMaskPaint, vUv); // ④ mask vẽ tay — kênh R/G/B/A = slot 0..3
+  layerMix(col, nrm, uTexL0, uNrmL0, p, uOn[0], uBias[0], 13.7, P.r, far);
+  layerMix(col, nrm, uTexL1, uNrmL1, p, uOn[1], uBias[1], 31.7, P.g, far);
+  layerMix(col, nrm, uTexL2, uNrmL2, p, uOn[2], uBias[2], 47.3, P.b, far);
+  layerMix(col, nrm, uTexL3, uNrmL3, p, uOn[3], uBias[3], 71.1, P.a, far);
   float m = fbm(vUv * uMacroScale * 6.0);
   col.rgb *= 1.0 + uMacro * (m - 0.5) * 1.4; // ② macro sáng/tối tần thấp
   float tm = smoothstep(0.35, 0.75, fbm(vUv * uMacroScale * 3.0 + 7.7));
-  col.rgb = mix(col.rgb, col.rgb * vec3(1.18, 1.02, 0.55), uTint * tm); // ② loang ÚA: nhuộm ấm từng vạt
-  gl_FragColor = vec4(col.rgb, 1.0);
+  col.rgb = mix(col.rgb, col.rgb * vec3(1.18, 1.02, 0.55), uTint * tm); // ② loang ÚA từng vạt
+  // ⑤ ánh sáng: tangent plane XZ (T=+X, B=−Z, N=+Y sau rotateX(−π/2)) → N_world = (n.x, n.z, −n.y)
+  vec3 n = normalize(vec3(nrm.xy * uNormalK, max(nrm.z, 0.1)));
+  vec3 Nw = normalize(vec3(n.x, n.z, -n.y));
+  float dif = max(dot(Nw, normalize(uSunDir)), 0.0);
+  vec3 lit = col.rgb * (uAmb * mix(0.75, 1.05, Nw.y) + uSunI * dif);
+  gl_FragColor = vec4(mix(col.rgb, lit, uLightOn), 1.0);
 }
 `
 
@@ -148,8 +215,15 @@ class GroundPreview {
   private readonly panel: HTMLElement
   private readonly geo: THREE.PlaneGeometry
   readonly mat: THREE.ShaderMaterial
-  private readonly texCache = new Map<string, THREE.Texture>() // key kho → texture (load 1 lần, dispose cuối)
+  private readonly texCache = new Map<string, THREE.Texture>() // key kho (+tiền tố n:) → texture, dispose cuối
   private readonly ro: ResizeObserver
+  private readonly paint = new PaintMask() // ④ mask vẽ tay 4 kênh (ground-paint.ts)
+  private readonly ray = new THREE.Raycaster()
+  private plane: THREE.Mesh | null = null
+  private paintSlot: number | null = null // slot đang vẽ (🖌) — null = orbit bình thường
+  private brushSize = 0.05 // bán kính cọ (× bề mặt)
+  private brushErase = false
+  private painting = false // đang giữ chuột vẽ
   private lastW = 0
   private lastH = 0
   private isDisposed = false
@@ -177,16 +251,78 @@ class GroundPreview {
     const plane = new THREE.Mesh(this.geo, this.mat)
     plane.rotation.x = -Math.PI / 2 // nằm sàn XZ
     this.scene.add(plane)
+    this.plane = plane
 
     this.controls = new OrbitControls(this.camera, this.canvas)
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.12
+    this._bindPaint()
     this.ro = new ResizeObserver(() => this._syncSize())
     this.ro.observe(this.canvas)
     this.renderer.setAnimationLoop(() => {
       this.controls.update()
       this.renderer.render(this.scene, this.camera)
     })
+  }
+
+  // ④ Vẽ mask: khi 1 slot bật 🖌 (orbit khóa), kéo chuột = đóng dấu cọ vào kênh slot tại UV raycast.
+  private _bindPaint(): void {
+    const draw = (e: PointerEvent): void => {
+      const uv = this._pickUV(e)
+      if (uv)
+        this.paint.stamp(uv.x, uv.y, this.brushSize, this.paintSlot as number, this.brushErase)
+    }
+    this.canvas.addEventListener('pointerdown', (e) => {
+      if (this.paintSlot === null) return
+      this.painting = true
+      this.canvas.setPointerCapture(e.pointerId)
+      draw(e)
+    })
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (this.painting && this.paintSlot !== null) draw(e)
+    })
+    const stop = (): void => {
+      this.painting = false
+    }
+    this.canvas.addEventListener('pointerup', stop)
+    this.canvas.addEventListener('pointerleave', stop)
+  }
+
+  // UV điểm chuột chạm plane (null = trượt ra ngoài) — nguồn tọa độ cho dấu cọ.
+  private _pickUV(e: PointerEvent): THREE.Vector2 | null {
+    const r = this.canvas.getBoundingClientRect()
+    if (r.width < 1 || r.height < 1 || !this.plane) return null
+    const nd = new THREE.Vector2(
+      ((e.clientX - r.left) / r.width) * 2 - 1,
+      -((e.clientY - r.top) / r.height) * 2 + 1
+    )
+    this.ray.setFromCamera(nd, this.camera)
+    const hit = this.ray.intersectObject(this.plane)[0]
+    return hit?.uv ? hit.uv.clone() : null
+  }
+
+  // Bật/tắt chế độ vẽ cho 1 slot: vẽ thì khóa orbit (chuột dành cho cọ), null = trả orbit.
+  setPaintSlot(i: number | null): void {
+    this.paintSlot = i
+    this.controls.enabled = i === null
+  }
+
+  setBrush(size: number, erase: boolean): void {
+    this.brushSize = size
+    this.brushErase = erase
+  }
+
+  clearPaint(ch: number): void {
+    this.paint.clear(ch)
+  }
+
+  // ⑤ Hướng nắng từ 2 slider (azimuth quanh trục Y + elevation trên chân trời, độ).
+  setSun(azDeg: number, elDeg: number): void {
+    if (this.isDisposed) return
+    const az = (azDeg * Math.PI) / 180
+    const el = (elDeg * Math.PI) / 180
+    const u = this.mat.uniforms.uSunDir.value as THREE.Vector3
+    u.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az))
   }
 
   // ShaderMaterial: nền chính + 4 SLOT lớp động (uOn/uBias array) + uniforms kỹ thuật ①②. Slot tắt vẫn cần
@@ -197,10 +333,16 @@ class GroundPreview {
       fragmentShader: FRAG,
       uniforms: {
         uTexBase: { value: this._tex('grass_o') },
+        uNrmBase: { value: this._tex('grass_o', true) },
         uTexL0: { value: this._tex('grass_o') },
+        uNrmL0: { value: this._tex('grass_o', true) },
         uTexL1: { value: this._tex('grass_o') },
+        uNrmL1: { value: this._tex('grass_o', true) },
         uTexL2: { value: this._tex('grass_o') },
+        uNrmL2: { value: this._tex('grass_o', true) },
         uTexL3: { value: this._tex('grass_o') },
+        uNrmL3: { value: this._tex('grass_o', true) },
+        uMaskPaint: { value: this.paint.texture },
         uOn: { value: [0, 0, 0, 0] },
         uBias: { value: [0.5, 0.5, 0.5, 0.5] },
         uRepeat: { value: 8 },
@@ -215,21 +357,30 @@ class GroundPreview {
         uTint: { value: 0.25 },
         uMaskScale: { value: 2.0 },
         uMaskSoft: { value: 0.18 },
+        uHeightK: { value: 0.3 }, // ③ height-lerp proxy — 0 = fade đều như bản cũ
+        uLightOn: { value: 1 }, // ⑤ tắt = unlit cũ (so sánh)
+        uSunDir: { value: new THREE.Vector3(0.47, 0.82, 0.33) }, // ≈ az 35° · el 55° (setSun ghi đè)
+        uSunI: { value: 0.9 },
+        uAmb: { value: 0.55 },
+        uNormalK: { value: 1 }, // nổi khối — scale n.xy
+        uFarOn: { value: 0.6 }, // ⑥ trộn xa
+        uFarRange: { value: 16 }, // khoảng cách đạt trộn đầy (m)
       },
     })
   }
 
-  // Texture theo KEY kho (TEX_OPTIONS) — load 1 lần vào cache. jpg PROTOCOL production/, wrap repeat
-  // (bombing offset cần wrap) + anisotropy cho góc nhìn xéo.
-  private _tex(key: string): THREE.Texture {
-    const hit = this.texCache.get(key)
+  // Texture theo KEY kho (TEX_OPTIONS) — load 1 lần vào cache (albedo + bản normal khi nrm=true; normal
+  // GIỮ colorSpace linear mặc định). jpg PROTOCOL production/, wrap repeat + anisotropy cho góc nhìn xéo.
+  private _tex(key: string, nrm = false): THREE.Texture {
+    const ck = (nrm ? 'n:' : '') + key
+    const hit = this.texCache.get(ck)
     if (hit) return hit
-    const url = TEX_OPTIONS.find((o) => o.key === key)?.url ?? TEX_OPTIONS[0].url
-    const t = new THREE.TextureLoader().load(url)
+    const o = TEX_OPTIONS.find((x) => x.key === key) ?? TEX_OPTIONS[0]
+    const t = new THREE.TextureLoader().load(nrm ? o.nrm : o.url)
     t.wrapS = THREE.RepeatWrapping
     t.wrapT = THREE.RepeatWrapping
     t.anisotropy = this.renderer.capabilities.getMaxAnisotropy()
-    this.texCache.set(key, t)
+    this.texCache.set(ck, t)
     return t
   }
 
@@ -237,16 +388,19 @@ class GroundPreview {
     if (!this.isDisposed) this.mat.uniforms[name].value = v
   }
 
-  // Đẩy BẢNG TRỘN vào shader: nền chính + tối đa MAX_MIX lớp (slot thừa → uOn=0, sampler trỏ nền cho hợp lệ).
+  // Đẩy BẢNG TRỘN vào shader: nền chính + tối đa MAX_MIX lớp, MỖI slot = CẶP albedo + normal cùng key
+  // (slot thừa → uOn=0, sampler trỏ nền cho hợp lệ).
   applyMix(base: string, layers: MixLayer[]): void {
     if (this.isDisposed) return
     const u = this.mat.uniforms
     u.uTexBase.value = this._tex(base)
+    u.uNrmBase.value = this._tex(base, true)
     const on = u.uOn.value as number[]
     const bias = u.uBias.value as number[]
     for (let i = 0; i < MAX_MIX; i++) {
       const L = layers[i]
       u[`uTexL${i}`].value = this._tex(L ? L.key : base)
+      u[`uNrmL${i}`].value = this._tex(L ? L.key : base, true)
       on[i] = L ? 1 : 0
       bias[i] = L ? L.bias : 0.5
     }
@@ -275,6 +429,7 @@ class GroundPreview {
     this.geo.dispose()
     this.mat.dispose()
     for (const t of this.texCache.values()) t.dispose()
+    this.paint.dispose()
     this.renderer.dispose()
     this.panel.remove()
   }
@@ -344,8 +499,14 @@ function mkTexSelect(value: string, onChange: (key: string) => void): HTMLSelect
   return sel
 }
 
-// 1 LỚP trong bảng trộn (block viền trái): hàng [select hẹp | ✕ nhỏ] + slider Ngưỡng (cao = ít xuất hiện).
-function mkLayerRow(layer: MixLayer, onApply: () => void, onRemove: () => void): HTMLElement {
+// 1 LỚP trong bảng trộn (block viền trái): hàng [select hẹp | 🖌 vẽ mask | ✕ nhỏ] + slider Ngưỡng.
+// 🖌 bật = vẽ mask TAY cho slot này (orbit khóa, kéo chuột trên preview = cọ) — chủ đích kiểu splat-paint.
+function mkLayerRow(
+  layer: MixLayer,
+  onApply: () => void,
+  onRemove: () => void,
+  brush: { on: boolean; toggle: () => void }
+): HTMLElement {
   const box = document.createElement('div')
   box.className = 'ap-mix-layer'
   const head = document.createElement('div')
@@ -354,18 +515,55 @@ function mkLayerRow(layer: MixLayer, onApply: () => void, onRemove: () => void):
     layer.key = k
     onApply()
   })
+  const pb = document.createElement('button')
+  pb.className = 'ap-mix-x'
+  pb.classList.toggle('ap-mix-brush-on', brush.on)
+  pb.textContent = '🖌'
+  pb.title = 'Vẽ mask tay cho lớp này (orbit tạm khóa)'
+  pb.addEventListener('click', brush.toggle)
   const del = document.createElement('button')
   del.className = 'ap-mix-x'
   del.textContent = '✕'
   del.title = 'Xóa lớp này'
   del.addEventListener('click', onRemove)
-  head.append(sel, del)
+  head.append(sel, pb, del)
   box.append(
     head,
     sliderRow('Ngưỡng', 0, 1, 0.05, layer.bias, (v) => {
       layer.bias = v
       onApply()
     })
+  )
+  return box
+}
+
+// Hàng CỌ VẼ (④): cỡ cọ + tẩy + xóa nét của slot đang vẽ — chỉ tác dụng khi có 🖌 bật.
+function mkBrushRow(p: GroundPreview, state: { paintSlot: number | null }): HTMLElement {
+  const box = document.createElement('div')
+  let size = 0.05
+  let erase = false
+  const row = document.createElement('div')
+  row.className = 'ap-mix-row'
+  row.append(
+    checkRow('Tẩy', false, (v) => {
+      erase = v
+      p.setBrush(size, erase)
+    })
+  )
+  const clr = document.createElement('button')
+  clr.className = 'ap-roof-presetbtn'
+  clr.textContent = 'Xóa nét'
+  clr.title = 'Xóa toàn bộ nét vẽ của slot đang bật 🖌'
+  clr.addEventListener('click', () => {
+    if (state.paintSlot !== null) p.clearPaint(state.paintSlot)
+  })
+  row.appendChild(clr)
+  box.append(
+    sliderRow('Cỡ cọ', 0.01, 0.15, 0.01, size, (v) => {
+      size = v
+      p.setBrush(size, erase)
+    }),
+    row
   )
   return box
 }
@@ -386,30 +584,42 @@ function mkBaseRow(state: { base: string }, apply: () => void): HTMLElement {
   return row
 }
 
-// ③ BẢNG TRỘN LỚP: nền chính (select đổi được, mặc định grass) + lớp động ＋/✕ (tối đa MAX_MIX slot shader),
-// mỗi lớp chọn texture kho riêng + Ngưỡng riêng; Mềm biên + Scale mask dùng CHUNG mọi lớp.
-function buildMixerBoard(p: GroundPreview): HTMLElement {
-  const state: { base: string; layers: MixLayer[] } = {
-    base: 'grass_o', // nền chính mặc định = cỏ (NgQuan chốt) — đổi qua select
-    layers: [
-      { key: 'construction_grave', bias: 0.5 },
-      { key: 'rippled_sand', bias: 0.62 },
-    ],
-  }
-  const apply = (): void => p.applyMix(state.base, state.layers)
-  const box = document.createElement('div')
+// Danh sách LỚP ĐỘNG (＋/✕/🖌) của bảng trộn — tách khỏi buildMixerBoard (gate 50 dòng).
+// Xóa lớp đang vẽ → tắt chế độ vẽ (trả orbit).
+function mkLayerList(
+  p: GroundPreview,
+  state: { layers: MixLayer[]; paintSlot: number | null },
+  apply: () => void
+): HTMLElement {
+  const wrap = document.createElement('div')
   const list = document.createElement('div')
   const addBtn = document.createElement('button')
   addBtn.className = 'ap-roof-presetbtn ap-mix-add'
   addBtn.textContent = '＋ Thêm lớp'
+  const setPaint = (i: number | null): void => {
+    state.paintSlot = i
+    p.setPaintSlot(i)
+  }
   const render = (): void => {
     list.replaceChildren(
       ...state.layers.map((l, i) =>
-        mkLayerRow(l, apply, () => {
-          state.layers.splice(i, 1)
-          render()
-          apply()
-        })
+        mkLayerRow(
+          l,
+          apply,
+          () => {
+            if (state.paintSlot === i) setPaint(null)
+            state.layers.splice(i, 1)
+            render()
+            apply()
+          },
+          {
+            on: state.paintSlot === i,
+            toggle: () => {
+              setPaint(state.paintSlot === i ? null : i)
+              render()
+            },
+          }
+        )
       )
     )
     addBtn.disabled = state.layers.length >= MAX_MIX
@@ -419,16 +629,56 @@ function buildMixerBoard(p: GroundPreview): HTMLElement {
     render()
     apply()
   })
-  box.append(
-    mkTitle('③ Bảng trộn lớp'),
-    mkBaseRow(state, apply),
-    list,
-    addBtn,
-    sliderRow('Mềm biên', 0.01, 0.5, 0.01, 0.18, (v) => p.set('uMaskSoft', v)),
-    sliderRow('Scale mask', 0.5, 6, 0.1, 2.0, (v) => p.set('uMaskScale', v))
-  )
+  wrap.append(list, addBtn)
   render()
+  return wrap
+}
+
+// ③+④ BẢNG TRỘN LỚP: nền chính + lớp động (mkLayerList) + hàng cọ vẽ; Mềm biên/Scale mask/Theo cao độ CHUNG.
+function buildMixerBoard(p: GroundPreview): HTMLElement {
+  const state: { base: string; layers: MixLayer[]; paintSlot: number | null } = {
+    base: 'grass_o', // nền chính mặc định = cỏ (NgQuan chốt) — đổi qua select
+    layers: [
+      { key: 'construction_grave', bias: 0.5 },
+      { key: 'rippled_sand', bias: 0.62 },
+    ],
+    paintSlot: null,
+  }
+  const apply = (): void => p.applyMix(state.base, state.layers)
+  const box = document.createElement('div')
+  box.append(
+    mkTitle('③ Bảng trộn lớp + ④ vẽ mask'),
+    mkBaseRow(state, apply),
+    mkLayerList(p, state, apply),
+    mkBrushRow(p, state),
+    sliderRow('Mềm biên', 0.01, 0.5, 0.01, 0.18, (v) => p.set('uMaskSoft', v)),
+    sliderRow('Scale mask', 0.5, 6, 0.1, 2.0, (v) => p.set('uMaskScale', v)),
+    // ③ height-lerp proxy: biên lớp bám CHÊNH ĐỘ SÁNG albedo (≈ cao độ vật liệu) — 0 = fade đều kiểu cũ
+    sliderRow('Theo cao độ', 0, 0.8, 0.05, 0.3, (v) => p.set('uHeightK', v))
+  )
   apply()
+  return box
+}
+
+// ⑤ ÁNH SÁNG (normal map blend + nắng chỉnh hướng) + ⑥ TRỘN XA (dual-scale theo khoảng cách camera).
+function buildLightRows(p: GroundPreview): HTMLElement {
+  const sun = { az: 35, el: 55 }
+  const box = document.createElement('div')
+  box.append(
+    mkTitle('⑤ Ánh sáng + ⑥ xa gần'),
+    checkRow('Ánh sáng (tắt = unlit cũ)', true, (v) => p.set('uLightOn', v ? 1 : 0)),
+    sliderRow('Hướng nắng (°)', 0, 360, 5, sun.az, (v) => {
+      sun.az = v
+      p.setSun(sun.az, sun.el)
+    }),
+    sliderRow('Cao nắng (°)', 10, 85, 1, sun.el, (v) => {
+      sun.el = v
+      p.setSun(sun.az, sun.el)
+    }),
+    sliderRow('Nổi khối', 0, 2, 0.05, 1, (v) => p.set('uNormalK', v)),
+    sliderRow('Trộn xa', 0, 1, 0.05, 0.6, (v) => p.set('uFarOn', v)),
+    sliderRow('Tầm xa (m)', 6, 30, 1, 16, (v) => p.set('uFarRange', v))
+  )
   return box
 }
 
@@ -447,7 +697,8 @@ export function setupGroundLab(
     mkTitle('🟫 Nền — chống lặp texture'),
     buildBombRows(preview),
     buildMacroRows(preview),
-    buildMixerBoard(preview)
+    buildMixerBoard(preview),
+    buildLightRows(preview)
   )
   paramHost?.replaceChildren(col)
 
@@ -456,10 +707,13 @@ export function setupGroundLab(
   const note = document.createElement('div')
   note.className = 'ap-roof-legend'
   note.textContent =
-    '① Bombing (iq): mỗi ô hash → xoay (90°×k hoặc tự do) + offset + jitter scale, trộn mép 4 ô → phá chu kỳ lặp, vẫn 1 texture; Seed = đổi bố cục. ' +
-    '② Macro noise tần thấp: Cường độ = sáng/tối loang · Loang úa = nhuộm ấm từng vạt (đổi MÀU). ' +
-    '③ Bảng trộn lớp: nền chính (select đổi được) + ＋ thêm tối đa 4 lớp, mỗi lớp chọn texture kho + Ngưỡng riêng (mask fbm seed riêng/slot). ' +
-    '9 texture thật từ assets/textures (PROTOCOL).'
+    '① Bombing (iq): mỗi ô hash → xoay (90°×k hoặc tự do) + offset + jitter scale, trộn mép 4 ô — phá chu kỳ lặp; Seed = đổi bố cục. ' +
+    '② Macro noise tần thấp: sáng/tối loang + Loang úa nhuộm ấm từng vạt. ' +
+    '③ Bảng trộn lớp: nền + tối đa 4 lớp, mask fbm seed riêng/slot + Ngưỡng; "Theo cao độ" = height-lerp (biên bám độ sáng albedo ≈ cao độ — sỏi lấn theo viên; height map thật = nâng cấp sau). ' +
+    '④ 🖌 vẽ mask tay per-slot (splat-paint): kéo chuột trên preview, orbit tạm khóa, Tẩy/Xóa nét ở hàng cọ. ' +
+    '⑤ Ánh sáng: normal map blend theo đúng phép xoay bombing + nắng az/el — tắt để so unlit. ' +
+    '⑥ Trộn xa: pha bản scale 0.23 theo khoảng cách camera — diệt lặp ở xa (zoom out để thấy). ' +
+    '9 bộ texture thật (basecolor + normal) từ assets/textures (PROTOCOL).'
   docHost?.replaceChildren(note)
 
   if (settingsHost) {
