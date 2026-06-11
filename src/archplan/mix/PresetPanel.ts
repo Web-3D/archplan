@@ -365,6 +365,13 @@ export class MixPresetPanel {
       this._ensureFileInput().click()
     )
     ft.append(add, exp, imp)
+    const wrap = document.createElement('div')
+    wrap.append(ft, this._modesRow())
+    return wrap
+  }
+
+  // Hàng 3 mode click-3D + ✨ toggle viền sáng hover. Tách khỏi _footer (rule-50).
+  private _modesRow(): HTMLElement {
     const modes = document.createElement('div')
     modes.className = 'ap-mixpre-ft'
     const ap = this._btn(
@@ -382,10 +389,16 @@ export class MixPresetPanel {
     )
     this.modeBtns = { apply: ap, erase: er, edit: ed }
     this._syncModeBtns()
-    const wrap = document.createElement('div')
-    wrap.append(ft, modes)
-    modes.append(ap, er, ed)
-    return wrap
+    // ✨ viền mờ sáng đích dưới con trỏ khi cầm xô (NgQuan: "trỏ vào đâu không biết") — mặc định BẬT
+    const hov = this._btn('✨', 'Viền sáng vật thể dưới con trỏ khi cầm 🪣/🧽/🎯 — bật/tắt', () => {
+      const on = !(this.ctx?.getMixHover?.() ?? true)
+      this.ctx?.setMixHover?.(on)
+      hov.classList.toggle('on', on)
+    })
+    hov.style.flex = '0 0 24px' // nút vuông nhỏ — 3 nút mode giữ bề ngang
+    hov.classList.toggle('on', this.ctx?.getMixHover?.() ?? true)
+    modes.append(ap, er, ed, hov)
+    return modes
   }
 
   // 🪣🧽🎯 Bật/tắt 1 mode (bấm lại nút đang on = tắt). 'apply' cần preset active; manager tự bake

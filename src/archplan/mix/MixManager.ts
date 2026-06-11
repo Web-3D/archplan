@@ -71,6 +71,7 @@ interface MixSel {
   dist: number
   kind: 'site' | 'build' // commit đúng hệ (applySite / ctx.build)
   label: string // tiêu đề board khay ("Tường building", "Hồ — vách"…)
+  obj: THREE.Object3D // ✨ node 3D của đích (pick-box segment / group rào / mesh zone…) — hover ghost
   get(): GroundMixParams | undefined
   set(p: GroundMixParams | undefined): void
   targetOf(): MixPaintTarget | null // target board/cọ — derive LAZY (sau set mới có params)
@@ -106,6 +107,8 @@ export interface MixManagerDeps {
   commitBuilding(): void
   /** 🪣🧽🎯 Cursor hint trên canvas theo mode xô (BUCKET_CURSOR) — '' = tắt. */
   bucketCursor(cursor: string): void
+  /** ✨ Phủ/gỡ ghost mờ sáng lên đích dưới con trỏ (HoverGhost của Lab) — null = tắt. */
+  hoverGhost(obj: THREE.Object3D | null): void
 }
 
 export class MixManager {
@@ -131,6 +134,10 @@ export class MixManager {
   // phiên vẫn serialize giá trị đầy đủ nên không gãy).
   private _bucket: MixBucketOp | null = null
   private _syncBucket: (() => void) | null = null // PresetPanel đăng ký — sync nút khi mode tắt từ ngoài
+  // ✨ HOVER GHOST (NgQuan 2026-06-11 "rê tới đâu viền mờ sáng vật thể đó"): chỉ chạy khi ĐANG cầm xô
+  // (đúng lúc cần biết click sẽ ăn gì); toggle ✨ ở khay. _hoverObj = đích hiện tại (đổi mới re-ghost).
+  private _hoverOn = true
+  private _hoverObj: THREE.Object3D | null = null
   private _onEditOpen: ((sel: MixEditSel) => void) | null = null // 🎯 khay đăng ký — mở board đối tượng
   // (🧪 preview editor preset KHÔNG còn qua cache này — MixPreview canvas riêng tự giữ material,
   //  2026-06-11 "tích hợp preview vào bên phải GUI" → manager hết món _previewMix/setPreview.)
@@ -568,8 +575,35 @@ export class MixManager {
       this.paintOff()
     }
     this._bucket = op
+    if (!op) this._hoverClear() // ✨ buông xô → gỡ ghost
     this.deps.bucketCursor(op ? BUCKET_CURSOR[op.mode] : '')
     this._syncBucket?.()
+  }
+
+  // ── ✨ HOVER GHOST — viền mờ sáng đích dưới con trỏ (chỉ khi cầm xô + toggle bật) ─────────────────
+
+  get hoverOn(): boolean {
+    return this._hoverOn
+  }
+
+  setHover(on: boolean): void {
+    this._hoverOn = on
+    if (!on) this._hoverClear()
+  }
+
+  /** Lab gọi mỗi pointermove (buttons=0). Rẻ khi không cầm xô — thoát sớm; chỉ re-ghost khi ĐỔI đích. */
+  hoverAt(e: PointerEvent): void {
+    if (!this._bucket || !this._hoverOn) return
+    const obj = this._resolveAt(e)?.obj ?? null
+    if (obj === this._hoverObj) return
+    this._hoverObj = obj
+    this.deps.hoverGhost(obj)
+  }
+
+  private _hoverClear(): void {
+    if (!this._hoverObj) return
+    this._hoverObj = null
+    this.deps.hoverGhost(null)
   }
 
   /** Thoát mode xô từ NGOÀI (mode khác bật / ESC / chuột phải) — bake phiên apply + báo panel sync. */
@@ -627,14 +661,15 @@ export class MixManager {
     if (!hit) return null
     const ud = hit.object.userData as { instId?: string; segIdx?: number; key?: string }
     const inst = typeof ud.instId === 'string' ? this._findInst(ud.instId) : null
-    return inst ? this._selBuildingOf(inst, ud, hit.distance) : null
+    return inst ? this._selBuildingOf(inst, ud, hit.distance, hit.object) : null
   }
 
   // Descriptor field mix theo ud — null nếu phần không nhận mix (roof/stairs). Tách (complexity).
   private _selBuildingOf(
     inst: ShapeInstance,
     ud: { segIdx?: number; key?: string },
-    dist: number
+    dist: number,
+    obj: THREE.Object3D // pick-box segment/found/slab — hover ghost = đúng khối phần đó
   ): MixSel | null {
     if (typeof ud.segIdx === 'number' && inst.segments[ud.segIdx]) {
       const seg = inst.segments[ud.segIdx]
@@ -642,6 +677,7 @@ export class MixManager {
         dist,
         kind: 'build',
         label: 'Tường building',
+        obj,
         get: () => seg.mix,
         set: (p) => (seg.mix = p),
         targetOf: () => (seg.mix ? { wallMix: seg.mix } : null),
@@ -653,6 +689,7 @@ export class MixManager {
         dist,
         kind: 'build',
         label: 'Móng',
+        obj,
         get: () => s.foundMix,
         set: (p) => (s.foundMix = p),
         targetOf: () => (s.foundMix ? { wallMix: s.foundMix } : null),
@@ -662,6 +699,7 @@ export class MixManager {
         dist,
         kind: 'build',
         label: 'Sàn',
+        obj,
         get: () => s.slabMix,
         set: (p) => (s.slabMix = p),
         targetOf: () => (s.slabMix ? { flatMix: s.slabMix } : null),
@@ -675,27 +713,29 @@ export class MixManager {
     return null
   }
 
-  // Walk-up cha tìm userData.fenceIdx (mesh con của fence group). −1 = không thuộc rào. Tách (max-depth).
-  private _walkFenceIdx(obj: THREE.Object3D): number {
+  // Walk-up cha tìm NODE mang userData.fenceIdx (mesh con của fence group). null = không thuộc rào.
+  // Trả node (không chỉ idx) — hover ghost phủ TRỌN group rào đó. Tách (max-depth).
+  private _walkFence(obj: THREE.Object3D): THREE.Object3D | null {
     let o: THREE.Object3D | null = obj
     while (o) {
-      if (typeof o.userData.fenceIdx === 'number') return o.userData.fenceIdx as number
+      if (typeof o.userData.fenceIdx === 'number') return o
       o = o.parent
     }
-    return -1
+    return null
   }
 
   // 🧱 Rào: hit đầu thuộc rào → f.mix (target {fence} — board được, không cọ vẽ).
   private _selFence(e: PointerEvent): MixSel | null {
     for (const hit of this.deps.fenceHits(e)) {
-      const idx = this._walkFenceIdx(hit.object)
-      if (idx < 0) continue
-      const f = this.deps.site().fences[idx]
+      const node = this._walkFence(hit.object)
+      if (!node) continue
+      const f = this.deps.site().fences[node.userData.fenceIdx as number]
       if (!f) return null
       return {
         dist: hit.distance,
         kind: 'site',
         label: 'Rào',
+        obj: node,
         get: () => f.mix,
         set: (p) => (f.mix = p),
         targetOf: () => ({ fence: f }),
@@ -719,7 +759,7 @@ export class MixManager {
     let o: THREE.Object3D | null = obj
     while (o) {
       const ud = o.userData
-      if (ud.waterMixRef) return this._selWater(ud, dist)
+      if (ud.waterMixRef) return this._selWater(ud, dist, o)
       if (typeof ud.groundLayerIdx === 'number') {
         const layer = (this.deps.site().groundLayers ?? [])[ud.groundLayerIdx]
         // CHỈ zone surface nhận mix (path/paving/wall đi builder viên riêng — addKindZone return sớm,
@@ -729,6 +769,7 @@ export class MixManager {
             dist,
             kind: 'site',
             label: 'Zone',
+            obj: o,
             get: () => layer.mix,
             set: (p) => (layer.mix = p),
             targetOf: () => layer,
@@ -740,6 +781,7 @@ export class MixManager {
           dist,
           kind: 'site',
           label: 'Nền lô G0',
+          obj: o,
           get: () => site.groundMix,
           set: (p) => (site.groundMix = p),
           targetOf: () => 'base',
@@ -751,13 +793,14 @@ export class MixManager {
   }
 
   // Đáy/vách hồ theo tag mesh (addBasinMesh). Tách khỏi _selSiteOf (rule-50).
-  private _selWater(ud: Record<string, unknown>, dist: number): MixSel {
+  private _selWater(ud: Record<string, unknown>, dist: number, obj: THREE.Object3D): MixSel {
     const w = ud.waterMixRef as WaterConfig
     const face: 'floor' | 'wall' = ud.waterMixFace === 'wall' ? 'wall' : 'floor'
     return {
       dist,
       kind: 'site',
       label: face === 'wall' ? 'Hồ — vách' : 'Hồ — đáy',
+      obj,
       get: () => (face === 'wall' ? w.wallMix : w.floorMix),
       set: (p) => (face === 'wall' ? (w.wallMix = p) : (w.floorMix = p)),
       targetOf: () => ({ water: w, face }),

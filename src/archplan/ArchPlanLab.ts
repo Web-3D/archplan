@@ -195,6 +195,7 @@ import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 k
 import { ShapeSelection } from './interaction/selection' // 🧲 Shape Group — chọn nhóm + ghost-drag
 import { SunGizmo, type SunGizmoHost } from './interaction/sunGizmo' // ☀ sun = vật thể kéo trong scene
 import { WaterTool, type WaterToolHost } from './interaction/waterDrag' // 💧 kéo hồ/đỉnh/viền 3D — tách monolith
+import { HoverGhost } from './mix/HoverGhost' // ✨ viền mờ sáng đích dưới con trỏ khi cầm xô
 import { MixManager } from './mix/MixManager' // 🎨 hệ mix nền (8 đích + cọ vẽ + prune) — tách Mảnh −1 plan palette
 import { MixPreview } from './mix/MixPreview' // 🔎 ô preview preset TRONG khay (canvas WebGPU riêng)
 import { MixPresetPanel } from './mix/PresetPanel' // 🧪 khay preset mix (Mảnh 2) — float như Palette
@@ -510,6 +511,8 @@ export class ArchPlanLab extends BaseWorld {
   // component (không mượn cache MixManager — né lẫn space 'wall'/'xz' gây sọc). Tạo lazy 1 lần, persist
   // qua _rebuildGUI (mount lại vào wrap mới); slider live qua tune() trong delegate tuneMixLive.
   private _mixPreview: MixPreview | null = null
+  // ✨ Ghost hover cho mode xô (manager gọi qua deps.hoverGhost) — tạo lazy lần đầu cần (scene sẵn).
+  private _hoverGhost: HoverGhost | null = null
   // Move tool (kéo element) + Focus (click→GUI) — tách ra interaction/manipulate.ts. moveMode + nút
   // GIỮ ở lab (điều phối 3 mode loại trừ); phiên kéo + map anchor folder nằm trong ManipulateTool.
   private manipulate: ManipulateTool | null = null
@@ -619,6 +622,8 @@ export class ArchPlanLab extends BaseWorld {
     bucketCursor: (c) => {
       this.canvas.style.cursor = c
     },
+    // ✨ ghost hover: phủ/gỡ viền mờ sáng (HoverGhost lazy — chỉ tạo khi lần đầu rê khi cầm xô)
+    hoverGhost: (obj) => (this._hoverGhost ??= new HoverGhost(this.scene)).show(obj),
   })
   // 🪨 Texture đá RÀO/VIỀN hồ: maps + TexturedSurface (triplanar) CACHE 1 lần/key (lab-lifetime) → bơm
   // ctx.borderMatByKey. Lab sở hữu maps + surf → dispose onDispose. Load ASYNC khi hồ dùng borderMaterial≠none.
@@ -879,6 +884,7 @@ export class ArchPlanLab extends BaseWorld {
       return
     }
     if (this.pickMode && this.picking) this._pickAt(e)
+    if (e.buttons === 0) this._mix.hoverAt(e) // ✨ rê (không giữ phím) khi cầm xô → ghost đích sẽ trúng
   }
 
   // Move mode đang kéo: ưu tiên hồ (waterTool) → cổng (_gateDrag) → element building (manipulate).
@@ -1473,8 +1479,7 @@ export class ArchPlanLab extends BaseWorld {
     this.controls = null
     this.palette?.dispose() // gỡ listener doc (mousedown/keydown) của popover palette
     this._teardownPanels() // gui nhà + panel Ground
-    this._mixPreview?.dispose() // 🔎 ô preview khay (WebGPU renderer riêng) — CHỈ dispose cuối, sống qua rebuild
-    this._mixPreview = null
+    this._disposeMixUi() // 🔎✨ ô preview + ghost hover — sống qua rebuild, CHỈ dispose cuối
     this._disposeLabFloat() // 🧪 Lab float persistent (preview + shell + toggle) — dispose ở teardown CUỐI
     this.drawer?.remove() // 🗄️ gỡ shell drawer phải (handle + body) — chỉ ở dispose, KHÔNG ở _rebuildGUI
     this.drawer = null
@@ -1487,6 +1492,14 @@ export class ArchPlanLab extends BaseWorld {
     this._clearBuilding()
     this._clearSite() // 🌳 dispose nền + rào lô
     this._disposeSceneResources()
+  }
+
+  // 🔎✨ Teardown UI mix sống-qua-rebuild — tách khỏi onDispose (complexity ≤10).
+  private _disposeMixUi(): void {
+    this._mixPreview?.dispose() // ô preview khay (WebGPU renderer riêng)
+    this._mixPreview = null
+    this._hoverGhost?.dispose() // ghost hover (material chung; geometry của mesh gốc không đụng)
+    this._hoverGhost = null
   }
 
   // Dispose tài nguyên scene tĩnh (không rebuild mỗi frame) + wall material cache.
@@ -1876,6 +1889,8 @@ export class ArchPlanLab extends BaseWorld {
     | 'getMixBucketMode'
     | 'registerMixBucketSync'
     | 'registerMixEditOpen'
+    | 'setMixHover'
+    | 'getMixHover'
     | 'setMixPreview'
   > {
     return {
@@ -1893,6 +1908,8 @@ export class ArchPlanLab extends BaseWorld {
       getMixBucketMode: () => this._mix.bucketMode,
       registerMixBucketSync: (fn) => this._mix.registerBucketSync(fn),
       registerMixEditOpen: (fn) => this._mix.registerEditOpen(fn), // 🎯 khay mở board đối tượng
+      setMixHover: (on) => this._mix.setHover(on), // ✨ toggle viền sáng hover (nút ✨ khay)
+      getMixHover: () => this._mix.hoverOn,
       setMixPreview: (mix) => this._setMixPreview(mix), // 🧪 tấm preview editor preset
     }
   }
