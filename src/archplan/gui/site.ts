@@ -1913,66 +1913,6 @@ function surfaceOnRow(ctx: APGuiCtx, w: WaterConfig): HTMLElement {
   })
 }
 
-// 🐟 ĐÀN CÁ KOI trong lòng hồ (PondFish — chỉ pool/pond có basin; puddle phẳng → caller bỏ qua).
-// Bật/Số cá = REBUILD commit (tạo/huỷ instance, đi đường applySite như mọi structural); Tốc bơi +
-// Xáo màu = LIVE qua tuneFish (CPU-param/uniform — 0 rebuild, đúng PERFORMANCE.md). Slider luôn hiện
-// (cá tắt → live no-op, giá trị áp khi bật — né stale-GUI vì applySite không rebuild pane).
-function fishRows(ctx: APGuiCtx, w: WaterConfig): HTMLElement {
-  const box = document.createElement('div')
-  box.appendChild(
-    toggleRow('🐟 Cá koi (đàn bơi)', w.fishOn, (on) => {
-      w.fishOn = on
-      ctx.applySite(true)
-    })
-  )
-  box.appendChild(
-    sliderRow(
-      'Số cá',
-      1,
-      30,
-      1,
-      w.fishCount,
-      (v, c) => {
-        w.fishCount = Math.round(v)
-        if (c) ctx.applySite(true)
-      },
-      1
-    )
-  )
-  for (const r of fishLiveRows(ctx, w)) box.appendChild(r)
-  return box
-}
-
-// 2 slider LIVE của cá (tốc bơi/xáo màu) — tách khỏi fishRows (Rule-50).
-function fishLiveRows(ctx: APGuiCtx, w: WaterConfig): HTMLElement[] {
-  return [
-    sliderRow(
-      'Tốc bơi %',
-      5,
-      80,
-      5,
-      w.fishSpeed * 100,
-      (v, c) => {
-        w.fishSpeed = v / 100
-        ctx.tuneFish(w, (f) => f.setSpeed(w.fishSpeed), c)
-      },
-      1
-    ),
-    sliderRow(
-      'Xáo màu cá',
-      0,
-      99,
-      1,
-      w.fishSeed,
-      (v, c) => {
-        w.fishSeed = Math.round(v)
-        ctx.tuneFish(w, (f) => f.setColorSeed(w.fishSeed), c)
-      },
-      1
-    ),
-  ]
-}
-
 // BẬC 4 "Surface" (mặt hồ): màu nước + gương/sóng/rung/đục — uniform LIVE qua tuneWater(w,…), KHÔNG dựng lại.
 function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void {
   host.append(
@@ -2010,7 +1950,6 @@ function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void
     )
   }
   host.appendChild(waveSizeRow(ctx, w))
-  if (w.kind !== 'puddle') host.appendChild(fishRows(ctx, w)) // 🐟 chỉ hồ LÕM (vũng không lòng)
 }
 type SurfKey = 'reflectivity' | 'flow' | 'distortion' | 'detail' | 'refract' | 'tint'
 
@@ -2360,6 +2299,161 @@ function buildFenceDomain(ctx: APGuiCtx): {
   }
 }
 
+// ── 🌉 CẦU (bridge bắc ngang hồ) — UI SHELL (NgQuan 2026-06-11) ─────────────────────────────────────
+// ⚠️ BẢN NHÁP: state + dựng hình 3D + lưu CHƯA nối — site-kit (state.ts/render) đang kẹt luồng cá koi.
+// Khi mạch cá commit xong → dời BridgeConfig sang threejs-modules/site/state.ts (bridges[] + parse) +
+// viết builder site/render + render trong Lab. Tham số mô hình theo industry (Houdini Arch Bridge SOP /
+// CityEngine pier styles / RailClone deck+pier / SideFX Japanese taiko-bashi): nhịp + vồng vòm + ván +
+// lan can (trụ con) + trụ đỡ gầm. Default = cầu vòm gỗ kiểu Nhật, hợp hồ koi.
+interface BridgeConfig {
+  enabled: boolean
+  material: 'wood' | 'stone'
+  offsetX: number // mm — tâm cầu lệch tâm lô (X)
+  offsetZ: number // mm — (Z)
+  rotDeg: number // độ — hướng bắc qua hồ
+  span: number // mm — chiều dài nhịp
+  deckWidth: number // mm — bề rộng mặt cầu
+  rise: number // mm — độ vồng vòm (taiko-bashi); 0 = phẳng
+  plankCount: number // số tấm ván chia mặt cầu
+  railOn: boolean
+  railHeight: number // mm — cao lan can
+  postCount: number // số trụ con lan can mỗi bên
+  pierOn: boolean
+  pierCount: number // số trụ đỡ dưới gầm
+}
+
+function makeBridge(): BridgeConfig {
+  return {
+    enabled: true,
+    material: 'wood',
+    offsetX: 0,
+    offsetZ: 5000, // rơi vào tâm pool default (như makeFishSchool) — user kéo đặt lại
+    rotDeg: 0,
+    span: 5000,
+    deckWidth: 1400,
+    rise: 600, // vồng vừa kiểu cầu vườn Nhật
+    plankCount: 14,
+    railOn: true,
+    railHeight: 900,
+    postCount: 6,
+    pierOn: true,
+    pierCount: 2,
+  }
+}
+
+// Draft đa-instance MODULE-LEVEL (sống trọn session, KHÔNG lưu vào design — shell tạm; dời sang
+// SiteState.bridges khi site-kit hết kẹt). Bắt đầu 1 cầu mẫu.
+const bridgeDrafts: BridgeConfig[] = [makeBridge()]
+
+type BridgeMKey = 'offsetX' | 'offsetZ' | 'span' | 'deckWidth' | 'rise' | 'railHeight'
+type BridgeNKey = 'plankCount' | 'postCount' | 'pierCount'
+
+// slider mét (hiển thị m, lưu mm) cho 1 field cầu. Tách giữ buildBridgeControls gọn (rule-50).
+function bridgeMSlider(
+  b: BridgeConfig,
+  label: string,
+  key: BridgeMKey,
+  min: number,
+  max: number
+): HTMLElement {
+  return sliderRow(label, min, max, 0.05, b[key] / 1000, (v) => (b[key] = Math.round(v * 1000)), 2)
+}
+
+// slider số nguyên (đếm) cho 1 field cầu.
+function bridgeNSlider(
+  b: BridgeConfig,
+  label: string,
+  key: BridgeNKey,
+  min: number,
+  max: number
+): HTMLElement {
+  return sliderRow(label, min, max, 1, b[key], (v) => (b[key] = Math.round(v)), 0)
+}
+
+// Controls 1 cầu — bộ tham số parametric (shell: chỉnh = mutate draft, CHƯA render/lưu).
+function buildBridgeControls(pane: HTMLElement, b: BridgeConfig): void {
+  pane.appendChild(toggleRow('Bật cầu', b.enabled, (on) => (b.enabled = on)))
+  pane.appendChild(
+    selectRow<BridgeConfig['material']>(
+      'Vật liệu',
+      [
+        ['Gỗ', 'wood'],
+        ['Đá', 'stone'],
+      ],
+      b.material,
+      (v) => (b.material = v)
+    )
+  )
+  pane.appendChild(bridgeMSlider(b, 'Pos X m', 'offsetX', -20, 20))
+  pane.appendChild(bridgeMSlider(b, 'Pos Z m', 'offsetZ', -20, 20))
+  pane.appendChild(sliderRow('Xoay °', 0, 360, 5, b.rotDeg, (v) => (b.rotDeg = v), 0))
+  pane.appendChild(bridgeMSlider(b, 'Dài (nhịp) m', 'span', 1, 20))
+  pane.appendChild(bridgeMSlider(b, 'Rộng mặt m', 'deckWidth', 0.6, 4))
+  pane.appendChild(bridgeMSlider(b, 'Vồng vòm m', 'rise', 0, 2))
+  pane.appendChild(bridgeNSlider(b, 'Số ván', 'plankCount', 4, 40))
+  pane.appendChild(toggleRow('Lan can', b.railOn, (on) => (b.railOn = on)))
+  pane.appendChild(bridgeMSlider(b, 'Cao lan can m', 'railHeight', 0.3, 1.5))
+  pane.appendChild(bridgeNSlider(b, 'Trụ con / bên', 'postCount', 0, 20))
+  pane.appendChild(toggleRow('Trụ đỡ gầm', b.pierOn, (on) => (b.pierOn = on)))
+  pane.appendChild(bridgeNSlider(b, 'Số trụ đỡ', 'pierCount', 0, 6))
+}
+
+// 1 pane cầu i: banner shell + controls + ✕ xoá. (Chưa applySite — shell chưa render.)
+function buildBridgePane(
+  b: BridgeConfig,
+  i: number,
+  rebuild: (focus?: number) => void
+): HTMLElement {
+  const pane = document.createElement('div')
+  const note = document.createElement('div')
+  note.style.cssText =
+    'margin:0 0 6px;padding:3px 5px;border:1px dashed var(--gr-bg-4,#b58a3c);border-radius:4px;' +
+    'font-size:9px;opacity:.8'
+  note.textContent = '🚧 Bản UI thử — hình 3D + lưu sẽ nối khi mạch cá xong'
+  pane.appendChild(note)
+  buildBridgeControls(pane, b)
+  pane.appendChild(
+    removeRow('✕ Remove cầu', () => {
+      bridgeDrafts.splice(bridgeDrafts.indexOf(b), 1)
+      rebuild(Math.max(0, i - 1))
+    })
+  )
+  return pane
+}
+
+// Sub-tab "Cầu" → hàng tab instance C1/C2… + ＋ (mirror buildFenceDomain). Draft module-level (shell).
+function buildBridgeDomain(): { panel: HTMLElement; dispose: () => void } {
+  const host = document.createElement('div')
+  host.classList.add('ap-fence-domain') // mượn tông nâu fence (chưa cần palette riêng)
+  let tabs: Tabs | null = null
+  const rebuild = (focus = 0): void => {
+    tabs?.dispose()
+    host.replaceChildren()
+    const items: TabItem[] = bridgeDrafts.map((b, i) => {
+      const pane = buildBridgePane(b, i, rebuild)
+      host.appendChild(pane)
+      return { label: `C${i + 1}`, panel: pane, title: `Cầu ${i + 1}` }
+    })
+    const addBtn = addInstanceButton('Cầu', () => {
+      bridgeDrafts.push(makeBridge())
+      rebuild(bridgeDrafts.length - 1)
+    })
+    tabs = new Tabs(host, items, {
+      classes: {
+        bar: 'ap-tab-bar ap-fence-itabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-fence-isub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+      addEl: addBtn,
+      initial: focus,
+    })
+  }
+  rebuild()
+  return { panel: host, dispose: (): void => tabs?.dispose() }
+}
+
 // Nút ✕ xoá 1 instance hồ (hàng riêng, canh phải).
 function removeRow(label: string, onRemove: () => void): HTMLElement {
   const row = document.createElement('div')
@@ -2560,21 +2654,25 @@ const STONE_MAT_OPTS: [string, BorderMaterialKey][] = [
   ['Rock rough', 'rock-rough'],
 ]
 
-// Hàng tab con SITE (Ground|Fence|Garden|Water) — tách khỏi setupSitePanel cho rule-50.
+// Hàng tab con SITE (Ground|Fence|Garden|Water|Cầu) — tách khỏi setupSitePanel cho rule-50.
 function makeSiteTabs(
   host: HTMLElement,
-  ground: HTMLElement,
-  fence: HTMLElement,
-  garden: HTMLElement,
-  water: HTMLElement
+  panels: {
+    ground: HTMLElement
+    fence: HTMLElement
+    garden: HTMLElement
+    water: HTMLElement
+    bridge: HTMLElement
+  }
 ): Tabs {
   return new Tabs(
     host,
     [
-      { label: 'Ground', panel: ground, title: 'Surface material / lot' },
-      { label: 'Fence', panel: fence, title: 'Fence' },
-      { label: 'Garden', panel: garden, title: 'Grass (3D, any surface) + trees' },
-      { label: 'Water', panel: water, title: 'Water: Pool / Pond / Puddle' },
+      { label: 'Ground', panel: panels.ground, title: 'Surface material / lot' },
+      { label: 'Fence', panel: panels.fence, title: 'Fence' },
+      { label: 'Garden', panel: panels.garden, title: 'Grass (3D, any surface) + trees' },
+      { label: 'Water', panel: panels.water, title: 'Water: Pool / Pond / Puddle' },
+      { label: 'Cầu', panel: panels.bridge, title: 'Cầu bắc ngang hồ (bridge)' },
     ],
     {
       classes: {
@@ -2592,46 +2690,43 @@ function makeSiteTabs(
 // "Garden" lồng BẬC 2 (Grass|Tree) — Grass = on/off + slider chi tiết cỏ (chuyển từ Lab; preview ở lại Lab).
 // (Tab "Rock" non bộ ĐÃ GỠ 2026-06-09 — procedural "chưa ra dáng"; đá điểm nhấn → Houdini bake, xem deferred.)
 // Trả { panel, dispose, navigateToWater }: panel cho drawer Tabs; navigateToWater = click hồ 3D → mở tab hồ.
-export function setupSitePanel(
-  ctx: APGuiCtx,
-  container: Element | null
-): {
+interface SitePanel {
   panel: HTMLElement
   dispose: () => void
   navigateToWater: (cfg: WaterConfig) => boolean
   navigateToFence: (idx: number) => void
   navigateToGroundLayer: (idx: number) => void
-} {
+}
+
+export function setupSitePanel(ctx: APGuiCtx, container: Element | null): SitePanel {
   const p = document.createElement('div')
   p.className = 'ap-scan-panel ap-site-panel'
-
-  // Sub-tab "Ground": hàng INSTANCE-tab tầng surface (G0 base + G1/G2… layer chồng + ＋) — xếp lớp 3D.
-  // (Bảng Lot/House/Coverage/Garden ĐÃ GỠ — NgQuan 2026-06-11 "giờ không cần nữa"; refresh = noop cho caller.)
+  // 5 sub-tab: Ground (G0+G1…) · Fence (F1…) · Garden (Grass|Tree) · Water (Pool|Pond|Puddle) · Cầu (UI shell).
   const groundSub = document.createElement('div')
   const ground = buildGroundDomain(ctx, () => {})
   groundSub.appendChild(ground.panel)
-
-  // Sub-tab "Fence": hàng rào ĐA-LỚP (instance-tab F1/F2… + ＋).
   const fence = buildFenceDomain(ctx)
   const fenceSub = fence.panel
-
-  // Sub-tab "Garden": BẬC 2 (Grass|Tree) — Grass = ô stick + chi tiết cỏ + preview (gom từ tab Lab cũ).
   const garden = buildGardenDomain(ctx)
   const gardenSub = garden.panel
-
-  // Sub-tab "Water": BẬC 2 (Pool|Pond|Puddle) — tông xanh nước curated, tách khỏi tông nâu Ground.
   const water = buildWaterDomain(ctx)
   const waterSub = water.panel
-
-  p.append(groundSub, fenceSub, gardenSub, waterSub)
+  const bridge = buildBridgeDomain() // 🌉 "Cầu" bắc ngang hồ — UI SHELL (draft, chưa render/lưu)
+  p.append(groundSub, fenceSub, gardenSub, waterSub, bridge.panel)
   container?.appendChild(p)
 
-  const tabs = makeSiteTabs(p, groundSub, fenceSub, gardenSub, waterSub)
+  const tabs = makeSiteTabs(p, {
+    ground: groundSub,
+    fence: fenceSub,
+    garden: gardenSub,
+    water: waterSub,
+    bridge: bridge.panel,
+  })
   return {
     panel: p,
     dispose: (): void => {
       tabs.dispose()
-      for (const d of [ground, fence, garden, water]) d.dispose()
+      for (const d of [ground, fence, garden, water, bridge]) d.dispose()
     },
     // Click hồ 3D → mở sub-tab "Water" (index 3) rồi ủy quyền water domain mở type+instance tab của cfg.
     navigateToWater: (cfg: WaterConfig): boolean => {
