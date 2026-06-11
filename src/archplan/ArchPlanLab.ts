@@ -617,8 +617,8 @@ export class ArchPlanLab extends BaseWorld {
     },
     commitSite: () => this._applySite(true),
     commitBuilding: () => this._buildScene(), // cùng đường ctx.build (commit hệ nhà)
-    bucketCursor: (on) => {
-      this.canvas.style.cursor = on ? 'copy' : ''
+    bucketCursor: (c) => {
+      this.canvas.style.cursor = c
     },
   })
   // 🪨 Texture đá RÀO/VIỀN hồ: maps + TexturedSurface (triplanar) CACHE 1 lần/key (lab-lifetime) → bơm
@@ -1872,8 +1872,9 @@ export class ArchPlanLab extends BaseWorld {
     | 'tuneMixLive'
     | 'registerMixPaintSync'
     | 'setMixBucket'
-    | 'getMixBucketOn'
+    | 'getMixBucketMode'
     | 'registerMixBucketSync'
+    | 'registerMixEditOpen'
     | 'setMixPreview'
   > {
     return {
@@ -1884,9 +1885,10 @@ export class ArchPlanLab extends BaseWorld {
       clearMixPaint: (target, slot) => this._mix.clearPaint(target, slot),
       tuneMixLive: (target) => this._mix.tuneLive(target),
       registerMixPaintSync: (fn) => this._mix.registerSync(fn),
-      setMixBucket: (src) => this._mix.setBucket(src),
-      getMixBucketOn: () => this._mix.bucketOn,
+      setMixBucket: (op) => this._mix.setBucket(op),
+      getMixBucketMode: () => this._mix.bucketMode,
       registerMixBucketSync: (fn) => this._mix.registerBucketSync(fn),
+      registerMixEditOpen: (fn) => this._mix.registerEditOpen(fn), // 🎯 khay mở board đối tượng
       setMixPreview: (mix) => this._setMixPreview(mix), // 🧪 tấm preview editor preset
     }
   }

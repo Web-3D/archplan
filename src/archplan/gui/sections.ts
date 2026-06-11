@@ -6,7 +6,6 @@
 
 import type GUI from 'lil-gui'
 import type { Controller } from 'lil-gui'
-import type { GroundMixParams } from 'threejs-modules/site/state' // 🎨 mix mặt tường (target wallMix)
 
 import {
   defaultOpening,
@@ -24,7 +23,7 @@ import {
 } from '../state/state'
 import type { APGuiCtx } from './ctx'
 import { buildTabBar } from './gui'
-import { mkMixSection } from './site' // 🎨 board mix (PhotoGroundMix) — cấy vào khu Wall material
+import { mixStatusRow } from './site' // 🎨 dòng báo mix — board inline đã tháo (khay 🧪: 🪣/🧽/🎯)
 
 // Material chia 4 nhóm select ngang hàng (Brick/Wood/Metal/Concrete) cho dễ chọn. Loại trừ nhau qua
 // seg.material: chọn 1 giá trị ở nhóm → set material; nhóm khác về 'none' sau rebuild.
@@ -114,24 +113,8 @@ function addMaterialControls(folder: GUI, seg: SegmentState, ctx: APGuiCtx): voi
   if (seg.material === 'jp-shoji' || seg.material === 'jp-shoji-glass')
     addShojiControls(folder, seg, ctx)
   if (seg.material === 'jp-shoji-glass') addShojiGlassControls(folder, seg, ctx)
-  addWallMixSection(folder, seg, ctx) // 🎨 mix mặt tường (seg.mix) — board cuối khu material
-}
-
-// 🎨 MIX mặt tường BUILDING (seg.mix — PhotoGroundMix mapping 'wall', NgQuan "kể cả tường wall trong
-// building"): bật = THAY material surface (chỉ nhánh surface — *-3d giữ geometry, mix bỏ qua). Board DOM
-// thuần append vào $children lil-gui (folder destroy → rời theo). Target generic { wallMix } — không cọ vẽ.
-// commit = ctx.build (history + persist hệ nhà — KHÔNG applySite). Tách hàm giữ addMaterialControls ≤50 dòng.
-function addWallMixSection(folder: GUI, seg: SegmentState, ctx: APGuiCtx): void {
-  folder.$children.appendChild(
-    mkMixSection(
-      ctx,
-      // mix off → wallMix=undefined (sameMixTarget so ref → false, vô hại; board chỉ dựng khi mix có)
-      () => ({ wallMix: seg.mix as GroundMixParams }),
-      () => seg.mix,
-      (m) => (seg.mix = m),
-      { defBase: 'cinder-blocks-wall', paintable: false, commit: () => ctx.build() }
-    )
-  )
+  // 🎨 Mix mặt tường (seg.mix): board inline ĐÃ THÁO — áp/gỡ/chỉnh qua khay 🧪 (🪣/🧽/🎯).
+  if (seg.mix) folder.$children.appendChild(mixStatusRow())
 }
 
 // Controls shoji (jp-shoji*): số đo trục gỗ + nan gỗ + độ nhiễu vân (nhám koshita). Self-heal né gui.add undefined.
@@ -192,16 +175,8 @@ function buildSlabSubfolder(parent: GUI, s: StructureState, ctx: APGuiCtx): GUI 
   })
     .name('Material')
     .onChange(ctx.build)
-  // 🎨 MIX sàn (slabMix — mapping 'xz' nằm như nền, THẮNG Material trên khi bật; target generic flatMix).
-  f.$children.appendChild(
-    mkMixSection(
-      ctx,
-      () => ({ flatMix: s.slabMix as GroundMixParams }),
-      () => s.slabMix,
-      (m) => (s.slabMix = m),
-      { defBase: 'roman-stone-floor', paintable: false, commit: () => ctx.build() }
-    )
-  )
+  // 🎨 Mix sàn (slabMix — THẮNG Material trên khi phủ): board inline ĐÃ THÁO — khay 🧪 (🪣/🧽/🎯).
+  if (s.slabMix) f.$children.appendChild(mixStatusRow())
   return f
 }
 
@@ -481,17 +456,8 @@ function buildFoundationSubfolder(parent: GUI, s: StructureState, ctx: APGuiCtx)
   live(f.add(s, 'foundH', 100, foundHMax, 50).name('Height'), ctx)
   if (s.foundType === 'wood-deck') buildWoodDeckControls(f, s, ctx) // deck + cột chống (2 vân riêng)
   if (s.foundType === 'stone-pillar') buildStonePillarFolders(f, s, ctx) // 3 tab con: Deck | Khung dưới | Trụ đá
-  // 🎨 MIX móng (foundMix — CHỈ nhánh Concrete; mapping 'wall' + rule trọng lực theo chân/cao móng thật).
-  if (s.foundType === 'concrete')
-    f.$children.appendChild(
-      mkMixSection(
-        ctx,
-        () => ({ wallMix: s.foundMix as GroundMixParams }),
-        () => s.foundMix,
-        (m) => (s.foundMix = m),
-        { defBase: 'cinder-blocks-wall', paintable: false, commit: () => ctx.build() }
-      )
-    )
+  // 🎨 Mix móng (foundMix — CHỈ render nhánh Concrete): board inline ĐÃ THÁO — khay 🧪 (🪣/🧽/🎯).
+  if (s.foundType === 'concrete' && s.foundMix) f.$children.appendChild(mixStatusRow())
   live(f.add(s.foundOh, 'n', 0, 2, 0.05).name('Expand N m'), ctx)
   live(f.add(s.foundOh, 'e', 0, 2, 0.05).name('Expand E m'), ctx)
   live(f.add(s.foundOh, 's', 0, 2, 0.05).name('Expand S m'), ctx)

@@ -34,6 +34,22 @@ export type MixPaintTarget =
   // 🎨 GENERIC mặt NẰM KHÔNG cọ vẽ (mapping 'xz' world — vd slabMix sàn building).
   | { flatMix: GroundMixParams }
 
+// 🪣🧽🎯 HỌ MODE XÔ MIX (khay 🧪 — UI inline đã tháo): 'apply' cầm src = REF preset.mix sống
+// (phiên xô chỉnh ✎ live trên bề mặt; buông xô MixManager bake → clone riêng) · 'erase' gỡ · 'edit' chọn.
+export type MixBucketOp =
+  | { mode: 'apply'; src: GroundMixParams }
+  | { mode: 'erase' }
+  | { mode: 'edit' }
+
+// 🎯 Đích mode 'edit' resolve được — khay mở board: target thật (zone/G0/hồ = CÓ cọ vẽ) + params
+// hiện hành + kind để commit đúng hệ (build = ctx.build / site = applySite) + label tiêu đề.
+export interface MixEditSel {
+  target: MixPaintTarget
+  kind: 'site' | 'build'
+  label: string
+  params: GroundMixParams
+}
+
 // Cùng target HỒ (cùng WaterConfig ref + cùng face)? — tách hàm giữ sameMixTarget dưới trần complexity.
 function sameWaterTarget(a: MixPaintTarget, b: MixPaintTarget): boolean {
   if (typeof a === 'string' || typeof b === 'string') return false
@@ -118,11 +134,15 @@ export interface APGuiCtx {
   // Kéo slider mix (Ngưỡng/Macro/…) → đẩy uniform vào material sống — KHÔNG rebuild site (stage 3 hết khựng).
   tuneMixLive?(target: MixPaintTarget): void
   registerMixPaintSync?(fn: () => void): void // UI đăng ký redraw — bỏ highlight 🖌 khi mode tắt từ ngoài
-  // 🪣 XÔ ÁP PRESET MIX (Mảnh 3 plan palette): cầm mix nguồn (ref preset sống) → click 3D = CLONE vào đích
-  // (tường building/rào/đáy-vách hồ/zone surface/G0/móng/sàn). null = buông xô. Optional như nhóm cọ.
-  setMixBucket?(src: GroundMixParams | null): void
-  getMixBucketOn?(): boolean // nút 🪣 panel preset hiện đúng trạng thái
-  registerMixBucketSync?(fn: () => void): void // panel đăng ký — bỏ highlight 🪣 khi mode tắt từ ngoài
+  // 🪣🧽🎯 HỌ MODE XÔ MIX (khay 🧪 — UI inline trong panel ĐÃ THÁO, NgQuan 2026-06-11): click 3D vào đích
+  // (tường building/rào/đáy-vách hồ/zone surface/G0/móng/sàn) →
+  //   'apply' = CLONE preset vào field mix · 'erase' = gỡ mix (field=undefined) · 'edit' = mở board
+  //   của ĐỐI TƯỢNG trong khay (registerMixEditOpen — cọ vẽ/slider live trên target thật).
+  // null = buông mode. Optional như nhóm cọ.
+  setMixBucket?(op: MixBucketOp | null): void
+  getMixBucketMode?(): MixBucketOp['mode'] | null // 3 nút khay hiện đúng trạng thái
+  registerMixBucketSync?(fn: () => void): void // panel đăng ký — bỏ highlight khi mode tắt từ ngoài
+  registerMixEditOpen?(fn: (sel: MixEditSel) => void): void // 🎯 click trúng đích có mix → khay mở board
   // 🧪 Tấm PREVIEW 3D cho EDITOR PRESET (khay 🧪 đang ✎): Lab dựng plane đứng 2×2m trước lô, material
   // từ cache mix của CHÍNH preset.mix → slider board tune LIVE thấy ngay (CLONE chỉ áp lúc 🪣 — đối
   // tượng đã áp KHÔNG đổi theo, đúng chốt). null = gỡ tấm. Gọi lại sau commit structural (đổi texture/rule).

@@ -33,7 +33,6 @@ import {
   isGroundTexKey,
   makeFence,
   makeGroundLayer,
-  makeGroundMixParams,
   makePavingParams,
   makeStonePathParams,
   makeWallCurveParams,
@@ -213,40 +212,34 @@ function colorRow(
 // (readout Lot/House/Coverage/Garden ĐÃ GỠ — NgQuan 2026-06-11. ctx.siteStats/registerSiteReadout giữ trong
 // interface + Lab plumbing optional-chain — vô hại, không gọi nữa.)
 
-// 🎨 Section surface G0: toggle "Mix nền (Lab)" — bật = bảng trộn PhotoGroundMix (target 'base',
-// site.groundMix); tắt = select texture đơn site.ground như cũ. Tự re-render khi toggle (swap select↔board).
+// 🎨 Dòng trạng thái mix — UI inline (toggle + board) ĐÃ THÁO khỏi MỌI panel (NgQuan 2026-06-11
+// "đã có bảng mix di động, tháo tất cả"): áp = 🪣, gỡ = 🧽, chỉnh/cọ vẽ = 🎯 ở khay 🧪.
+// EXPORT cho gui/sections.ts (tường building/móng/sàn) dùng cùng dòng báo.
+export function mixStatusRow(): HTMLElement {
+  const d = document.createElement('div')
+  d.textContent = '🎨 đang phủ MIX — chỉnh 🎯 / gỡ 🧽 ở khay 🧪'
+  d.style.cssText = 'opacity:.75;font-size:9px;margin:2px 0 4px'
+  return d
+}
+
+// 🎨 Section surface G0: select texture đơn + (mix đang phủ → dòng trạng thái — mix THẮNG select khi render).
+// Board/toggle inline đã tháo — xem mixStatusRow.
 function mkBaseMixSection(ctx: APGuiCtx): HTMLElement {
   const site = ctx.site
   const wrap = document.createElement('div')
-  const render = (): void => {
-    wrap.replaceChildren()
-    wrap.appendChild(
-      toggleRow('Mix nền (Lab)', site.groundMix !== undefined, (on) => {
-        site.groundMix = on
-          ? (site.groundMix ??
-            makeGroundMixParams(isGroundTexKey(site.ground) ? site.ground : 'grass-o'))
-          : undefined
-        if (!on && ctx.getMixPaint?.()?.target === 'base') ctx.setMixPaint?.(null, 0) // 🖌 đang vẽ G0 → thoát
-        render()
+  if (site.groundMix) wrap.appendChild(mixStatusRow())
+  wrap.appendChild(
+    texPaletteRow(
+      'Surface',
+      GROUND_OPTS,
+      site.ground,
+      (v) => {
+        site.ground = v
         ctx.applySite(true)
-      })
+      },
+      { groups: GROUND_TEX_GROUPS, onOpen: () => ctx.prefetchGroundTextures?.() }
     )
-    if (site.groundMix) buildMixBoard(wrap, ctx, 'base', site.groundMix)
-    else
-      wrap.appendChild(
-        texPaletteRow(
-          'Surface',
-          GROUND_OPTS,
-          site.ground,
-          (v) => {
-            site.ground = v
-            ctx.applySite(true)
-          },
-          { groups: GROUND_TEX_GROUPS, onOpen: () => ctx.prefetchGroundTextures?.() }
-        )
-      )
-  }
-  render()
+  )
   return wrap
 }
 
@@ -1327,42 +1320,11 @@ function mkMixBaseRow(mix: GroundMixParams, commit: () => void): HTMLElement {
   )
 }
 
-// 🎨 Section MIX gắn được vào pane BẤT KỲ (đáy/vách hồ, tường rào, tường BUILDING — stage 4): toggle + board.
-// get/set thao tác field GroundMixParams trong state (vd w.floorMix / seg.mix). Tắt khi đang vẽ target này →
-// thoát cọ. defBase = texture nền mặc định lúc bật. paintable=false → ẩn hàng cọ. targetOf = LẤY LẠI target
-// mỗi render (target {wallMix} trỏ params object — đổi sau toggle). commit default = applySite; building bơm
-// ctx.build. EXPORT cho gui/sections.ts (khu Wall material building) — cấy ghép = 1 call này + render hook.
-export function mkMixSection(
-  ctx: APGuiCtx,
-  targetOf: () => MixPaintTarget,
-  get: () => GroundMixParams | undefined,
-  set: (m: GroundMixParams | undefined) => void,
-  o: { defBase: GroundMaterialKey; paintable: boolean; commit?: () => void }
-): HTMLElement {
-  ensureMixCss() // board có thể sống NGOÀI site panel (lil-gui building) — tự đảm bảo style
-  const commit = o.commit ?? ((): void => ctx.applySite(true))
-  const wrap = document.createElement('div')
-  wrap.classList.add('ap-mix-host')
-  const render = (): void => {
-    wrap.replaceChildren()
-    wrap.appendChild(
-      toggleRow('Mix (Lab)', get() !== undefined, (on) => {
-        set(on ? (get() ?? makeGroundMixParams(o.defBase)) : undefined)
-        const c = ctx.getMixPaint?.()
-        if (!on && c && sameMixTarget(c.target, targetOf())) ctx.setMixPaint?.(null, 0) // đang vẽ → thoát
-        render()
-        commit()
-      })
-    )
-    const m = get()
-    if (m) buildMixBoard(wrap, ctx, targetOf(), m, o.paintable, commit)
-  }
-  render()
-  return wrap
-}
+// (mkMixSection — toggle + board inline per-panel — ĐÃ XÓA 2026-06-11: mọi thao tác mix per-đối-tượng
+// chuyển về khay 🧪: 🪣 áp · 🧽 gỡ · 🎯 chỉnh/cọ vẽ. buildMixBoard GIỮ — khay tái dùng làm editor.)
 
-// 🟫 Thân pane SURFACE-zone: MIX NỀN (toggle — bật = bảng trộn Lab thay texture đơn) | select texture đơn,
-// + form + Length/Width + Thickness/Drape/Terrain (buildAddZoneExtras).
+// 🟫 Thân pane SURFACE-zone: status mix (nếu phủ) + Drape + select texture đơn,
+// + form + Length/Width + Thickness/Terrain (buildAddZoneExtras).
 function buildSurfaceZoneBody(
   pane: HTMLElement,
   ctx: APGuiCtx,
@@ -1370,40 +1332,26 @@ function buildSurfaceZoneBody(
   flatIdx: number,
   rebuild: (focus?: number) => void
 ): void {
-  // 🎨 NgQuan 2026-06-10: "bê bộ nền Lab vào thay texture trong Z1" — mix off vẫn giữ đường texture đơn (nhẹ).
-  // 2026-06-11: Drape (bám gò) đẩy LÊN ngang hàng Mix nền (1 flex-row đôi — gỡ khỏi buildAddZoneExtras).
-  const dual = document.createElement('div')
-  dual.style.cssText = 'display:flex;gap:14px;flex-wrap:wrap;align-items:center'
-  dual.append(
-    toggleRow('Mix nền (Lab)', layer.mix !== undefined, (on) => {
-      layer.mix = on
-        ? (layer.mix ??
-          makeGroundMixParams(isGroundTexKey(layer.material) ? layer.material : 'grass-o'))
-        : undefined
-      if (!on && ctx.getMixPaint?.()?.target === layer) ctx.setMixPaint?.(null, 0) // 🖌 đang vẽ → thoát mode
-      rebuild(flatIdx)
-      ctx.applySite(true)
-    }),
+  // 🎨 Mix board inline ĐÃ THÁO (mixStatusRow) — áp/gỡ/chỉnh qua khay 🧪. Drape giữ tại chỗ.
+  if (layer.mix) pane.appendChild(mixStatusRow())
+  pane.appendChild(
     toggleRow('Drape (bám gò)', layer.drape ?? false, (on) => {
       layer.drape = on
       ctx.applySite(true)
     })
   )
-  pane.appendChild(dual)
-  if (layer.mix) buildMixBoard(pane, ctx, layer, layer.mix)
-  else
-    pane.appendChild(
-      texPaletteRow(
-        'Surface',
-        GROUND_OPTS,
-        layer.material,
-        (v) => {
-          layer.material = v
-          ctx.applySite(true)
-        },
-        { groups: GROUND_TEX_GROUPS, onOpen: () => ctx.prefetchGroundTextures?.() }
-      )
+  pane.appendChild(
+    texPaletteRow(
+      'Surface',
+      GROUND_OPTS,
+      layer.material,
+      (v) => {
+        layer.material = v
+        ctx.applySite(true)
+      },
+      { groups: GROUND_TEX_GROUPS, onOpen: () => ctx.prefetchGroundTextures?.() }
     )
+  )
   pane.appendChild(groundFormRow(ctx, layer)) // circle=đường kính, ellipse=trục X
   pane.appendChild(layerSlider(ctx, layer, 'length', 'Length m', 0.5, 40, 0.1, 1000))
   pane.appendChild(layerSlider(ctx, layer, 'width', 'Width m', 0.5, 40, 0.1, 1000))
@@ -1917,16 +1865,8 @@ function mkBottomFloorPane(ctx: APGuiCtx, w: WaterConfig): HTMLElement {
       if (c) ctx.applySite(true)
     })
   )
-  // 🎨 MIX đáy hồ (floorMix — mapping 'xz' world, cọ vẽ raycast mesh floor). Bật = thay Floor mat.
-  floor.appendChild(
-    mkMixSection(
-      ctx,
-      () => ({ water: w, face: 'floor' }),
-      () => w.floorMix,
-      (m) => (w.floorMix = m),
-      { defBase: 'thai-beach-sand-2k', paintable: true }
-    )
-  )
+  // 🎨 Mix đáy hồ (floorMix): board inline ĐÃ THÁO — áp/gỡ/chỉnh+cọ vẽ qua khay 🧪 (🪣/🧽/🎯).
+  if (w.floorMix) floor.appendChild(mixStatusRow())
   return floor
 }
 
@@ -1935,16 +1875,8 @@ function buildBottomTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): Tabs 
   const walls = document.createElement('div')
   waterSlider(walls, ctx, w, 'Wall depth m', 0.1, 3, 'depthY') // depthY = độ sâu lòng hồ = chiều cao tường
   materialRow(walls, ctx, w, 'Wall mat', 'wallMaterial')
-  // 🎨 MIX vách hồ (wallMix — mapping 'uv' chu-vi×cao mét, cọ vẽ theo isect.uv). Bật = thay Wall mat.
-  walls.appendChild(
-    mkMixSection(
-      ctx,
-      () => ({ water: w, face: 'wall' }),
-      () => w.wallMix,
-      (m) => (w.wallMix = m),
-      { defBase: 'stone-wall', paintable: true } // 🧱 bộ tường (nhóm chung kho) — vách hồ đá xếp
-    )
-  )
+  // 🎨 Mix vách hồ (wallMix): board inline ĐÃ THÁO — áp/gỡ/chỉnh+cọ vẽ qua khay 🧪 (🪣/🧽/🎯).
+  if (w.wallMix) walls.appendChild(mixStatusRow())
   host.append(floor, walls)
   return new Tabs(
     host,
@@ -2077,17 +2009,8 @@ function buildFenceControls(body: HTMLElement, ctx: APGuiCtx, f: FenceConfig): v
       ctx.applySite(true)
     })
   )
-  // 🎨 MIX mặt tường rào (f.mix — mapping 'wall' planar đứng, CHỈ hiệu lực Type=Wall; KHÔNG cọ vẽ tay).
-  // Bật = thay Wall mat (wallTex). Wood → render bỏ qua (fenceMixMat chỉ gọi khi type='wall').
-  body.appendChild(
-    mkMixSection(
-      ctx,
-      () => ({ fence: f }),
-      () => f.mix,
-      (m) => (f.mix = m),
-      { defBase: 'cinder-blocks-wall', paintable: false } // 🧱 khớp wallTex cinder cũ (bộ tường nhóm chung kho)
-    )
-  )
+  // 🎨 Mix mặt tường rào (f.mix — CHỈ hiệu lực Type=Wall): board inline ĐÃ THÁO — khay 🧪 (🪣/🧽/🎯).
+  if (f.mix) body.appendChild(mixStatusRow())
   buildFenceSliders(body, ctx, f)
   buildGateControls(body, ctx, f)
 }
