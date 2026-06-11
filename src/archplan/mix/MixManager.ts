@@ -134,8 +134,9 @@ export class MixManager {
   // phiên vẫn serialize giá trị đầy đủ nên không gãy).
   private _bucket: MixBucketOp | null = null
   private _syncBucket: (() => void) | null = null // PresetPanel đăng ký — sync nút khi mode tắt từ ngoài
-  // ✨ HOVER GHOST (NgQuan 2026-06-11 "rê tới đâu viền mờ sáng vật thể đó"): chỉ chạy khi ĐANG cầm xô
-  // (đúng lúc cần biết click sẽ ăn gì); toggle ✨ ở khay. _hoverObj = đích hiện tại (đổi mới re-ghost).
+  // ✨ HOVER GHOST (NgQuan 2026-06-11 "rê tới đâu viền mờ sáng vật thể đó"): ĐỘC LẬP mode xô —
+  // bật là rê đâu sáng đó (áp màu LẪN select đều chính xác). Toggle = nút ✨ khay tiện ích / Space.
+  // _hoverObj = đích hiện tại (đổi mới re-ghost).
   private _hoverOn = true
   private _hoverObj: THREE.Object3D | null = null
   private _onEditOpen: ((sel: MixEditSel) => void) | null = null // 🎯 khay đăng ký — mở board đối tượng
@@ -575,7 +576,6 @@ export class MixManager {
       this.paintOff()
     }
     this._bucket = op
-    if (!op) this._hoverClear() // ✨ buông xô → gỡ ghost
     this.deps.bucketCursor(op ? BUCKET_CURSOR[op.mode] : '')
     this._syncBucket?.()
   }
@@ -591,9 +591,9 @@ export class MixManager {
     if (!on) this._hoverClear()
   }
 
-  /** Lab gọi mỗi pointermove (buttons=0). Rẻ khi không cầm xô — thoát sớm; chỉ re-ghost khi ĐỔI đích. */
+  /** Lab gọi mỗi pointermove (buttons=0). ĐỘC LẬP mode xô — ✨ bật là chạy; chỉ re-ghost khi ĐỔI đích. */
   hoverAt(e: PointerEvent): void {
-    if (!this._bucket || !this._hoverOn) return
+    if (!this._hoverOn) return
     const obj = this._resolveAt(e)?.obj ?? null
     if (obj === this._hoverObj) return
     this._hoverObj = obj

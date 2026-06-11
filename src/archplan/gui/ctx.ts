@@ -143,9 +143,7 @@ export interface APGuiCtx {
   getMixBucketMode?(): MixBucketOp['mode'] | null // 3 nút khay hiện đúng trạng thái
   registerMixBucketSync?(fn: () => void): void // panel đăng ký — bỏ highlight khi mode tắt từ ngoài
   registerMixEditOpen?(fn: (sel: MixEditSel) => void): void // 🎯 click trúng đích có mix → khay mở board
-  // ✨ Hover ghost — viền mờ sáng đích dưới con trỏ khi cầm xô (biết click sẽ ăn gì; toggle ✨ khay, mặc định BẬT).
-  setMixHover?(on: boolean): void
-  getMixHover?(): boolean
+  // (✨ hover ghost: toggle qua KHAY TIỆN ÍCH 🧰 / Space — Lab gọi thẳng _setHoverOn, không qua ctx)
   // 🔎 Ô PREVIEW cho EDITOR PRESET (khay 🧪 đang ✎): canvas WebGPU riêng bên phải khay (MixPreview),
   // material riêng của component → slider board tune LIVE qua tune() (CLONE chỉ áp lúc 🪣 — đối
   // tượng đã áp KHÔNG đổi theo, đúng chốt). null = ẩn ô. Gọi lại sau commit structural (đổi texture/rule).

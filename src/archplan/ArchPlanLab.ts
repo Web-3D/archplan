@@ -445,7 +445,11 @@ export class ArchPlanLab extends BaseWorld {
   // 🧰 Khay tiện ích góc trên-trái (shell BỀN — tạo 1 lần onInit): 🤚/✨/🎨/🎛/🧪. Trạng thái hiện/ẩn
   // palette + khay mix sống ở Lab (wrap recreate mỗi _rebuildGUI → áp lại display).
   private utilTray: HTMLElement | null = null
-  private _trayBtns: { hover?: HTMLButtonElement; pal?: HTMLButtonElement; mix?: HTMLButtonElement } = {}
+  private _trayBtns: {
+    hover?: HTMLButtonElement
+    pal?: HTMLButtonElement
+    mix?: HTMLButtonElement
+  } = {}
   private _paletteShown = true
   private _mixTrayShown = true
   private controls: OrbitControls | null = null
@@ -725,24 +729,24 @@ export class ArchPlanLab extends BaseWorld {
       return
     }
     if (this._onEscape(e)) return // 🪣 buông xô áp preset / 🧲 xả nhóm shape (Move mode)
-    // X trơn = thả/thu MENU 🎨 Palette (lưới swatch), KHÔNG phải popover tìm-kiếm-màu (né Ctrl/Meta/Alt+X).
-    if (this._isPlainX(e)) {
-      e.preventDefault()
-      this.palette?.togglePanel()
-      return
-    }
-    // R trơn = bật/tắt 🧪 Lab (né Ctrl+R / Cmd+R reload trang). Guard tách ra _isPlainR cho gọn complexity.
-    if (this._isPlainR(e)) {
-      e.preventDefault()
-      this._toggleLab()
-      return
-    }
-    if (this._trayHotkey(e)) return // 🧰 Space = ✨ hover · V = 🎛 khay mix (gom 1 guard giữ complexity)
+    if (this._uiHotkey(e)) return // 🧰 X = menu 🎨 · R = 🧪 Lab · Space = ✨ hover · V = 🎛 khay mix
     this._keysDown.add(e.code)
   }
 
-  // 🧰 Phím tắt khay tiện ích: Space trơn = toggle ✨ viền sáng hover · V trơn = hiện/ẩn khay mix preset.
-  private _trayHotkey(e: KeyboardEvent): boolean {
+  // 🧰 Phím tắt UI gom 1 guard (giữ _onKeyDown ≤10): X trơn = thả/thu MENU 🎨 Palette (không phải popover
+  // search; né Ctrl/Meta/Alt+X) · R trơn = bật/tắt 🧪 Lab (né Ctrl+R reload) · Space = toggle ✨ viền sáng
+  // hover · V = hiện/ẩn 🎛 khay mix preset.
+  private _uiHotkey(e: KeyboardEvent): boolean {
+    if (this._isPlainX(e)) {
+      e.preventDefault()
+      this.palette?.togglePanel()
+      return true
+    }
+    if (this._isPlainR(e)) {
+      e.preventDefault()
+      this._toggleLab()
+      return true
+    }
     if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return false
     if (e.code === 'Space') {
       e.preventDefault() // né page-scroll
@@ -1898,8 +1902,6 @@ export class ArchPlanLab extends BaseWorld {
     | 'getMixBucketMode'
     | 'registerMixBucketSync'
     | 'registerMixEditOpen'
-    | 'setMixHover'
-    | 'getMixHover'
     | 'setMixPreview'
   > {
     return {
@@ -1917,8 +1919,6 @@ export class ArchPlanLab extends BaseWorld {
       getMixBucketMode: () => this._mix.bucketMode,
       registerMixBucketSync: (fn) => this._mix.registerBucketSync(fn),
       registerMixEditOpen: (fn) => this._mix.registerEditOpen(fn), // 🎯 khay mở board đối tượng
-      setMixHover: (on) => this._mix.setHover(on), // ✨ toggle viền sáng hover (nút ✨ khay)
-      getMixHover: () => this._mix.hoverOn,
       setMixPreview: (mix) => this._setMixPreview(mix), // 🧪 tấm preview editor preset
     }
   }
@@ -2239,19 +2239,25 @@ export class ArchPlanLab extends BaseWorld {
       bar.appendChild(b)
       return b
     }
-    const move = mk('🤚', 'Move (F) — kéo tường/cột/cầu thang/cửa/hồ trong 3D. Chuột phải = thoát.', () =>
-      this._setMoveMode(!this.moveMode)
+    const move = mk(
+      '🤚',
+      'Move (F) — kéo tường/cột/cầu thang/cửa/hồ trong 3D. Chuột phải = thoát.',
+      () => this._setMoveMode(!this.moveMode)
     )
     this._syncMoveToggle = (on) => move.classList.toggle('on', on) // nút bền → gán thẳng (hết moveFloat)
-    const hov = mk('✨', 'Viền sáng vật thể dưới con trỏ — rê là sáng, không cần cầm xô (Space)', () =>
-      this._setHoverOn(!this._mix.hoverOn)
+    const hov = mk(
+      '✨',
+      'Viền sáng vật thể dưới con trỏ — rê là sáng, không cần cầm xô (Space)',
+      () => this._setHoverOn(!this._mix.hoverOn)
     )
     hov.classList.toggle('on', this._mix.hoverOn)
     const pal = mk('🎨', 'Hiện / ẩn bảng Palette màu (menu thả trong bảng: X)', () =>
       this._setPaletteShown(!this._paletteShown)
     )
     pal.classList.toggle('on', this._paletteShown)
-    const mix = mk('🎛', 'Hiện / ẩn khay Mix preset (V)', () => this._setMixTrayShown(!this._mixTrayShown))
+    const mix = mk('🎛', 'Hiện / ẩn khay Mix preset (V)', () =>
+      this._setMixTrayShown(!this._mixTrayShown)
+    )
     mix.classList.toggle('on', this._mixTrayShown)
     this._trayBtns = { hover: hov, pal, mix }
     this.canvas.parentElement?.appendChild(bar)

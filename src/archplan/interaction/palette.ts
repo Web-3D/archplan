@@ -89,7 +89,8 @@ export class PalettePanel {
     p.className = 'ap-scan-panel ap-palette-panel'
     const ttl = document.createElement('button')
     ttl.className = 'ap-scan-title'
-    ttl.textContent = '▸ 🎨 Palette' // mặc định ĐÓNG (không thả khay trước)
+    ttl.textContent = '▸ 🎨' // symbol-only (bỏ tên — khay tiện ích 🧰 2026-06-11); mặc định ĐÓNG
+    ttl.title = 'Palette màu — click thả/thu (X) · kéo để dời · nút 🎨 khay tiện ích = hiện/ẩn'
     const body = document.createElement('div')
     body.style.display = 'none'
     const cur = document.createElement('button')
@@ -165,7 +166,7 @@ export class PalettePanel {
     if (!body || !ttl) return
     const open = body.style.display !== 'none'
     body.style.display = open ? 'none' : ''
-    ttl.textContent = `${open ? '▸' : '▾'} 🎨 Palette`
+    ttl.textContent = `${open ? '▸' : '▾'} 🎨` // symbol-only như build()
     if (open) this.closeBrowser() // thu menu → đóng luôn popover search nếu đang mở
   }
 

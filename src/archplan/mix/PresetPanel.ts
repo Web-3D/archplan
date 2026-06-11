@@ -34,10 +34,10 @@ function ensurePresetCss(): void {
   const s = document.createElement('style')
   s.id = 'ap-mixpre-css'
   s.textContent =
-    // góc trên-trái (drawer Tools đã dời xuống đáy); z 155 > palette 150 — ô preview mở bên phải không chìm.
+    // góc trên-trái DƯỚI khay tiện ích 🧰 (top:40); z 155 > palette 150 — ô preview mở bên phải không chìm.
     // 🎨 Palette OKLCH NgQuan 2026-06-11 (Atelier): bg-1 nền · bg-2..4 surface · bg-5 highlight · accent · text
     // — khai báo --mp-* tại float root (khay + ô preview cùng ăn); đổi palette sau = sửa 1 dòng vars.
-    `.ap-mixpre-float{position:absolute;top:6px;left:6px;z-index:155;` +
+    `.ap-mixpre-float{position:absolute;top:40px;left:6px;z-index:155;` +
     `--mp-bg-1:#3a1e0c;--mp-bg-2:#5e3110;--mp-bg-3:#924c16;--mp-bg-4:#c8741f;` +
     `--mp-bg-5:#f2a93b;--mp-accent:#e8c547;--mp-text:#fbebcf}` +
     // board buildMixBoard BÊN TRONG khay (.ap-mix-host khai --gr-* trên chính nó) → đè scoped cùng palette
@@ -121,7 +121,7 @@ export class MixPresetPanel {
     hd.className = 'ap-mixpre-hd'
     const caret = document.createElement('span')
     const ttl = document.createElement('span')
-    ttl.textContent = '🧪 Mix presets'
+    ttl.textContent = '🎛' // symbol-only (bỏ tên; đổi 🧪→🎛 vì trùng nút Lab trong khay tiện ích)
     hd.append(caret, ttl)
     const body = document.createElement('div')
     body.className = 'ap-mixpre-body'
@@ -179,7 +179,7 @@ export class MixPresetPanel {
 
   // ── 🖐 Kéo khay (header) — dời WRAP float (ô preview bên phải đi theo); <4px = click thu/mở ──────
   private _wireDrag(hd: HTMLElement, wrap: HTMLElement): void {
-    hd.title = 'Kéo để dời khay · click thu/mở'
+    hd.title = 'Mix presets (V hiện/ẩn) — kéo để dời khay · click thu/mở'
     hd.addEventListener('pointerdown', (e) => this._dragStart(e, wrap, hd))
     hd.addEventListener('pointermove', (e) => this._dragMove(e, wrap))
     hd.addEventListener('pointerup', (e) => this._dragEnd(e, hd))
@@ -389,15 +389,8 @@ export class MixPresetPanel {
     )
     this.modeBtns = { apply: ap, erase: er, edit: ed }
     this._syncModeBtns()
-    // ✨ viền mờ sáng đích dưới con trỏ khi cầm xô (NgQuan: "trỏ vào đâu không biết") — mặc định BẬT
-    const hov = this._btn('✨', 'Viền sáng vật thể dưới con trỏ khi cầm 🪣/🧽/🎯 — bật/tắt', () => {
-      const on = !(this.ctx?.getMixHover?.() ?? true)
-      this.ctx?.setMixHover?.(on)
-      hov.classList.toggle('on', on)
-    })
-    hov.style.flex = '0 0 24px' // nút vuông nhỏ — 3 nút mode giữ bề ngang
-    hov.classList.toggle('on', this.ctx?.getMixHover?.() ?? true)
-    modes.append(ap, er, ed, hov)
+    // (✨ hover ghost đã DỜI ra khay tiện ích góc trên-trái — Space; độc lập mode xô)
+    modes.append(ap, er, ed)
     return modes
   }
 
