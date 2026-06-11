@@ -2,8 +2,8 @@
  * VỊ TRÍ   — 01-Doraemon/src/sandbox/archplan/mix/PresetPanel.ts
  * VAI TRÒ  — Khay MIX DI ĐỘNG rộng (NgQuan 2026-06-11 redesign): KHUNG PRESET ô vuông (1 mặc định + 7 ô
  *            + để thêm — tên trên, thumb giữa, ✎/🗑 dưới; bấm = chọn → nạp thẳng vào editor dưới) →
- *            EDITOR RỘNG (khung lớp 4 ô + cột slider trái | ô preview phải, buildMixPresetEditor) →
- *            3 MODE click-3D 🪣 Áp / 🧽 Gỡ / 🎯 Chỉnh + ⬇⬆ JSON. Bỏ dropdown — V/nút 🧱 ẩn/hiện cả khay.
+ *            EDITOR RỘNG (khung lớp 2×2 + cột slider | ô preview, buildMixPresetEditor) → 2 MODE click-3D
+ *            🎯 Chỉnh (chỉnh tại chỗ — bề mặt trống tạo từ preset đang chọn) / 🧽 Gỡ + ⬇⬆ JSON.
  * LIÊN HỆ  — Kho: ./presets (archplan.mixPresets.v1). Editor: buildMixPresetEditor + board 🎯: buildMixBoard
  *            (gui/site.ts). Mode/resolve/bake: MixManager (qua APGuiCtx). Preview: Lab mount MixPreview vào
  *            previewHostEl(). Lab mount như PalettePanel (float trên canvas, instance persist qua _rebuildGUI).
@@ -105,12 +105,12 @@ export class MixPresetPanel {
   private readonly previewHost = document.createElement('div') // ô preview — Lab mount MixPreview vào (persist)
   private statusEl: HTMLElement | null = null
   private fileInput: HTMLInputElement | null = null
-  private modeBtns: Partial<Record<'apply' | 'erase' | 'edit', HTMLButtonElement>> = {}
+  private modeBtns: Partial<Record<'erase' | 'edit', HTMLButtonElement>> = {}
   private editSel: MixEditSel | null = null // 🎯 đối tượng đang chỉnh trong khay (board target thật)
   private editHost: HTMLElement | null = null
   private drag: { sx: number; sy: number; px: number; py: number; moved: boolean } | null = null
 
-  /** Preset đang CHỌN (active) — nguồn 🪣 áp + đang sửa trong editor. */
+  /** Preset đang CHỌN (active) — đang sửa trong editor + nguồn tạo mix khi 🎯 click bề mặt còn trống. */
   activePreset(): MixPreset | null {
     return this.presets.find((p) => p.id === this.activeId) ?? null
   }
@@ -280,11 +280,11 @@ export class MixPresetPanel {
     return card
   }
 
-  // Chọn preset → active + nạp vào editor + preview; đang cầm 🪣 thì đổi "đạn" sang preset mới.
+  // Chọn preset → active + nạp vào editor + preview; đang ở mode 🎯 thì đổi nguồn-tạo sang preset mới.
   private _select(p: MixPreset): void {
     this.activeId = p.id
-    if (this.ctx?.getMixBucketMode?.() === 'apply')
-      this.ctx.setMixBucket?.({ mode: 'apply', src: p.mix })
+    if (this.ctx?.getMixBucketMode?.() === 'edit')
+      this.ctx.setMixBucket?.({ mode: 'edit', src: p.mix })
     this._renderFrame()
     this._renderEditor()
     this._syncPreview()
@@ -292,8 +292,6 @@ export class MixPresetPanel {
 
   private _delete(p: MixPreset): void {
     if (!window.confirm(`Xóa preset "${p.name}"? (bề mặt đã áp giữ nguyên — clone riêng)`)) return
-    if (this.activeId === p.id && this.ctx?.getMixBucketMode?.() === 'apply')
-      this.ctx.setMixBucket?.(null) // buông xô trước (manager bake refs về clone — không mồ côi)
     this.presets = this.presets.filter((q) => q.id !== p.id)
     if (this.activeId === p.id) this.activeId = null
     this._save()
@@ -369,20 +367,15 @@ export class MixPresetPanel {
   private _footer(): HTMLElement {
     const ft = document.createElement('div')
     ft.className = 'ap-mixpre-ft'
-    const ap = this._btn(
-      '🪣 Áp',
-      'Cầm preset đang chọn — click đích 3D để áp (REF live trong phiên; buông xô = chốt clone riêng). ESC/chuột phải thoát',
-      () => this._setMode('apply')
-    )
-    const er = this._btn('🧽 Gỡ', 'Click đích CÓ mix trong 3D để gỡ (về material thường)', () =>
-      this._setMode('erase')
-    )
     const ed = this._btn(
       '🎯 Chỉnh',
-      'Click đích CÓ mix trong 3D → board của ĐỐI TƯỢNG hiện ở khay',
+      'Click bề mặt 3D → chỉnh ngay tại chỗ (bề mặt chưa có mix sẽ tạo từ preset đang chọn). ESC/chuột phải thoát',
       () => this._setMode('edit')
     )
-    this.modeBtns = { apply: ap, erase: er, edit: ed }
+    const er = this._btn('🧽 Gỡ', 'Click bề mặt CÓ mix trong 3D để gỡ (về material thường)', () =>
+      this._setMode('erase')
+    )
+    this.modeBtns = { erase: er, edit: ed }
     this._syncModeBtns()
     const exp = this._btn(
       '⬇',
@@ -392,31 +385,32 @@ export class MixPresetPanel {
     const imp = this._btn('⬆', 'Import JSON (merge vào kho — id trùng tự cấp mới)', () =>
       this._ensureFileInput().click()
     )
-    ft.append(ap, er, ed, exp, imp)
+    ft.append(ed, er, exp, imp)
     return ft
   }
 
-  // 🪣🧽🎯 Bật/tắt 1 mode (bấm lại nút đang on = tắt). 'apply' cần preset active; manager tự bake phiên cũ.
-  private _setMode(mode: 'apply' | 'erase' | 'edit'): void {
+  // 🎯🧽 Bật/tắt 1 mode (bấm lại nút đang on = tắt). 'edit' cấp src = preset đang chọn (tạo khi bề mặt trống).
+  private _setMode(mode: 'erase' | 'edit'): void {
     if (this.ctx?.getMixBucketMode?.() === mode) {
       this.ctx.setMixBucket?.(null)
-    } else if (mode === 'apply') {
-      this._armApply()
+    } else if (mode === 'erase') {
+      this.ctx?.setMixBucket?.({ mode: 'erase' })
+      this._flash('🧽 click bề mặt có mix để gỡ')
     } else {
-      this.ctx?.setMixBucket?.(mode === 'erase' ? { mode: 'erase' } : { mode: 'edit' })
-      this._flash(mode === 'erase' ? '🧽 click đích có mix để gỡ' : '🎯 click đích có mix để chỉnh')
+      this._armEdit()
     }
     this._syncModeBtns()
   }
 
-  private _armApply(): void {
+  // 🎯 Cầm Chỉnh — src = preset đang chọn (clone khi bề mặt trống), thiếu preset thì dùng mặc định.
+  private _armEdit(): void {
     const p = this.activePreset()
-    if (!p) {
-      this._flash('Chọn 1 ô preset trước rồi mới 🪣')
-      return
-    }
-    this.ctx?.setMixBucket?.({ mode: 'apply', src: p.mix })
-    this._flash(`🪣 ${p.name} — click đích 3D (sửa lớp = live trên bề mặt; buông xô = chốt)`)
+    this.ctx?.setMixBucket?.({ mode: 'edit', src: p?.mix ?? makeGroundMixParams('grass-o') })
+    this._flash(
+      p
+        ? `🎯 click bề mặt — chưa có mix sẽ tạo từ "${p.name}" rồi chỉnh`
+        : '🎯 click bề mặt để chỉnh (trống → tạo mix mặc định)'
+    )
   }
 
   private _syncModeBtns(): void {

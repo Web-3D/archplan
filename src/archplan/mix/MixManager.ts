@@ -124,14 +124,10 @@ export class MixManager {
   private _stroking = false
   private readonly _brush = { size: 0.6, erase: false } // cọ: bán kính m world + chế độ tẩy (UI board đẩy vào)
   private _syncPaint: (() => void) | null = null // UI đăng ký — bỏ highlight 🖌 khi mode bị tắt từ ngoài
-  // 🪣🧽🎯 HỌ MODE XÔ (UI inline đã tháo — mọi thao tác mix per-đối-tượng đi qua đây): 'apply' = áp
-  // preset · 'erase' = gỡ mix · 'edit' = mở board đối tượng trong khay. KHÔNG khóa orbit (click đơn
-  // <5px qua _maybeClickFocus; kéo = orbit như thường). null = tắt.
-  // 🔗→📋 REF-PHIÊN-XÔ (NgQuan 2026-06-11 "ref lúc ban đầu để chỉnh thấy trên bề mặt, xong lưu clone
-  // riêng"): trong phiên 'apply', đích nhận REF THẲNG preset.mix → chỉnh ✎ = live TRÊN MỌI bề mặt vừa
-  // áp (cùng cache entry); BUÔNG xô (ESC/chuột phải/tắt nút/đổi mode/đổi preset) = _bakeRefs đóng băng
-  // từng field thành structuredClone RIÊNG (chốt CLONE giữ nguyên — file save tự chứa, autosave giữa
-  // phiên vẫn serialize giá trị đầy đủ nên không gãy).
+  // 🧽🎯 HỌ MODE XÔ (NgQuan 2026-06-11 bỏ 'apply' gộp vào 'edit'): 'erase' = gỡ mix · 'edit' = click bề
+  // mặt → CÓ mix thì mở board chỉnh tại chỗ, CHƯA có thì structuredClone từ src (preset đang chọn) +
+  // commit rồi mở board. CLONE riêng từng bề mặt (file save tự chứa). KHÔNG khóa orbit (click đơn <5px
+  // qua _maybeClickFocus; kéo = orbit). null = tắt.
   private _bucket: MixBucketOp | null = null
   private _syncBucket: (() => void) | null = null // PresetPanel đăng ký — sync nút khi mode tắt từ ngoài
   // ✨ HOVER GHOST (NgQuan 2026-06-11 "rê tới đâu viền mờ sáng vật thể đó"): ĐỘC LẬP mode xô —
@@ -545,14 +541,14 @@ export class MixManager {
     }
   }
 
-  // ── 🪣🧽🎯 HỌ MODE XÔ — resolve đích click 3D + áp/gỡ/mở-board (UI inline đã tháo) ────────────────
+  // ── 🧽🎯 HỌ MODE XÔ — resolve đích click 3D → gỡ / chỉnh-tại-chỗ (tạo nếu trống) ─────────────────
 
   /** Mode xô đang bật (click qua _maybeClickFocus sẽ xử thay vì focus GUI). */
   get bucketOn(): boolean {
     return this._bucket !== null
   }
 
-  /** Mode hiện hành — 3 nút khay hiện đúng trạng thái ('apply'|'erase'|'edit'|null). */
+  /** Mode hiện hành — nút khay hiện đúng trạng thái ('erase'|'edit'|null). */
   get bucketMode(): MixBucketOp['mode'] | null {
     return this._bucket?.mode ?? null
   }
@@ -568,9 +564,7 @@ export class MixManager {
   }
 
   // Bật mode xô / null = tắt. Bật = tắt 3 mode kia + cọ; KHÔNG khóa orbit (click đơn — kéo vẫn xoay).
-  // Rời phiên 'apply' (tắt/đổi mode/đổi preset) = BAKE refs → clone riêng từng bề mặt.
   setBucket(op: MixBucketOp | null): void {
-    if (this._bucket?.mode === 'apply') this._bakeRefs(this._bucket.src)
     if (op) {
       this.deps.offOtherModes()
       this.paintOff()
@@ -606,14 +600,14 @@ export class MixManager {
     this.deps.hoverGhost(null)
   }
 
-  /** Thoát mode xô từ NGOÀI (mode khác bật / ESC / chuột phải) — bake phiên apply + báo panel sync. */
+  /** Thoát mode xô từ NGOÀI (mode khác bật / ESC / chuột phải) — báo panel sync. */
   bucketOff(): void {
     if (!this._bucket) return
     this.setBucket(null)
   }
 
-  // Click 3D khi mode xô bật: resolve đích gần nhất → 'apply' = gán REF preset (bake khi buông xô) ·
-  // 'erase' = field undefined · 'edit' = mở board đối tượng (chỉ đích ĐANG có mix). false = click hụt.
+  // Click 3D khi mode xô bật: resolve đích gần nhất → 'erase' = field undefined · 'edit' = mở board
+  // (CHƯA có mix thì tạo CLONE từ src rồi mở luôn). false = click hụt.
   bucketApplyAt(e: PointerEvent): boolean {
     const op = this._bucket
     if (!op) return false
@@ -623,17 +617,18 @@ export class MixManager {
   }
 
   private _bucketDo(op: MixBucketOp, sel: MixSel): boolean {
-    if (op.mode === 'apply') {
-      sel.set(op.src) // 🔗 REF trong phiên xô — chỉnh ✎ live trên bề mặt; buông xô mới đóng băng clone
-      this._commitKind(sel.kind)
-      return true
-    }
-    const params = sel.get()
-    if (!params) return false // 🧽/🎯 cần đích ĐANG có mix
     if (op.mode === 'erase') {
+      if (!sel.get()) return false // 🧽 cần đích ĐANG có mix
       sel.set(undefined)
       this._commitKind(sel.kind)
       return true
+    }
+    // 🎯 edit: CHƯA có mix → tạo CLONE từ src (preset đang chọn) + commit (render ngay) rồi mở board.
+    let params = sel.get()
+    if (!params) {
+      params = structuredClone(op.src)
+      sel.set(params)
+      this._commitKind(sel.kind)
     }
     const target = sel.targetOf()
     if (target) this._onEditOpen?.({ target, kind: sel.kind, label: sel.label, params })
@@ -810,56 +805,6 @@ export class MixManager {
       set: (p) => (face === 'wall' ? (w.wallMix = p) : (w.floorMix = p)),
       targetOf: () => ({ water: w, face }),
     }
-  }
-
-  // ── 🔗→📋 BAKE phiên xô: mọi field đang REF src → structuredClone RIÊNG (đóng băng) ────────────────
-
-  // Sau bake, mỗi bề mặt độc lập (chỉnh preset không lan nữa — đúng chốt CLONE); 🎯 để tinh chỉnh riêng.
-  private _bakeRefs(src: GroundMixParams): void {
-    const siteDirty = this._bakeSiteRefs(src)
-    const buildDirty = this._bakeBuildingRefs(src)
-    if (siteDirty) this.deps.commitSite()
-    if (buildDirty) this.deps.commitBuilding()
-  }
-
-  private _bakeSiteRefs(src: GroundMixParams): boolean {
-    const site = this.deps.site()
-    // bk LUÔN chạy ở vế trái (dirty = bk(...) || dirty) — không để short-circuit nuốt mất bake.
-    const bk = (cur: GroundMixParams | undefined, set: (p: GroundMixParams) => void): boolean => {
-      if (cur !== src) return false
-      set(structuredClone(src))
-      return true
-    }
-    let dirty = bk(site.groundMix, (p) => (site.groundMix = p))
-    for (const l of site.groundLayers ?? []) dirty = bk(l.mix, (p) => (l.mix = p)) || dirty
-    for (const w of site.waters) {
-      dirty = bk(w.floorMix, (p) => (w.floorMix = p)) || dirty
-      dirty = bk(w.wallMix, (p) => (w.wallMix = p)) || dirty
-    }
-    for (const f of site.fences) dirty = bk(f.mix, (p) => (f.mix = p)) || dirty
-    return dirty
-  }
-
-  private _bakeBuildingRefs(src: GroundMixParams): boolean {
-    let dirty = false
-    const insts = this.deps.state().floors.flatMap((fl) => fl.instances)
-    for (const inst of insts) {
-      for (const seg of inst.segments)
-        if (seg.mix === src) {
-          seg.mix = structuredClone(src)
-          dirty = true
-        }
-      const s = inst.structure
-      if (s.slabMix === src) {
-        s.slabMix = structuredClone(src)
-        dirty = true
-      }
-      if (s.foundMix === src) {
-        s.foundMix = structuredClone(src)
-        dirty = true
-      }
-    }
-    return dirty
   }
 
   // ── DISPOSE ────────────────────────────────────────────────────────────────────────────────────────

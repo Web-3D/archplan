@@ -35,12 +35,10 @@ export type MixPaintTarget =
   // 🎨 GENERIC mặt NẰM KHÔNG cọ vẽ (mapping 'xz' world — vd slabMix sàn building).
   | { flatMix: GroundMixParams }
 
-// 🪣🧽🎯 HỌ MODE XÔ MIX (khay 🧪 — UI inline đã tháo): 'apply' cầm src = REF preset.mix sống
-// (phiên xô chỉnh ✎ live trên bề mặt; buông xô MixManager bake → clone riêng) · 'erase' gỡ · 'edit' chọn.
-export type MixBucketOp =
-  | { mode: 'apply'; src: GroundMixParams }
-  | { mode: 'erase' }
-  | { mode: 'edit' }
+// 🧽🎯 HỌ MODE XÔ MIX (khay 🧱 — NgQuan 2026-06-11 bỏ 'apply', gộp vào 'edit'): 'edit' click bề mặt →
+// CÓ mix thì mở board chỉnh tại chỗ; CHƯA có thì tạo CLONE từ src (preset đang chọn) rồi mở board luôn.
+// 'erase' = gỡ mix. src = nguồn clone khi bề mặt còn trống (panel luôn cấp).
+export type MixBucketOp = { mode: 'erase' } | { mode: 'edit'; src: GroundMixParams }
 
 // 🎯 Đích mode 'edit' resolve được — khay mở board: target thật (zone/G0/hồ = CÓ cọ vẽ) + params
 // hiện hành + kind để commit đúng hệ (build = ctx.build / site = applySite) + label tiêu đề.
