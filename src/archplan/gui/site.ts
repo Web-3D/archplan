@@ -1823,9 +1823,19 @@ const SURF_ROWS: [string, number, number, number, SurfKey][] = [
   ['Murk %', 0, 100, 5, 'tint'],
 ]
 
+// 💧 PERF: tắt riêng mặt nước (giữ hồ) → mesh ẩn = reflector ngừng render RTT (đỡ 1 lần render scene/frame
+// MỖI hồ). LIVE thuần visible — 0 rebuild; bật lại = frame đầu compile shader + cấp RTT (khựng nhẹ 1 lần).
+function surfaceOnRow(ctx: APGuiCtx, w: WaterConfig): HTMLElement {
+  return toggleRow('💧 Mặt nước (tắt đỡ lag)', w.surfaceOn, (on) => {
+    w.surfaceOn = on
+    ctx.tuneWater(w, (s) => (s.getMesh().visible = on), true)
+  })
+}
+
 // BẬC 4 "Surface" (mặt hồ): màu nước + gương/sóng/rung/đục — uniform LIVE qua tuneWater(w,…), KHÔNG dựng lại.
 function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void {
-  host.appendChild(
+  host.append(
+    surfaceOnRow(ctx, w),
     colorRow('Water color', w.color, (hex, c) => {
       w.color = hex
       ctx.tuneWater(w, (s) => s.setWaterColor(hex), c)
@@ -1858,25 +1868,28 @@ function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void
       )
     )
   }
-  // Wave size — RAW (không phải %). ĐẢO rippleScale: v≤12 = 13−v NHƯ CŨ (state cũ hiển thị đúng chỗ);
-  // v>12 = 1/(v−11) → rs PHÂN SỐ (0.5→~0.077, chu kỳ sóng tới ~13m) — NgQuan 2026-06-10 "tăng lên 24".
-  host.appendChild(
-    sliderRow(
-      'Wave size',
-      1,
-      24,
-      0.5,
-      w.rippleScale >= 1 ? 13 - w.rippleScale : 11 + 1 / w.rippleScale,
-      (v, c) => {
-        const rs = v <= 12 ? 13 - v : 1 / (v - 11) // size→rippleScale (cao=to → freq thấp)
-        w.rippleScale = rs
-        ctx.tuneWater(w, (s) => s.setRippleScale(rs), c)
-      },
-      1
-    )
-  )
+  host.appendChild(waveSizeRow(ctx, w))
 }
 type SurfKey = 'reflectivity' | 'flow' | 'distortion' | 'detail' | 'refract' | 'tint'
+
+// Wave size — RAW (không phải %). ĐẢO rippleScale: v≤12 = 13−v NHƯ CŨ (state cũ hiển thị đúng chỗ);
+// v>12 = 1/(v−11) → rs PHÂN SỐ (0.5→~0.077, chu kỳ sóng tới ~13m) — NgQuan 2026-06-10 "tăng lên 24".
+// Tách khỏi buildSurfaceTab (Rule-50 — thêm row 💧 Mặt nước đẩy hàm quá 50 dòng).
+function waveSizeRow(ctx: APGuiCtx, w: WaterConfig): HTMLElement {
+  return sliderRow(
+    'Wave size',
+    1,
+    24,
+    0.5,
+    w.rippleScale >= 1 ? 13 - w.rippleScale : 11 + 1 / w.rippleScale,
+    (v, c) => {
+      const rs = v <= 12 ? 13 - v : 1 / (v - 11) // size→rippleScale (cao=to → freq thấp)
+      w.rippleScale = rs
+      ctx.tuneWater(w, (s) => s.setRippleScale(rs), c)
+    },
+    1
+  )
+}
 
 // BẬC 4 "Bottom" (đáy hồ) → BẬC 5: Floor (đáy: màu + chất liệu) | Walls (tường: độ sâu + chất liệu). Trả
 // Tabs (Floor|Walls) cho caller dispose. Floor/wall = 2 mesh RIÊNG → material độc lập (None | Caro tile).
