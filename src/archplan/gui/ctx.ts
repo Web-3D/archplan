@@ -8,13 +8,48 @@ import type GUI from 'lil-gui'
 import type * as THREE from 'three'
 import type { GrassBlades } from 'threejs-modules/components/GrassBlades'
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
-import type { CoverageStats, GroundLayer, SiteState, WaterConfig } from 'threejs-modules/site/state'
+import type {
+  CoverageStats,
+  FenceConfig,
+  GroundLayer,
+  SiteState,
+  WaterConfig,
+} from 'threejs-modules/site/state'
 
 import type { GridOpts, GroundType, SunOpts } from '../scene/scene'
 import type { BuildingState, ShapeInstance } from '../state/state'
 
-// 🖌 Target của cọ vẽ mask mix: 1 zone (GroundLayer.mix) HOẶC nền lô G0 ('base' — site.groundMix).
-export type MixPaintTarget = GroundLayer | 'base'
+// 🖌 Target của bảng mix + cọ vẽ mask: zone (GroundLayer.mix) · nền lô G0 ('base' — site.groundMix) ·
+// đáy/vách hồ (w.floorMix/wallMix — stage 4) · mặt tường rào (f.mix — KHÔNG cọ vẽ, mapping 'wall').
+// Wrapper water/fence được GUI tạo mới mỗi lần build pane → SO SÁNH bằng sameMixTarget, KHÔNG ===.
+export type MixPaintTarget =
+  | GroundLayer
+  | 'base'
+  | { water: WaterConfig; face: 'floor' | 'wall' }
+  | { fence: FenceConfig }
+
+// Cùng target HỒ (cùng WaterConfig ref + cùng face)? — tách hàm giữ sameMixTarget dưới trần complexity.
+function sameWaterTarget(a: MixPaintTarget, b: MixPaintTarget): boolean {
+  if (typeof a === 'string' || typeof b === 'string') return false
+  return 'water' in a && 'water' in b && a.water === b.water && a.face === b.face
+}
+
+// Cùng target RÀO (cùng FenceConfig ref)?
+function sameFenceTarget(a: MixPaintTarget, b: MixPaintTarget): boolean {
+  if (typeof a === 'string' || typeof b === 'string') return false
+  return 'fence' in a && 'fence' in b && a.fence === b.fence
+}
+
+// So 2 target mix (null-safe): zone/'base' = identity; water = cùng WaterConfig ref + cùng face;
+// fence = cùng FenceConfig ref. Wrapper object khác nhau nhưng trỏ cùng config → CÙNG target.
+export function sameMixTarget(
+  a: MixPaintTarget | null | undefined,
+  b: MixPaintTarget | null | undefined
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return sameWaterTarget(a, b) || sameFenceTarget(a, b)
+}
 
 // Highlight 3D khi click tab GUI: flash viền wireframe vàng nhạt quanh phần đang chỉnh ~0.6s.
 // wall/open = 1 tường/lỗ (segIdx[/opIdx]); col = 1 cột (colIdx); còn lại = phần của shape (instId).
