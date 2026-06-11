@@ -13,6 +13,7 @@
 import type { PondFish } from 'threejs-modules/components/PondFish'
 import type {
   BorderMaterialKey,
+  BridgeConfig,
   FenceConfig,
   FishSchool,
   GroundLayer,
@@ -33,6 +34,7 @@ import {
   GROUND_THICK_MAX,
   GROUND_THICK_MIN,
   isGroundTexKey,
+  makeBridge,
   makeFence,
   makeFishSchool,
   makeGroundLayer,
@@ -2302,80 +2304,79 @@ function buildFenceDomain(ctx: APGuiCtx): {
   }
 }
 
-// ── 🌉 CẦU (bridge bắc ngang hồ) — UI SHELL (NgQuan 2026-06-11) ─────────────────────────────────────
-// ⚠️ BẢN NHÁP: state + dựng hình 3D + lưu CHƯA nối — site-kit (state.ts/render) đang kẹt luồng cá koi.
-// Khi mạch cá commit xong → dời BridgeConfig sang threejs-modules/site/state.ts (bridges[] + parse) +
-// viết builder site/render + render trong Lab. Tham số mô hình theo industry (Houdini Arch Bridge SOP /
-// CityEngine pier styles / RailClone deck+pier / SideFX Japanese taiko-bashi): nhịp + vồng vòm + ván +
-// lan can (trụ con) + trụ đỡ gầm. Default = cầu vòm gỗ kiểu Nhật, hợp hồ koi.
-interface BridgeConfig {
-  enabled: boolean
-  material: 'wood' | 'stone'
-  offsetX: number // mm — tâm cầu lệch tâm lô (X)
-  offsetZ: number // mm — (Z)
-  rotDeg: number // độ — hướng bắc qua hồ
-  span: number // mm — chiều dài nhịp
-  deckWidth: number // mm — bề rộng mặt cầu
-  rise: number // mm — độ vồng vòm (taiko-bashi); 0 = phẳng
-  plankCount: number // số tấm ván chia mặt cầu
-  railOn: boolean
-  railHeight: number // mm — cao lan can
-  postCount: number // số trụ con lan can mỗi bên
-  pierOn: boolean
-  pierCount: number // số trụ đỡ dưới gầm
-}
-
-function makeBridge(): BridgeConfig {
-  return {
-    enabled: true,
-    material: 'wood',
-    offsetX: 0,
-    offsetZ: 5000, // rơi vào tâm pool default (như makeFishSchool) — user kéo đặt lại
-    rotDeg: 0,
-    span: 5000,
-    deckWidth: 1400,
-    rise: 600, // vồng vừa kiểu cầu vườn Nhật
-    plankCount: 14,
-    railOn: true,
-    railHeight: 900,
-    postCount: 6,
-    pierOn: true,
-    pierCount: 2,
-  }
-}
-
-// Draft đa-instance MODULE-LEVEL (sống trọn session, KHÔNG lưu vào design — shell tạm; dời sang
-// SiteState.bridges khi site-kit hết kẹt). Bắt đầu 1 cầu mẫu.
-const bridgeDrafts: BridgeConfig[] = [makeBridge()]
-
+// ── 🌉 CẦU (bridge bắc ngang hồ) — đa-instance site.bridges (mirror buildFenceDomain) ──────────────
+// Tham số parametric theo industry (Houdini Arch Bridge SOP / CityEngine pier / RailClone deck+pier /
+// SideFX Japanese taiko-bashi): nhịp + vồng vòm + ván + lan can (trụ con) + trụ đỡ gầm. Đặt TỰ DO trong
+// lô (không bám hồ). Slider commit-on-release (applySite — dựng lại CHỈ cầu qua _syncBridge); toggle/select
+// = áp ngay. Builder hình: site/render/bridge.ts.
 type BridgeMKey = 'offsetX' | 'offsetZ' | 'span' | 'deckWidth' | 'rise' | 'railHeight'
 type BridgeNKey = 'plankCount' | 'postCount' | 'pierCount'
 
-// slider mét (hiển thị m, lưu mm) cho 1 field cầu. Tách giữ buildBridgeControls gọn (rule-50).
+// slider mét (hiển thị m, lưu mm) — buông tay (committed) mới applySite (dựng lại cầu). Tách (rule-50).
 function bridgeMSlider(
+  ctx: APGuiCtx,
   b: BridgeConfig,
   label: string,
   key: BridgeMKey,
   min: number,
   max: number
 ): HTMLElement {
-  return sliderRow(label, min, max, 0.05, b[key] / 1000, (v) => (b[key] = Math.round(v * 1000)), 2)
+  return sliderRow(
+    label,
+    min,
+    max,
+    0.05,
+    b[key] / 1000,
+    (v, c) => {
+      b[key] = Math.round(v * 1000)
+      if (c) ctx.applySite(true)
+    },
+    2
+  )
 }
 
-// slider số nguyên (đếm) cho 1 field cầu.
+// slider số nguyên (đếm) — buông tay mới applySite.
 function bridgeNSlider(
+  ctx: APGuiCtx,
   b: BridgeConfig,
   label: string,
   key: BridgeNKey,
   min: number,
   max: number
 ): HTMLElement {
-  return sliderRow(label, min, max, 1, b[key], (v) => (b[key] = Math.round(v)), 0)
+  return sliderRow(
+    label,
+    min,
+    max,
+    1,
+    b[key],
+    (v, c) => {
+      b[key] = Math.round(v)
+      if (c) ctx.applySite(true)
+    },
+    0
+  )
 }
 
-// Controls 1 cầu — bộ tham số parametric (shell: chỉnh = mutate draft, CHƯA render/lưu).
-function buildBridgeControls(pane: HTMLElement, b: BridgeConfig): void {
-  pane.appendChild(toggleRow('Bật cầu', b.enabled, (on) => (b.enabled = on)))
+// Toggle cầu (áp ngay) — tách giữ buildBridgeControls gọn (rule-50).
+function bridgeToggle(
+  pane: HTMLElement,
+  ctx: APGuiCtx,
+  b: BridgeConfig,
+  label: string,
+  key: 'enabled' | 'railOn' | 'pierOn'
+): void {
+  pane.appendChild(
+    toggleRow(label, b[key], (on) => {
+      b[key] = on
+      ctx.applySite(true)
+    })
+  )
+}
+
+// Controls 1 cầu — bộ tham số parametric. Toggle/select áp ngay; slider buông tay mới dựng lại.
+function buildBridgeControls(pane: HTMLElement, ctx: APGuiCtx, b: BridgeConfig): void {
+  bridgeToggle(pane, ctx, b, 'Bật cầu', 'enabled')
   pane.appendChild(
     selectRow<BridgeConfig['material']>(
       'Vật liệu',
@@ -2384,62 +2385,78 @@ function buildBridgeControls(pane: HTMLElement, b: BridgeConfig): void {
         ['Đá', 'stone'],
       ],
       b.material,
-      (v) => (b.material = v)
+      (v) => {
+        b.material = v
+        ctx.applySite(true)
+      }
     )
   )
-  pane.appendChild(bridgeMSlider(b, 'Pos X m', 'offsetX', -20, 20))
-  pane.appendChild(bridgeMSlider(b, 'Pos Z m', 'offsetZ', -20, 20))
-  pane.appendChild(sliderRow('Xoay °', 0, 360, 5, b.rotDeg, (v) => (b.rotDeg = v), 0))
-  pane.appendChild(bridgeMSlider(b, 'Dài (nhịp) m', 'span', 1, 20))
-  pane.appendChild(bridgeMSlider(b, 'Rộng mặt m', 'deckWidth', 0.6, 4))
-  pane.appendChild(bridgeMSlider(b, 'Vồng vòm m', 'rise', 0, 2))
-  pane.appendChild(bridgeNSlider(b, 'Số ván', 'plankCount', 4, 40))
-  pane.appendChild(toggleRow('Lan can', b.railOn, (on) => (b.railOn = on)))
-  pane.appendChild(bridgeMSlider(b, 'Cao lan can m', 'railHeight', 0.3, 1.5))
-  pane.appendChild(bridgeNSlider(b, 'Trụ con / bên', 'postCount', 0, 20))
-  pane.appendChild(toggleRow('Trụ đỡ gầm', b.pierOn, (on) => (b.pierOn = on)))
-  pane.appendChild(bridgeNSlider(b, 'Số trụ đỡ', 'pierCount', 0, 6))
+  pane.appendChild(bridgeMSlider(ctx, b, 'Pos X m', 'offsetX', -20, 20))
+  pane.appendChild(bridgeMSlider(ctx, b, 'Pos Z m', 'offsetZ', -20, 20))
+  pane.appendChild(
+    sliderRow(
+      'Xoay °',
+      0,
+      360,
+      5,
+      b.rotDeg,
+      (v, c) => {
+        b.rotDeg = v
+        if (c) ctx.applySite(true)
+      },
+      0
+    )
+  )
+  pane.appendChild(bridgeMSlider(ctx, b, 'Dài (nhịp) m', 'span', 1, 20))
+  pane.appendChild(bridgeMSlider(ctx, b, 'Rộng mặt m', 'deckWidth', 0.6, 4))
+  pane.appendChild(bridgeMSlider(ctx, b, 'Vồng vòm m', 'rise', 0, 2))
+  pane.appendChild(bridgeNSlider(ctx, b, 'Số ván', 'plankCount', 4, 40))
+  bridgeToggle(pane, ctx, b, 'Lan can', 'railOn')
+  pane.appendChild(bridgeMSlider(ctx, b, 'Cao lan can m', 'railHeight', 0.3, 1.5))
+  pane.appendChild(bridgeNSlider(ctx, b, 'Trụ con / bên', 'postCount', 0, 20))
+  bridgeToggle(pane, ctx, b, 'Trụ đỡ gầm', 'pierOn')
+  pane.appendChild(bridgeNSlider(ctx, b, 'Số trụ đỡ', 'pierCount', 0, 6))
 }
 
-// 1 pane cầu i: banner shell + controls + ✕ xoá. (Chưa applySite — shell chưa render.)
+// 1 pane cầu i: controls + ✕ xoá (splice site.bridges + applySite).
 function buildBridgePane(
+  ctx: APGuiCtx,
   b: BridgeConfig,
   i: number,
   rebuild: (focus?: number) => void
 ): HTMLElement {
   const pane = document.createElement('div')
-  const note = document.createElement('div')
-  note.style.cssText =
-    'margin:0 0 6px;padding:3px 5px;border:1px dashed var(--gr-bg-4,#b58a3c);border-radius:4px;' +
-    'font-size:9px;opacity:.8'
-  note.textContent = '🚧 Bản UI thử — hình 3D + lưu sẽ nối khi mạch cá xong'
-  pane.appendChild(note)
-  buildBridgeControls(pane, b)
+  buildBridgeControls(pane, ctx, b)
   pane.appendChild(
     removeRow('✕ Remove cầu', () => {
-      bridgeDrafts.splice(bridgeDrafts.indexOf(b), 1)
+      ctx.site.bridges.splice(ctx.site.bridges.indexOf(b), 1)
       rebuild(Math.max(0, i - 1))
+      ctx.applySite(true)
     })
   )
   return pane
 }
 
-// Sub-tab "Cầu" → hàng tab instance C1/C2… + ＋ (mirror buildFenceDomain). Draft module-level (shell).
-function buildBridgeDomain(): { panel: HTMLElement; dispose: () => void } {
+// Sub-tab "Cầu" → hàng tab instance C1/C2… + ＋ (mirror buildFenceDomain) trên site.bridges.
+function buildBridgeDomain(ctx: APGuiCtx): { panel: HTMLElement; dispose: () => void } {
   const host = document.createElement('div')
-  host.classList.add('ap-fence-domain') // mượn tông nâu fence (chưa cần palette riêng)
+  host.classList.add('ap-fence-domain') // mượn tông nâu fence
   let tabs: Tabs | null = null
   const rebuild = (focus = 0): void => {
     tabs?.dispose()
     host.replaceChildren()
-    const items: TabItem[] = bridgeDrafts.map((b, i) => {
-      const pane = buildBridgePane(b, i, rebuild)
+    const items: TabItem[] = ctx.site.bridges.map((b, i) => {
+      const pane = buildBridgePane(ctx, b, i, rebuild)
       host.appendChild(pane)
       return { label: `C${i + 1}`, panel: pane, title: `Cầu ${i + 1}` }
     })
     const addBtn = addInstanceButton('Cầu', () => {
-      bridgeDrafts.push(makeBridge())
-      rebuild(bridgeDrafts.length - 1)
+      const last = ctx.site.bridges[ctx.site.bridges.length - 1]
+      const b = makeBridge()
+      if (last) b.offsetX = last.offsetX + 3000 // stagger né chồng cầu cũ
+      ctx.site.bridges.push(b)
+      rebuild(ctx.site.bridges.length - 1)
+      ctx.applySite(true)
     })
     tabs = new Tabs(host, items, {
       classes: {
@@ -2935,7 +2952,7 @@ export function setupSitePanel(ctx: APGuiCtx, container: Element | null): SitePa
   const gardenSub = garden.panel
   const water = buildWaterDomain(ctx)
   const waterSub = water.panel
-  const bridge = buildBridgeDomain() // 🌉 "Cầu" bắc ngang hồ — UI SHELL (draft, chưa render/lưu)
+  const bridge = buildBridgeDomain(ctx) // 🌉 "Cầu" bắc ngang hồ — đa-instance site.bridges
   p.append(groundSub, fenceSub, gardenSub, waterSub, bridge.panel)
   container?.appendChild(p)
 

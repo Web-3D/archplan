@@ -151,6 +151,7 @@ import {
   TexturedSurface,
   type TexturedSurfaceMaps,
 } from 'threejs-modules/shaders/surface/TexturedSurface' // 🧱 fence wall texture (tường dọc, triplanar) + material cache
+import { buildSiteBridge } from 'threejs-modules/site/render/bridge' // 🌉 dựng cầu (box vòm + lan can + trụ)
 import {
   buildGroundLayers,
   buildSiteFence,
@@ -1379,8 +1380,7 @@ export class ArchPlanLab extends BaseWorld {
     this.coordPicker.build()
     this.scene.add(this.siteGroup) // 🌳 nền + lô (dưới building)
     this.scene.add(this._grassGroup) // 🌿 cỏ — group BỀN, KHÔNG xoá mỗi rebuild (dirty-check riêng)
-    this.scene.add(this._fenceGroup) // 🧱 rào — group BỀN (dirty-check riêng, né rebuild nước khi kéo slider rào)
-    this.scene.add(this._bridgeGroup) // 🌉 cầu — group BỀN (dirty-check _bridgeSig riêng)
+    this.scene.add(this._fenceGroup, this._bridgeGroup) // 🧱 rào + 🌉 cầu — group BỀN (dirty-check riêng)
     this.scene.add(this._gatePickGroup) // 🚪 pick-box cổng vô hình (Move mode kéo trượt cổng)
     this.scene.add(this.buildingGroup)
     this.scene.add(this.pickGroup) // SPIKE: lớp pick vô hình cho brush paint
