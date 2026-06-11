@@ -321,19 +321,32 @@ function addFrameRows(opF: GUI, op: OpeningState, ctx: APGuiCtx): void {
   opF.addColor(op, 'frameColor').name('Màu khung').onChange(ctx.build)
 }
 
-// C2 CÁNH GỖ — chỉ kind door/loading_door + lỗ CHỮ NHẬT. Slider "Mở %" = LIVE xoay pivot qua
-// ctx.tuneLeafLive (transform thuần 0 rebuild — pattern tunePathRotLive); buông = ctx.build() commit.
+// Màu cánh default theo loại — đổi loại = fill lại (mirror hành vi frameStyle/FRAME_DEFAULTS).
+const LEAF_COLOR_DEFAULTS = {
+  wood: 0x7a5a3a, // gỗ nâu
+  'glass-slide': 0x3a3d42, // khung nhôm sẫm
+  'shoji-slide': 0x7a4a30, // gỗ ấm reddish (khớp woodColor ShojiScreen)
+} as const
+
+// C2 CÁNH GỖ xoay + C4 CÁNH TRƯỢT kính/shoji — chỉ kind door/loading_door + lỗ CHỮ NHẬT. Slider
+// "Mở %" = LIVE transform pivot (xoay bản lề / translate ray) qua ctx.tuneLeafLive (0 rebuild —
+// pattern tunePathRotLive); buông = ctx.build() commit.
 function addLeafRows(opF: GUI, op: OpeningState, ctx: APGuiCtx, key: string): void {
   if (op.round || op.kind === 'window') return
   op.leafType ??= 'none'
   opF
-    .add(op, 'leafType', { 'Không cánh': 'none', 'Cánh gỗ': 'wood' })
+    .add(op, 'leafType', {
+      'Không cánh': 'none',
+      'Cánh gỗ': 'wood',
+      'Kính trượt': 'glass-slide',
+      'Shoji trượt': 'shoji-slide',
+    })
     .name('Cánh')
     .onChange((v: string) => {
       if (v !== 'none') {
         op.leafDouble ??= false
         op.leafOpen ??= 0
-        op.leafColor ??= 0x7a5a3a
+        op.leafColor = LEAF_COLOR_DEFAULTS[v as keyof typeof LEAF_COLOR_DEFAULTS]
       }
       ctx.rebuild()
       ctx.build()
@@ -341,14 +354,21 @@ function addLeafRows(opF: GUI, op: OpeningState, ctx: APGuiCtx, key: string): vo
   if (op.leafType === 'none') return
   op.leafDouble ??= false
   op.leafOpen ??= 0
-  op.leafColor ??= 0x7a5a3a
-  opF.add(op, 'leafDouble').name('Đôi (French)').onChange(ctx.build)
+  op.leafColor ??= LEAF_COLOR_DEFAULTS[op.leafType]
+  const slide = op.leafType !== 'wood'
+  opF
+    .add(op, 'leafDouble')
+    .name(slide ? '2 cánh (2 ray)' : 'Đôi (French)')
+    .onChange(ctx.build)
   opF
     .add(op, 'leafOpen', 0, 100, 1)
     .name('Mở %')
     .onChange((v: number) => ctx.tuneLeafLive(key, v))
     .onFinishChange(ctx.build)
-  opF.addColor(op, 'leafColor').name('Màu cánh').onChange(ctx.build)
+  opF
+    .addColor(op, 'leafColor')
+    .name(op.leafType === 'glass-slide' ? 'Màu khung' : 'Màu cánh')
+    .onChange(ctx.build)
 }
 
 export function rebuildOpeningSubfolders(
