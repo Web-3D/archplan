@@ -2,9 +2,10 @@
  * VỊ TRÍ   — 01-Doraemon/src/sandbox/archplan/mix/PresetPanel.ts
  * VAI TRÒ  — Khay MIX DI ĐỘNG (trung tâm DUY NHẤT thao tác mix — UI inline per-panel đã tháo
  *            2026-06-11): danh sách preset (thumb base + tên, click = cầm active, ✎ = editor
- *            preset + tấm preview, dblclick đổi tên, ＋/🗑, ⬇⬆ JSON) + 3 MODE click-3D:
+ *            preset + ô preview bên phải khay, dblclick đổi tên, ＋/🗑, ⬇⬆ JSON) + 3 MODE click-3D:
  *            🪣 Áp (REF live trong phiên — chỉnh ✎ thấy trên bề mặt; buông xô = bake clone riêng)
  *            · 🧽 Gỡ · 🎯 Chỉnh (board ĐỐI TƯỢNG hiện trong khay — zone/G0/hồ có cọ vẽ).
+ *            Mặc định GÓC TRÊN-TRÁI; KÉO header dời tự do (mirror PalettePanel — NgQuan 2026-06-11).
  * LIÊN HỆ  — Kho: ./presets (archplan.mixPresets.v1). Board: buildMixBoard (gui/site.ts).
  *            Mode/resolve/bake: MixManager (qua APGuiCtx setMixBucket/registerMixEditOpen).
  *            Lab mount như PalettePanel (float trên canvas, instance persist qua _rebuildGUI).
@@ -33,7 +34,8 @@ function ensurePresetCss(): void {
   const s = document.createElement('style')
   s.id = 'ap-mixpre-css'
   s.textContent =
-    `.ap-mixpre-float{position:absolute;top:6px;left:470px;z-index:30}` +
+    // góc trên-trái (drawer Tools đã dời xuống đáy); z 155 > palette 150 — ô preview mở bên phải không chìm
+    `.ap-mixpre-float{position:absolute;top:6px;left:6px;z-index:155}` +
     `.ap-mixpre{width:196px;background:#3e2f1c;border:1px solid #b58a3c;border-radius:6px;` +
     `color:#f5ead2;font:10px/1.3 'Segoe UI',system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.45)}` +
     `.ap-mixpre-hd{display:flex;align-items:center;gap:4px;padding:3px 6px;cursor:pointer;font-weight:600}` +
@@ -66,6 +68,11 @@ function ensurePresetCss(): void {
   document.head.appendChild(s)
 }
 
+// Vị trí khay ĐÃ KÉO (px, theo offset-parent) — MODULE-LEVEL vì instance panel bị dispose/new mỗi
+// _rebuildGUI (teardown Lab); biến module sống trọn session. null = chưa kéo (CSS góc trên-trái).
+// UI-only, reset khi reload — mirror ngữ nghĩa _palPos của PalettePanel.
+let floatPos: { left: number; top: number } | null = null
+
 // Target có cọ vẽ mask không (mirror _meshMatch manager): base/zone/đáy-vách hồ = có;
 // fence/tường-building/sàn generic ({wallMix}/{flatMix}) = không (chưa bake uv chu-vi).
 function paintableTarget(t: MixPaintTarget): boolean {
@@ -87,6 +94,9 @@ export class MixPresetPanel {
   private modeBtns: Partial<Record<'apply' | 'erase' | 'edit', HTMLButtonElement>> = {}
   private editSel: MixEditSel | null = null // 🎯 đối tượng đang chỉnh trong khay (board target thật)
   private editHost: HTMLElement | null = null
+  // 🖐 Kéo khay bằng header (mirror PalettePanel): phiên kéo + cờ chặn click thu/mở ngay sau kéo.
+  private drag: { sx: number; sy: number; px: number; py: number; moved: boolean } | null = null
+  private dragMoved = false
 
   /** Preset đang CẦM (active) — nguồn CLONE cho 🪣 áp (Mảnh 3). */
   activePreset(): MixPreset | null {
@@ -116,9 +126,18 @@ export class MixPresetPanel {
       st.style.display = this.collapsed ? 'none' : ''
     }
     hd.addEventListener('click', () => {
+      if (this.dragMoved) {
+        this.dragMoved = false // vừa kéo xong → bỏ qua toggle thu/mở lần này
+        return
+      }
       this.collapsed = !this.collapsed
       syncCollapse()
     })
+    this._wireDrag(hd, wrap)
+    if (floatPos) {
+      wrap.style.left = `${floatPos.left}px` // khôi phục vị trí đã kéo (instance new mỗi rebuild)
+      wrap.style.top = `${floatPos.top}px`
+    }
     this.listEl = body
     const editHost = document.createElement('div')
     this.editHost = editHost // 🎯 board đối tượng (mode edit) — giữa list và status
@@ -151,12 +170,53 @@ export class MixPresetPanel {
     if (this.statusEl) this.statusEl.textContent = msg
   }
 
+  // ── 🖐 Kéo khay (header) — dời WRAP float (ô preview bên phải đi theo); <4px = click thu/mở ──────
+  private _wireDrag(hd: HTMLElement, wrap: HTMLElement): void {
+    hd.title = 'Kéo để dời khay · click thu/mở'
+    hd.addEventListener('pointerdown', (e) => this._dragStart(e, wrap, hd))
+    hd.addEventListener('pointermove', (e) => this._dragMove(e, wrap))
+    hd.addEventListener('pointerup', (e) => this._dragEnd(e, hd))
+  }
+
+  private _dragStart(e: PointerEvent, wrap: HTMLElement, hd: HTMLElement): void {
+    if (e.button !== 0) return
+    const host = wrap.offsetParent?.getBoundingClientRect() ?? { left: 0, top: 0 }
+    const wr = wrap.getBoundingClientRect()
+    this.drag = {
+      sx: e.clientX,
+      sy: e.clientY,
+      px: wr.left - host.left,
+      py: wr.top - host.top,
+      moved: false,
+    }
+    hd.setPointerCapture(e.pointerId)
+  }
+
+  private _dragMove(e: PointerEvent, wrap: HTMLElement): void {
+    const d = this.drag
+    if (!d) return
+    const dx = e.clientX - d.sx
+    const dy = e.clientY - d.sy
+    if (!d.moved && dx * dx + dy * dy < 16) return // <4px = chưa coi là kéo
+    d.moved = true
+    floatPos = { left: d.px + dx, top: d.py + dy } // module-level — giữ qua _rebuildGUI
+    wrap.style.left = `${floatPos.left}px`
+    wrap.style.top = `${floatPos.top}px`
+  }
+
+  private _dragEnd(e: PointerEvent, hd: HTMLElement): void {
+    if (!this.drag) return
+    if (this.drag.moved) this.dragMoved = true // chặn click thu/mở ngay sau kéo
+    this.drag = null
+    if (hd.hasPointerCapture(e.pointerId)) hd.releasePointerCapture(e.pointerId)
+  }
+
   private _save(): void {
     saveMixPresets(this.presets)
   }
 
-  // 🧪 Đồng bộ tấm preview 3D theo editor đang mở (✎): mở = preview CHÍNH preset.mix (slider live);
-  // đóng/xóa = gỡ tấm. Gọi lại sau commit board (đổi texture/rule = structural → tấm rebuild material).
+  // 🔎 Đồng bộ Ô PREVIEW (canvas bên phải khay) theo editor đang mở (✎): mở = preview CHÍNH preset.mix
+  // (slider live); đóng/xóa = ẩn ô. Gọi lại sau commit board (đổi texture/rule = structural → rebuild material).
   private _syncPreview(): void {
     const p = this.presets.find((q) => q.id === this.editId) ?? null
     this.ctx?.setMixPreview?.(p ? p.mix : null)
@@ -200,7 +260,7 @@ export class MixPresetPanel {
     })
     const edit = this._icon(
       '✎',
-      'Sửa preset (bảng trộn — tấm preview hiện trước lô, lưu thẳng kho)',
+      'Sửa preset (bảng trộn — ô preview hiện bên phải khay, lưu thẳng kho)',
       () => {
         this.editId = this.editId === p.id ? null : p.id
         this._renderList()

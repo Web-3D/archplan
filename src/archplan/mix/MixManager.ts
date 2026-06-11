@@ -36,6 +36,33 @@ import type { BuildingState, ShapeInstance } from '../state/state'
 /** 1 entry cache mix: material + sig structural + mask vẽ tay (sống qua rebuild material). */
 type MixEntry = { gmix: PhotoGroundMix; sig: string; pm: PaintMask }
 
+/** Hệ tọa độ trải của material (PhotoGroundMix chốt mapping LÚC DỰNG — không đổi được sau đó). */
+type MixSpace = 'xz' | 'uv' | 'wall'
+
+/** Entry tách THEO SPACE trong 1 params: phiên REF-xô cùng params có thể phủ cả mặt nằm ('xz') lẫn
+ *  mặt đứng ('wall'/'uv') — dùng chung 1 material là SAI mapping (đáy hồ ăn material 'wall' chiếu
+ *  positionWorld.y = hằng trên mặt nằm → texture kéo sọc 1 chiều. Bug NgQuan 2026-06-11). */
+type MixEntrySet = Partial<Record<MixSpace, MixEntry>>
+
+/** Đẩy bộ uniform LIVE từ params vào 1 PhotoGroundMix — DÙNG CHUNG manager + MixPreview (1 nguồn,
+ *  khay ✎ kéo slider thấy cùng giá trị ở bề mặt thật lẫn ô preview). */
+export function applyMixUniforms(g: PhotoGroundMix, m: GroundMixParams): void {
+  g.set('maskScale', m.maskScale)
+  g.set('maskSoft', m.maskSoft)
+  g.set('heightK', m.heightK)
+  g.set('macro', m.macro)
+  g.set('tint', m.tint)
+  g.set('bomb', m.bomb)
+  g.set('rotFree', m.rotFree)
+  g.set('seed', m.seed)
+  g.set('scaleJit', m.scaleJit)
+  g.set('margin', m.margin)
+  g.set('farOn', m.farOn)
+  g.set('farRange', m.farRange)
+  g.set('gravity', m.gravity) // 🧱 cường độ rule trọng lực (uniform live — mặt nằm không có rule → no-op)
+  m.slots.forEach((s, i) => g.setSlot(i, s.bias, s.seed)) // 🖌 stage 3: per-slot uniform (Ngưỡng live)
+}
+
 /** Cursor hint canvas theo mode xô: áp = copy · gỡ = cell · chỉnh = crosshair. */
 const BUCKET_CURSOR = { apply: 'copy', erase: 'cell', edit: 'crosshair' } as const
 
@@ -84,9 +111,10 @@ export interface MixManagerDeps {
 export class MixManager {
   // 🎨 PhotoGroundMix CACHE — key = chính OBJECT GroundMixParams (stage 4: target nhân ra zone/'base'/hồ
   // floor+wall/fence → wrapper target không stable, nhưng params object SỐNG TẠI CHỖ trong state qua rebuild).
+  // Value = entry TÁCH THEO SPACE (xem MixEntrySet — fix sọc kéo phiên REF: 1 params phủ cả mặt nằm + đứng).
   // sig = CHỈ keys texture + rule (stage 3: bias/seed/paint-rect = uniform live) — đổi sig = dựng lại material
   // (pm GIỮ). pm = PaintMask 128² mask vẽ tay — sống cùng entry, dispose khi params rời state (prune)/dispose.
-  private readonly _cache = new Map<GroundMixParams, MixEntry>()
+  private readonly _cache = new Map<GroundMixParams, MixEntrySet>()
   // 🖌 Mode VẼ MASK mix: target + slot đang vẽ (null = tắt); _stroking = đang giữ chuột kéo nét.
   // Bật = orbit khóa (như paintMode SPIKE); pointer raycast mesh target → uv bbox → pm.stamp. Buông = persist.
   private _paint: { target: MixPaintTarget; slot: number } | null = null
@@ -104,9 +132,8 @@ export class MixManager {
   private _bucket: MixBucketOp | null = null
   private _syncBucket: (() => void) | null = null // PresetPanel đăng ký — sync nút khi mode tắt từ ngoài
   private _onEditOpen: ((sel: MixEditSel) => void) | null = null // 🎯 khay đăng ký — mở board đối tượng
-  // 🧪 Preset đang PREVIEW (tấm editor trước lô — Lab dựng mesh): cộng vào _liveParams để prune
-  // KHÔNG dọn cache material đang hiển thị trên tấm. null = không preview.
-  private _previewMix: GroundMixParams | null = null
+  // (🧪 preview editor preset KHÔNG còn qua cache này — MixPreview canvas riêng tự giữ material,
+  //  2026-06-11 "tích hợp preview vào bên phải GUI" → manager hết món _previewMix/setPreview.)
 
   constructor(private readonly deps: MixManagerDeps) {}
 
@@ -136,10 +163,10 @@ export class MixManager {
     return target.mix
   }
 
-  // 🖌 Entry cache mix của target. undefined = mix tắt / chưa dựng.
+  // 🖌 Entry cache mix của target — đúng SPACE của target. undefined = mix tắt / chưa dựng.
   private _hitOf(target: MixPaintTarget): MixEntry | undefined {
     const p = this._paramsOf(target)
-    return p ? this._cache.get(p) : undefined
+    return p ? this._cache.get(p)?.[this._spaceOf(target)] : undefined
   }
 
   // 🎨 Hệ tọa độ trải mix của target: mặt NẰM (zone/'base'/đáy hồ) = 'xz' world; vách hồ = 'uv' (chu-vi×cao
@@ -162,9 +189,9 @@ export class MixManager {
     // Stage 3: sig keys texture + 🧱 rule per-slot (rule bake vào graph — đổi = structural như đổi texture);
     // bias/seed/gravity/paint-rect/wall-range = uniform live → kéo slider KHÔNG dựng lại material.
     const sig = JSON.stringify([keys, mix.slots.map((s) => s.rule ?? null)])
-    let hit = this._cache.get(mix)
+    let hit = this._cache.get(mix)?.[this._spaceOf(target)]
     if (!hit || hit.sig !== sig) hit = this._buildEntry(target, mix, sets, sig, hit)
-    this._applyUniforms(hit.gmix, mix)
+    applyMixUniforms(hit.gmix, mix)
     this._applyPaintRect(hit.gmix, target)
     this._applyWallRange(hit.gmix, target) // 🧱 dải cao tường cho rule trọng lực (mặt đứng)
     return hit.gmix.getMaterial()
@@ -195,7 +222,12 @@ export class MixManager {
     })
     if (space === 'uv') gmix.getMaterial().side = THREE.DoubleSide // vách hồ nhìn cả 2 phía (như basinMaterial)
     const hit = { gmix, sig, pm }
-    this._cache.set(mix, hit)
+    let set = this._cache.get(mix)
+    if (!set) {
+      set = {}
+      this._cache.set(mix, set)
+    }
+    set[space] = hit // entry RIÊNG per-space — cùng params mặt nằm/đứng không giẫm material nhau
     return hit
   }
 
@@ -204,24 +236,6 @@ export class MixManager {
     const pm = new PaintMask(128) // 128² đủ vạt/lối mòn per-target, base64 ~87KB (Lab giữ 256² cho sàn 12m)
     if (mix.paint) pm.loadBase64(mix.paint)
     return pm
-  }
-
-  // Đẩy bộ uniform LIVE của mix vào material (mỗi lần build site / kéo slider — rẻ, không recompile).
-  private _applyUniforms(g: PhotoGroundMix, m: NonNullable<GroundLayer['mix']>): void {
-    g.set('maskScale', m.maskScale)
-    g.set('maskSoft', m.maskSoft)
-    g.set('heightK', m.heightK)
-    g.set('macro', m.macro)
-    g.set('tint', m.tint)
-    g.set('bomb', m.bomb)
-    g.set('rotFree', m.rotFree)
-    g.set('seed', m.seed)
-    g.set('scaleJit', m.scaleJit)
-    g.set('margin', m.margin)
-    g.set('farOn', m.farOn)
-    g.set('farRange', m.farRange)
-    g.set('gravity', m.gravity) // 🧱 cường độ rule trọng lực (uniform live — mặt nằm không có rule → no-op)
-    m.slots.forEach((s, i) => g.setSlot(i, s.bias, s.seed)) // 🖌 stage 3: per-slot uniform (Ngưỡng live)
   }
 
   // 🧱 Dải cao tường cho rule trọng lực: vách hồ = (yBot, depth) — khớp _waterRect; rào = (mặt nền, height).
@@ -241,7 +255,7 @@ export class MixManager {
   // (assembler biết yBase/h — Lab không phải tự suy floor stacking).
   wallMixMat(mix: GroundMixParams, range: { footY: number; h: number }): THREE.Material | null {
     const mat = this.matFor({ wallMix: mix })
-    if (mat) this._cache.get(mix)?.gmix.setWallRange(range.footY, range.h)
+    if (mat) this._cache.get(mix)?.wall?.gmix.setWallRange(range.footY, range.h)
     return mat
   }
 
@@ -326,12 +340,12 @@ export class MixManager {
 
   // ── 🎨 PRUNE — dọn cache theo state sống ───────────────────────────────────────────────────────────
 
-  // 🎨 Tập GroundMixParams đang SỐNG trong state (mọi nguồn: site + building + tấm preview) — chuẩn prune.
+  // 🎨 Tập GroundMixParams đang SỐNG trong state (site + building) — chuẩn prune. (Preview ✎ KHÔNG
+  // còn ở đây — MixPreview canvas riêng tự giữ material, không mượn cache manager.)
   private _liveParams(): Set<GroundMixParams> {
     const live = new Set<GroundMixParams>()
     this._collectSiteMix(live)
     this._collectBuildingMix(live)
-    if (this._previewMix) live.add(this._previewMix) // 🧪 tấm preview editor preset đang mở
     return live
   }
 
@@ -345,11 +359,6 @@ export class MixManager {
       if (w.wallMix) live.add(w.wallMix)
     }
     for (const f of site.fences) if (f.mix) live.add(f.mix)
-  }
-
-  /** 🧪 Đăng ký/bỏ preset đang preview trên tấm editor (Lab gọi qua _setMixPreview). */
-  setPreview(mix: GroundMixParams | null): void {
-    this._previewMix = mix
   }
 
   // 🎨 Gom mix params tường BUILDING (mọi floor → instance → segment) vào set sống.
@@ -368,13 +377,19 @@ export class MixManager {
     const live = this._liveParams()
     for (const k of [...this._cache.keys()]) {
       if (live.has(k)) continue
-      const v = this._cache.get(k)
-      v?.gmix.dispose()
-      v?.pm.dispose() // 🖌 DataTexture mask vẽ của target xóa
+      this._disposeSet(this._cache.get(k))
       this._cache.delete(k)
     }
     const cur = this._paint && this._paramsOf(this._paint.target)
     if (this._paint && (!cur || !live.has(cur))) this.paintOff()
+  }
+
+  // Dispose mọi entry per-space của 1 params (gmix material + PaintMask DataTexture).
+  private _disposeSet(set: MixEntrySet | undefined): void {
+    for (const v of Object.values(set ?? {})) {
+      v?.gmix.dispose()
+      v?.pm.dispose() // 🖌 DataTexture mask vẽ của target xóa
+    }
   }
 
   // ── 🖌 VẼ MASK MIX per-target — mode + cọ + persist ────────────────────────────────────────────────
@@ -502,10 +517,13 @@ export class MixManager {
   }
 
   // Kéo slider mix (Ngưỡng/Macro/…) → đẩy thẳng uniform vào material đang sống — KHÔNG rebuild site.
+  // MỌI space của params (phiên REF-xô: ✎ chỉnh phải live cả mặt nằm 'xz' lẫn mặt đứng 'wall'/'uv').
   tuneLive(target: MixPaintTarget): void {
-    const hit = this._hitOf(target)
     const mix = this._paramsOf(target)
-    if (hit && mix) this._applyUniforms(hit.gmix, mix)
+    if (!mix) return
+    for (const v of Object.values(this._cache.get(mix) ?? {})) {
+      if (v) applyMixUniforms(v.gmix, mix)
+    }
   }
 
   // ── 🪣🧽🎯 HỌ MODE XÔ — resolve đích click 3D + áp/gỡ/mở-board (UI inline đã tháo) ────────────────
@@ -789,10 +807,7 @@ export class MixManager {
 
   /** Teardown toàn bộ cache: gmix material + PaintMask DataTexture. Gọi từ Lab _disposeSurfaceTextures. */
   dispose(): void {
-    for (const v of this._cache.values()) {
-      v.gmix.dispose() // 🎨 mix per-target
-      v.pm.dispose() // 🖌 DataTexture mask vẽ
-    }
+    for (const v of this._cache.values()) this._disposeSet(v)
     this._cache.clear()
   }
 }

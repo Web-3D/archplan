@@ -196,6 +196,7 @@ import { ShapeSelection } from './interaction/selection' // 🧲 Shape Group —
 import { SunGizmo, type SunGizmoHost } from './interaction/sunGizmo' // ☀ sun = vật thể kéo trong scene
 import { WaterTool, type WaterToolHost } from './interaction/waterDrag' // 💧 kéo hồ/đỉnh/viền 3D — tách monolith
 import { MixManager } from './mix/MixManager' // 🎨 hệ mix nền (8 đích + cọ vẽ + prune) — tách Mảnh −1 plan palette
+import { MixPreview } from './mix/MixPreview' // 🔎 ô preview preset TRONG khay (canvas WebGPU riêng)
 import { MixPresetPanel } from './mix/PresetPanel' // 🧪 khay preset mix (Mảnh 2) — float như Palette
 import {
   CoordPicker,
@@ -504,13 +505,11 @@ export class ArchPlanLab extends BaseWorld {
   // 🧪 Khay preset mix (Mảnh 2 plan palette) — float như Palette, instance + kho GIỮ qua _rebuildGUI.
   private mixPreWrap: HTMLElement | null = null
   private mixPresetPanel: MixPresetPanel | null = null
-  // 🧪 Tấm PREVIEW preset đang ✎ (feedback NgQuan "chỉnh không thấy live"): plane đứng 2×2m trước lô,
-  // material = wallMixMat(preset.mix) — CÙNG cache entry params → slider board tune uniform LIVE thấy
-  // ngay, rule trọng lực hiện (mặt đứng). Material thuộc MixManager cache (prune dọn khi preview tắt);
-  // Lab sở hữu geometry + fallback material (texture chưa load → màu preset base).
-  private _mixPrevMesh: THREE.Mesh | null = null
-  private _mixPrevFallback: THREE.MeshStandardMaterial | null = null
-  private _mixPrevSrc: GroundMixParams | null = null
+  // 🔎 Ô PREVIEW preset đang ✎ — canvas WebGPU RIÊNG trong khay 🧪 (cột phải panel; feedback NgQuan
+  // 2026-06-11 "tích hợp vào bên phải của gui" thay tấm plane 2×2m đứng trước lô). Material RIÊNG của
+  // component (không mượn cache MixManager — né lẫn space 'wall'/'xz' gây sọc). Tạo lazy 1 lần, persist
+  // qua _rebuildGUI (mount lại vào wrap mới); slider live qua tune() trong delegate tuneMixLive.
+  private _mixPreview: MixPreview | null = null
   // Move tool (kéo element) + Focus (click→GUI) — tách ra interaction/manipulate.ts. moveMode + nút
   // GIỮ ở lab (điều phối 3 mode loại trừ); phiên kéo + map anchor folder nằm trong ManipulateTool.
   private manipulate: ManipulateTool | null = null
@@ -1474,6 +1473,8 @@ export class ArchPlanLab extends BaseWorld {
     this.controls = null
     this.palette?.dispose() // gỡ listener doc (mousedown/keydown) của popover palette
     this._teardownPanels() // gui nhà + panel Ground
+    this._mixPreview?.dispose() // 🔎 ô preview khay (WebGPU renderer riêng) — CHỈ dispose cuối, sống qua rebuild
+    this._mixPreview = null
     this._disposeLabFloat() // 🧪 Lab float persistent (preview + shell + toggle) — dispose ở teardown CUỐI
     this.drawer?.remove() // 🗄️ gỡ shell drawer phải (handle + body) — chỉ ở dispose, KHÔNG ở _rebuildGUI
     this.drawer = null
@@ -1883,7 +1884,10 @@ export class ArchPlanLab extends BaseWorld {
       getMixBrush: () => this._mix.getBrush(),
       setMixBrush: (sizeM, erase) => this._mix.setBrush(sizeM, erase),
       clearMixPaint: (target, slot) => this._mix.clearPaint(target, slot),
-      tuneMixLive: (target) => this._mix.tuneLive(target),
+      tuneMixLive: (target) => {
+        this._mix.tuneLive(target)
+        this._mixPreview?.tune() // 🔎 slider ✎ live cả trên ô preview (material riêng — không qua cache)
+      },
       registerMixPaintSync: (fn) => this._mix.registerSync(fn),
       setMixBucket: (op) => this._mix.setBucket(op),
       getMixBucketMode: () => this._mix.bucketMode,
@@ -1953,14 +1957,21 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
-  // 🚪 C2: kéo slider Mở % → xoay pivot cánh TRỰC TIẾP (transform thuần, 0 rebuild/recompile — đúng
-  // PERFORMANCE.md). Pivot mang userData {leafKey, leafBase, leafSign} gắn lúc assembleLeaves; buông
-  // slider = ctx.build() commit persist (rebuild đặt lại đúng góc từ state).
+  // 🚪 C2+C4: kéo slider Mở % → transform pivot cánh TRỰC TIẾP (thuần, 0 rebuild/recompile — đúng
+  // PERFORMANCE.md). userData gắn lúc assembleLeaves: swing {leafBase, leafSign} → xoay bản lề;
+  // slide {leafBaseX/Z, leafDirX/Z, leafMax} → translate dọc ray. Buông slider = ctx.build() commit.
   private _tuneLeafLive(key: string, openPct: number): void {
-    const rad = (Math.min(100, Math.max(0, openPct)) / 100) * LEAF_MAX_RAD
+    const pct = Math.min(100, Math.max(0, openPct)) / 100
     this.buildingGroup.traverse((o) => {
-      if (o.userData.leafKey === key)
-        o.rotation.y = (o.userData.leafBase as number) + (o.userData.leafSign as number) * rad
+      if (o.userData.leafKey !== key) return
+      if (o.userData.leafKind === 'slide') {
+        const d = pct * (o.userData.leafMax as number)
+        o.position.x = (o.userData.leafBaseX as number) + (o.userData.leafDirX as number) * d
+        o.position.z = (o.userData.leafBaseZ as number) + (o.userData.leafDirZ as number) * d
+      } else {
+        o.rotation.y =
+          (o.userData.leafBase as number) + (o.userData.leafSign as number) * pct * LEAF_MAX_RAD
+      }
     })
   }
 
@@ -2024,7 +2035,16 @@ export class ArchPlanLab extends BaseWorld {
   }
 
   // ◀ Drawer TRÁI: bảng Tools (Surface + tọa độ) ẩn vào mép trái mặc định; tay kéo »/« nhô ra/ẩn vào.
+  // Neo ĐÁY-TRÁI ngay TRÊN thanh sun (override .ap-ldrawer top:5 của css gốc — INJECT id-guard, không
+  // sửa file css): .ap-sun-ctrl bottom:8 + cao ~124px → bottom:140. Nhường góc trên-trái cho khay 🧪
+  // (NgQuan 2026-06-11). bottom-anchor → nội dung cao mọc NGƯỢC lên, không đè thanh sun.
   private _setupLeftDrawer(): void {
+    if (!document.getElementById('ap-ldrawer-pos-css')) {
+      const s = document.createElement('style')
+      s.id = 'ap-ldrawer-pos-css'
+      s.textContent = `.ap-ldrawer{top:auto;bottom:140px}`
+      document.head.appendChild(s)
+    }
     const drawer = document.createElement('div')
     drawer.className = 'ap-ldrawer ap-ldrawer-closed' // ẩn vào trái mặc định
     const handle = document.createElement('button')
@@ -2144,51 +2164,22 @@ export class ArchPlanLab extends BaseWorld {
     this._buildFloatingMove(ctx) // 🤚 Move = nút float góc trái-dưới (cạnh thanh sáng sun)
   }
 
-  // 🧪 Preview preset đang ✎: lưu nguồn + đăng ký manager (prune giữ cache) + dựng/gỡ tấm.
+  // 🔎 Preview preset đang ✎ (ctx.setMixPreview): tạo lazy component 1 LẦN + mount vào wrap khay,
+  // rồi sync (null = ẩn). Material/renderer do MixPreview tự quản — Lab không giữ mesh/fallback nữa.
   private _setMixPreview(mix: GroundMixParams | null): void {
-    this._mixPrevSrc = mix
-    this._mix.setPreview(mix)
-    this._syncMixPreviewMesh()
-  }
-
-  // Dựng/cập nhật/gỡ tấm preview theo _mixPrevSrc. Gọi lại cuối _siteTexOpts (texture preset load
-  // xong → re-render site → thay fallback bằng material mix thật; lô đổi cỡ → tấm dời theo mép).
-  private _syncMixPreviewMesh(): void {
-    const src = this._mixPrevSrc
-    if (!src) {
-      this._disposeMixPreview()
-      return
+    if (mix && !this._mixPreview) {
+      this._mixPreview = new MixPreview({
+        mapsOf: (k) => {
+          const maps = this._groundTex[k]
+          if (!maps) this._ensureGroundTex(k) // load xong: _siteSig='' + re-render → resync() thay fallback
+          return maps ?? null
+        },
+        tileOf: (k) => GROUND_TEX_SPEC[k]?.tile ?? 2,
+      })
+      void this._mixPreview.init() // WebGPU init async — fallback màu hiện tới khi sẵn sàng
+      if (this.mixPreWrap) this._mixPreview.mount(this.mixPreWrap)
     }
-    const baseY = this.site.groundThick / 1000
-    if (!this._mixPrevMesh) {
-      this._mixPrevMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2))
-      this._mixPrevMesh.castShadow = false
-      this.scene.add(this._mixPrevMesh) // scene (KHÔNG siteGroup) — sống qua rebuild site
-    }
-    const m = this._mixPrevMesh
-    m.position.set(0, baseY + 1, this.site.lotDepth / 2000 + 1.2) // trước lô, chân chạm mặt nền
-    const mat = this._mix.wallMixMat(src, { footY: baseY, h: 2 }) // range = thân tấm → rule chạy đúng
-    if (mat) {
-      mat.side = THREE.DoubleSide // nhìn 2 phía — entry này CHỈ tấm preview dùng (object áp = CLONE riêng)
-      m.material = mat
-    } else {
-      // texture chưa load (wallMixMat kick-off async) → màu preset base tạm; load xong tự thay
-      this._mixPrevFallback ??= new THREE.MeshStandardMaterial({ side: THREE.DoubleSide })
-      this._mixPrevFallback.color.setHex(GROUND_PRESETS[src.base]?.color ?? 0x8a8680)
-      m.material = this._mixPrevFallback
-    }
-  }
-
-  // Gỡ tấm preview: geometry + fallback do Lab sở hữu; material mix thuộc MixManager cache —
-  // KHÔNG dispose ở đây (setPreview(null) đã rút khỏi _liveParams → prune dọn ở lượt gom opts kế).
-  private _disposeMixPreview(): void {
-    if (this._mixPrevMesh) {
-      this.scene.remove(this._mixPrevMesh)
-      this._mixPrevMesh.geometry.dispose()
-      this._mixPrevMesh = null
-    }
-    this._mixPrevFallback?.dispose()
-    this._mixPrevFallback = null
+    this._mixPreview?.sync(mix)
   }
 
   // 🧪 Khay preset mix: wrap float mới mỗi _rebuildGUI (gỡ cái cũ — phòng leak DOM), panel instance GIỮ
@@ -2201,6 +2192,7 @@ export class ArchPlanLab extends BaseWorld {
     this.mixPreWrap = wrap
     if (!this.mixPresetPanel) this.mixPresetPanel = new MixPresetPanel()
     this.mixPresetPanel.build(wrap, ctx)
+    this._mixPreview?.mount(wrap) // 🔎 ô preview sống qua rebuild — gắn lại vào wrap mới (giữ WebGPU context)
   }
 
   // 🤚 Move = nút float CỐ ĐỊNH góc trái-dưới (cạnh thanh sáng sun ap-sun-ctrl), NGOÀI drawer → luôn
@@ -2487,13 +2479,19 @@ export class ArchPlanLab extends BaseWorld {
     this.leftTools = null
     this.paletteWrap?.remove() // 🎨 palette float tự do
     this.paletteWrap = null
+    this._teardownMixTray()
+    this.moveFloat?.remove() // 🤚 Move float góc trái-dưới
+    this.moveFloat = null
+  }
+
+  // 🧪 Gỡ khay preset mix mỗi rebuild — tách khỏi _teardownPanels (complexity ≤10). Ô preview 🔎 chỉ
+  // ẨN (component + WebGPU renderer GIỮ — _mountMixPresets gắn lại; dispose cuối ở onDispose).
+  private _teardownMixTray(): void {
     this.mixPreWrap?.remove() // 🧪 khay preset mix float
     this.mixPreWrap = null
     this.mixPresetPanel?.dispose()
     this.mixPresetPanel = null
-    this._setMixPreview(null) // 🧪 gỡ tấm preview (geometry + fallback; material cache prune lo)
-    this.moveFloat?.remove() // 🤚 Move float góc trái-dưới
-    this.moveFloat = null
+    this._mixPreview?.sync(null)
   }
 
   private _rebuildGUI(): void {
@@ -2854,7 +2852,7 @@ export class ArchPlanLab extends BaseWorld {
     }
     if (Object.keys(borderByKey).length > 0) opts.borderMatByKey = borderByKey
     // Fence material KHÔNG resolve ở đây nữa (đa-lớp → mỗi lớp 1 kind riêng) — _syncFence bơm per-fence.
-    this._syncMixPreviewMesh() // 🧪 texture preset load xong / lô đổi cỡ → cập nhật tấm preview
+    this._mixPreview?.resync() // 🔎 texture preset load xong → ô preview thay fallback màu bằng mix thật
     return opts
   }
 
