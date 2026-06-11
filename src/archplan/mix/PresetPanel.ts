@@ -268,6 +268,7 @@ export class MixPresetPanel {
       }
     )
     const del = this._icon('🗑', 'Xóa preset (đối tượng đã áp giữ nguyên — CLONE)', () => {
+      if (!window.confirm(`Xóa preset "${p.name}"? (bề mặt đã áp giữ nguyên — clone riêng)`)) return
       // đang cầm 🪣 chính preset này → buông xô trước (manager bake refs về clone — không mồ côi)
       if (this.activeId === p.id && this.ctx?.getMixBucketMode?.() === 'apply')
         this.ctx.setMixBucket?.(null)
