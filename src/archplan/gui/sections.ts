@@ -279,6 +279,7 @@ function buildOneOpening(
   live(opF.add(op, 'x', 0, xMax, 10).name('X'), ctx)
   live(opF.add(op, 'yOffset', -3000, 6000, 10).name('Y'), ctx)
   addFrameRows(opF, op, ctx)
+  addBarRows(opF, op, ctx)
   addLeafRows(opF, op, ctx, `${inst.id}:${segIdx}:${opIdx}`)
   opF
     .add(
@@ -319,6 +320,24 @@ function addFrameRows(opF: GUI, op: OpeningState, ctx: APGuiCtx): void {
   live(opF.add(op, 'frameW', 30, 200, 5).name('Bản khung'), ctx)
   live(opF.add(op, 'frameOut', 0, 60, 5).name('Nhô'), ctx)
   opF.addColor(op, 'frameColor').name('Màu khung').onChange(ctx.build)
+}
+
+// C3 SONG SẮT — chỉ kind window (cả lỗ TRÒN — thanh cắt theo chord ellipse khớp carve). Static
+// (bake bucket cùng khung) → đổi = rebuild commit, không cần live.
+function addBarRows(opF: GUI, op: OpeningState, ctx: APGuiCtx): void {
+  if (op.kind !== 'window') return
+  op.barStyle ??= 'none'
+  opF
+    .add(op, 'barStyle', { 'Không song': 'none', 'Song dọc': 'vert', 'Ô lưới': 'grid' })
+    .name('Song sắt')
+    .onChange((v: string) => {
+      if (v !== 'none') op.barColor ??= 0x30343a
+      ctx.rebuild()
+      ctx.build()
+    })
+  if (op.barStyle === 'none') return
+  op.barColor ??= 0x30343a
+  opF.addColor(op, 'barColor').name('Màu song').onChange(ctx.build)
 }
 
 // Màu cánh default theo loại — đổi loại = fill lại (mirror hành vi frameStyle/FRAME_DEFAULTS).
