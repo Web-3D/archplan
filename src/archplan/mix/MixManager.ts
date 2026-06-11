@@ -221,6 +221,17 @@ export class MixManager {
       mapping: space, // stage 4: 'xz' nằm · 'uv' vách hồ · 'wall' tường rào
     })
     if (space === 'uv') gmix.getMaterial().side = THREE.DoubleSide // vách hồ nhìn cả 2 phía (như basinMaterial)
+    if (space === 'wall') {
+      // 🥊 Z-FIGHT mép góc tường (NgQuan 2026-06-11): 2 segment box GIAO NHAU ở khối góc — mặt trên +
+      // mặt đứng vùng giao ĐỒNG PHẲNG. Cùng material thì merge chung bucket (vô hình); mix vs material
+      // khác = 2 mesh chồng → lóe. polygonOffset ÂM (WebGPU map → depthBias) cho mix THẮNG ổn định
+      // (đá quấn góc). Giới hạn: 2 PRESET MIX KHÁC NHAU giáp góc vẫn fight (bias bằng nhau) — né bằng
+      // cách áp CÙNG preset cho 2 segment giáp góc (cùng params → merge 1 bucket, hết fight).
+      const m = gmix.getMaterial()
+      m.polygonOffset = true
+      m.polygonOffsetFactor = -1
+      m.polygonOffsetUnits = -1
+    }
     const hit = { gmix, sig, pm }
     let set = this._cache.get(mix)
     if (!set) {
