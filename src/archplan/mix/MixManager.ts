@@ -656,12 +656,17 @@ export class MixManager {
 
   // 🏠 Pick-box building: segIdx = tường (seg.mix) · key 'found'/'slab' = móng/sàn (structure).
   // 'roof'/'stairs' không nhận mix → null (mái che = không xử gì, đúng).
+  // DUYỆT mọi pick-box (sort dist tăng) → trả phần PAINTABLE gần nhất. Trước đây chỉ lấy [0]: nếu pick-box
+  // gần nhất là phần CHƯA nhận mix (mái/cầu thang/cột/ban công → null) thì cả building bị bỏ qua dù tường/
+  // móng/sàn nằm ngay sau → "khó trỏ". Giờ nhìn xuyên phần không-paintable tới phần paintable kế.
   private _selBuilding(e: PointerEvent): MixSel | null {
-    const hit = this.deps.buildingHits(e)[0]
-    if (!hit) return null
-    const ud = hit.object.userData as { instId?: string; segIdx?: number; key?: string }
-    const inst = typeof ud.instId === 'string' ? this._findInst(ud.instId) : null
-    return inst ? this._selBuildingOf(inst, ud, hit.distance, hit.object) : null
+    for (const hit of this.deps.buildingHits(e)) {
+      const ud = hit.object.userData as { instId?: string; segIdx?: number; key?: string }
+      const inst = typeof ud.instId === 'string' ? this._findInst(ud.instId) : null
+      const sel = inst ? this._selBuildingOf(inst, ud, hit.distance, hit.object) : null
+      if (sel) return sel
+    }
+    return null
   }
 
   // Descriptor field mix theo ud — null nếu phần không nhận mix (roof/stairs). Tách (complexity).

@@ -2255,7 +2255,7 @@ export class ArchPlanLab extends BaseWorld {
       this._setPaletteShown(!this._paletteShown)
     )
     pal.classList.toggle('on', this._paletteShown)
-    const mix = mk('🎛', 'Hiện / ẩn khay Mix preset (V)', () =>
+    const mix = mk('🧱', 'Hiện / ẩn khay Mix preset (V)', () =>
       this._setMixTrayShown(!this._mixTrayShown)
     )
     mix.classList.toggle('on', this._mixTrayShown)

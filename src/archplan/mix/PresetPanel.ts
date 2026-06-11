@@ -92,7 +92,6 @@ export class MixPresetPanel {
   private presets: MixPreset[] = loadMixPresets()
   private activeId: string | null = null
   private editId: string | null = null // preset đang mở bảng trộn ✎ (giữ qua render list)
-  private collapsed = false
   private ctx: APGuiCtx | null = null
   private listEl: HTMLElement | null = null
   private statusEl: HTMLElement | null = null
@@ -101,9 +100,8 @@ export class MixPresetPanel {
   private modeBtns: Partial<Record<'apply' | 'erase' | 'edit', HTMLButtonElement>> = {}
   private editSel: MixEditSel | null = null // 🎯 đối tượng đang chỉnh trong khay (board target thật)
   private editHost: HTMLElement | null = null
-  // 🖐 Kéo khay bằng header (mirror PalettePanel): phiên kéo + cờ chặn click thu/mở ngay sau kéo.
+  // 🖐 Kéo khay bằng header (mirror PalettePanel): phiên kéo (header chỉ để kéo — không còn collapse).
   private drag: { sx: number; sy: number; px: number; py: number; moved: boolean } | null = null
-  private dragMoved = false
 
   /** Preset đang CẦM (active) — nguồn CLONE cho 🪣 áp (Mảnh 3). */
   activePreset(): MixPreset | null {
@@ -117,29 +115,15 @@ export class MixPresetPanel {
     wrap.replaceChildren()
     const panel = document.createElement('div')
     panel.className = 'ap-mixpre'
+    // Header = NHÃN + tay kéo (NgQuan 2026-06-11 "V bung ra hết, không cần dropdown"): bỏ collapse —
+    // bật khay (V / nút 🧱) = panel hiện ĐẦY ĐỦ; tắt = ẩn cả wrap (Lab _setMixTrayShown).
     const hd = document.createElement('div')
     hd.className = 'ap-mixpre-hd'
-    const caret = document.createElement('span')
     const ttl = document.createElement('span')
-    ttl.textContent = '🎛' // symbol-only (bỏ tên; đổi 🧪→🎛 vì trùng nút Lab trong khay tiện ích)
-    hd.append(caret, ttl)
+    ttl.textContent = '🧱' // symbol-only (NgQuan đổi 🎛→🧱; né trùng Lab 🧪 / palette 🎨 trong khay tiện ích)
+    hd.append(ttl)
     const body = document.createElement('div')
     body.className = 'ap-mixpre-body'
-    const syncCollapse = (): void => {
-      caret.textContent = this.collapsed ? '▸' : '▾'
-      body.style.display = this.collapsed ? 'none' : ''
-      editHost.style.display = this.collapsed ? 'none' : ''
-      ft.style.display = this.collapsed ? 'none' : ''
-      st.style.display = this.collapsed ? 'none' : ''
-    }
-    hd.addEventListener('click', () => {
-      if (this.dragMoved) {
-        this.dragMoved = false // vừa kéo xong → bỏ qua toggle thu/mở lần này
-        return
-      }
-      this.collapsed = !this.collapsed
-      syncCollapse()
-    })
     this._wireDrag(hd, wrap)
     if (floatPos) {
       wrap.style.left = `${floatPos.left}px` // khôi phục vị trí đã kéo (instance new mỗi rebuild)
@@ -154,7 +138,6 @@ export class MixPresetPanel {
     const ft = this._footer()
     panel.append(hd, body, editHost, st, ft)
     wrap.appendChild(panel)
-    syncCollapse()
     ctx.registerMixBucketSync?.(() => this._syncModeBtns()) // mode tắt từ ngoài (Move/Pick/ESC) → bỏ highlight
     ctx.registerMixEditOpen?.((sel) => this._openEditSel(sel)) // 🎯 click đích có mix → board vào khay
     this._renderList()
@@ -179,7 +162,7 @@ export class MixPresetPanel {
 
   // ── 🖐 Kéo khay (header) — dời WRAP float (ô preview bên phải đi theo); <4px = click thu/mở ──────
   private _wireDrag(hd: HTMLElement, wrap: HTMLElement): void {
-    hd.title = 'Mix presets (V hiện/ẩn) — kéo để dời khay · click thu/mở'
+    hd.title = 'Mix presets (V hiện/ẩn) — kéo để dời khay'
     hd.addEventListener('pointerdown', (e) => this._dragStart(e, wrap, hd))
     hd.addEventListener('pointermove', (e) => this._dragMove(e, wrap))
     hd.addEventListener('pointerup', (e) => this._dragEnd(e, hd))
@@ -213,7 +196,6 @@ export class MixPresetPanel {
 
   private _dragEnd(e: PointerEvent, hd: HTMLElement): void {
     if (!this.drag) return
-    if (this.drag.moved) this.dragMoved = true // chặn click thu/mở ngay sau kéo
     this.drag = null
     if (hd.hasPointerCapture(e.pointerId)) hd.releasePointerCapture(e.pointerId)
   }
