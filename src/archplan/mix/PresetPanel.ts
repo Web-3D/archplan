@@ -27,7 +27,7 @@ import {
   saveMixPresets,
 } from './presets'
 
-const PRESET_MIN_SLOTS = 8 // 1 mặc định + 7 ô + (NgQuan); phình thêm khi preset > 7
+const PRESET_MIN_SLOTS = 10 // 10 ô preset (NgQuan); phình thêm khi preset > 9
 
 function ensurePresetCss(): void {
   if (document.getElementById('ap-mixpre-css')) return
@@ -49,9 +49,9 @@ function ensurePresetCss(): void {
     `.ap-mixpre-hd{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;` +
     `padding:4px 6px;cursor:grab;font-weight:600;font-size:13px;background:var(--mp-bg-1);` +
     `border-bottom:1px solid var(--mp-bg-3)}` +
-    // KHUNG PRESET — ô VUÔNG (NgQuan: to thêm ~10px → 5 cột thay 6), aspect-ratio 1
+    // KHUNG PRESET — ô VUÔNG NHỎ (NgQuan "nhỏ đi phân nửa" — giữ cỡ cũ 6 cột): 10 ô (6+4), aspect-ratio 1
     // (tên trên · thumb giữa · ✎🗑 dưới); ô + thêm preset
-    `.ap-mixP-frame{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:6px}` +
+    `.ap-mixP-frame{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;padding:6px}` +
     `.ap-mixP-card{aspect-ratio:1;display:flex;flex-direction:column;gap:1px;padding:2px;` +
     `border:1px solid var(--mp-bg-4);border-radius:5px;background:var(--mp-bg-2);color:var(--mp-text);` +
     `cursor:pointer;overflow:hidden}` +
