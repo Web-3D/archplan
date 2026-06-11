@@ -45,7 +45,10 @@ function ensurePresetCss(): void {
     `.ap-mixpre{width:392px;max-height:67vh;overflow-y:auto;background:var(--mp-bg-1);` +
     `border:1px solid var(--mp-bg-4);border-radius:6px;color:var(--mp-text);` +
     `font:10px/1.3 'Segoe UI',system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.45)}` +
-    `.ap-mixpre-hd{display:flex;align-items:center;gap:4px;padding:3px 6px;cursor:grab;font-weight:600}` +
+    // header DÍNH ĐỈNH khi cuộn (NgQuan: symbol 🧱 luôn cố định) — nền bg-1 che nội dung chạy dưới
+    `.ap-mixpre-hd{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;` +
+    `padding:4px 6px;cursor:grab;font-weight:600;font-size:13px;background:var(--mp-bg-1);` +
+    `border-bottom:1px solid var(--mp-bg-3)}` +
     // KHUNG PRESET — ô VUÔNG NHỎ (NgQuan "nhỏ đi phân nửa + hình vuông"): 6 cột, aspect-ratio 1
     // (tên trên · thumb giữa · ✎🗑 dưới); ô + thêm preset
     `.ap-mixP-frame{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;padding:6px}` +
