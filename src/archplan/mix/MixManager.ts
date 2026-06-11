@@ -85,6 +85,9 @@ export class MixManager {
   // orbit (click đơn <5px qua _maybeClickFocus; kéo = orbit như thường). null = tắt.
   private _bucket: GroundMixParams | null = null
   private _syncBucket: (() => void) | null = null // PresetPanel đăng ký — sync nút 🪣 khi tắt từ ngoài
+  // 🧪 Preset đang PREVIEW (tấm editor trước lô — Lab dựng mesh): cộng vào _liveParams để prune
+  // KHÔNG dọn cache material đang hiển thị trên tấm. null = không preview.
+  private _previewMix: GroundMixParams | null = null
 
   constructor(private readonly deps: MixManagerDeps) {}
 
@@ -304,10 +307,18 @@ export class MixManager {
 
   // ── 🎨 PRUNE — dọn cache theo state sống ───────────────────────────────────────────────────────────
 
-  // 🎨 Tập GroundMixParams đang SỐNG trong state (mọi nguồn: G0 + zones + hồ floor/wall + rào) — chuẩn prune.
+  // 🎨 Tập GroundMixParams đang SỐNG trong state (mọi nguồn: site + building + tấm preview) — chuẩn prune.
   private _liveParams(): Set<GroundMixParams> {
-    const site = this.deps.site()
     const live = new Set<GroundMixParams>()
+    this._collectSiteMix(live)
+    this._collectBuildingMix(live)
+    if (this._previewMix) live.add(this._previewMix) // 🧪 tấm preview editor preset đang mở
+    return live
+  }
+
+  // 🎨 Gom mix params hệ SITE (G0 + zones + hồ floor/wall + rào). Tách hàm (complexity ≤10).
+  private _collectSiteMix(live: Set<GroundMixParams>): void {
+    const site = this.deps.site()
     if (site.groundMix) live.add(site.groundMix)
     for (const l of site.groundLayers ?? []) if (l.mix) live.add(l.mix)
     for (const w of site.waters) {
@@ -315,8 +326,11 @@ export class MixManager {
       if (w.wallMix) live.add(w.wallMix)
     }
     for (const f of site.fences) if (f.mix) live.add(f.mix)
-    this._collectBuildingMix(live) // 🎨 tường building (seg.mix) — tách hàm (complexity)
-    return live
+  }
+
+  /** 🧪 Đăng ký/bỏ preset đang preview trên tấm editor (Lab gọi qua _setMixPreview). */
+  setPreview(mix: GroundMixParams | null): void {
+    this._previewMix = mix
   }
 
   // 🎨 Gom mix params tường BUILDING (mọi floor → instance → segment) vào set sống.

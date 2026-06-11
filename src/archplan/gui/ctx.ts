@@ -123,6 +123,10 @@ export interface APGuiCtx {
   setMixBucket?(src: GroundMixParams | null): void
   getMixBucketOn?(): boolean // nút 🪣 panel preset hiện đúng trạng thái
   registerMixBucketSync?(fn: () => void): void // panel đăng ký — bỏ highlight 🪣 khi mode tắt từ ngoài
+  // 🧪 Tấm PREVIEW 3D cho EDITOR PRESET (khay 🧪 đang ✎): Lab dựng plane đứng 2×2m trước lô, material
+  // từ cache mix của CHÍNH preset.mix → slider board tune LIVE thấy ngay (CLONE chỉ áp lúc 🪣 — đối
+  // tượng đã áp KHÔNG đổi theo, đúng chốt). null = gỡ tấm. Gọi lại sau commit structural (đổi texture/rule).
+  setMixPreview?(mix: GroundMixParams | null): void
   // 💧 Hiện VIỀN form định vị (mảng mờ mặt nền) khi KÉO slider Pos/Width/Depth — live preview vị trí+kích
   // thước KHÔNG rebuild (né leak reflector). Buông slider = applySite(true) commit + tự ẩn viền.
   previewWater(cfg: WaterConfig): void

@@ -113,9 +113,11 @@ export class MixPresetPanel {
     syncCollapse()
     ctx.registerMixBucketSync?.(() => this._syncBucketBtn()) // 🪣 tắt từ ngoài (Move/Pick/ESC) → bỏ highlight
     this._renderList()
+    this._syncPreview() // 🧪 _rebuildGUI giữ editor mở → dựng lại tấm preview
   }
 
   dispose(): void {
+    this.ctx?.setMixPreview?.(null) // 🧪 gỡ tấm preview trước khi buông ctx
     this.fileInput?.remove()
     this.fileInput = null
     this.listEl = null
@@ -129,6 +131,13 @@ export class MixPresetPanel {
 
   private _save(): void {
     saveMixPresets(this.presets)
+  }
+
+  // 🧪 Đồng bộ tấm preview 3D theo editor đang mở (✎): mở = preview CHÍNH preset.mix (slider live);
+  // đóng/xóa = gỡ tấm. Gọi lại sau commit board (đổi texture/rule = structural → tấm rebuild material).
+  private _syncPreview(): void {
+    const p = this.presets.find((q) => q.id === this.editId) ?? null
+    this.ctx?.setMixPreview?.(p ? p.mix : null)
   }
 
   private _renderList(): void {
@@ -164,16 +173,22 @@ export class MixPresetPanel {
       e.stopPropagation()
       this._renameInline(p, name)
     })
-    const edit = this._icon('✎', 'Sửa preset (bảng trộn — lưu thẳng vào kho)', () => {
-      this.editId = this.editId === p.id ? null : p.id
-      this._renderList()
-    })
+    const edit = this._icon(
+      '✎',
+      'Sửa preset (bảng trộn — tấm preview hiện trước lô, lưu thẳng kho)',
+      () => {
+        this.editId = this.editId === p.id ? null : p.id
+        this._renderList()
+        this._syncPreview() // 🧪 mở = dựng tấm, đóng = gỡ
+      }
+    )
     const del = this._icon('🗑', 'Xóa preset (đối tượng đã áp giữ nguyên — CLONE)', () => {
       this.presets = this.presets.filter((q) => q.id !== p.id)
       if (this.activeId === p.id) this.activeId = null
       if (this.editId === p.id) this.editId = null
       this._save()
       this._renderList()
+      this._syncPreview() // 🧪 xóa preset đang ✎ → gỡ tấm
     })
     row.append(texPreviewEl(p.mix.base), name, edit, del)
     return row
@@ -224,6 +239,7 @@ export class MixPresetPanel {
       buildMixBoard(box, this.ctx, { wallMix: p.mix }, p.mix, false, () => {
         this._save()
         this._renderList()
+        this._syncPreview() // 🧪 structural (đổi texture/rule) → tấm rebuild material; slider thường = live sẵn
       })
     return box
   }
@@ -242,6 +258,7 @@ export class MixPresetPanel {
       this.editId = p.id
       this._save()
       this._renderList()
+      this._syncPreview() // 🧪 preset mới mở editor luôn → tấm hiện ngay
     })
     const exp = this._btn(
       '⬇',
