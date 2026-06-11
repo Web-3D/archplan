@@ -140,6 +140,7 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js'
 import { PMREMGenerator } from 'three/webgpu'
 import type { GrassBlades, GrassExcludeRect } from 'threejs-modules/components/GrassBlades'
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
+import type { PondFish } from 'threejs-modules/components/PondFish' // 🐟 đàn cá hồ — instance dựng ở site-kit
 import { SkyGradient } from 'threejs-modules/components/SkyGradient' // 🌅 bầu trời gradient ngày↔đêm
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
@@ -664,6 +665,7 @@ export class ArchPlanLab extends BaseWorld {
   // 💧 Hồ ĐANG SỐNG (đa-instance): cfg↔surf zip theo renderWaters(site). _activeWater = pool của tab đang
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
+  private _siteFish: { cfg: WaterConfig; fish: PondFish }[] = [] // 🐟 đàn cá mỗi hồ fishOn — update(dt) trong onUpdate
   private _siteGroundMesh: THREE.Mesh | null = null // 🏔️ ref mesh nền base → LIVE-rebuild geometry-only (terrain drag)
   private _activeWater: WaterConfig | null = null
   private labExp: { dispose: () => void } | null = null // 🔀 thí nghiệm Lab đang active (Mái / Particles)
@@ -1380,6 +1382,7 @@ export class ArchPlanLab extends BaseWorld {
     this._applyRotate()
     this.controls?.update()
     for (const s of this.siteShaders) s.setTime?.(time) // 🌿 gió lùa cỏ (GrassGround) chạy theo elapsed
+    for (const f of this._siteFish) f.fish.update(deltaTime) // 🐟 vẫy (uniform) + dời đàn (≤40 matrix, rẻ)
     this.css2dRenderer?.render(this.scene, this.camera)
     this.guard?.check()
     this.devHud?.update(this.renderer.info, deltaTime)
@@ -1864,6 +1867,7 @@ export class ArchPlanLab extends BaseWorld {
     APGuiCtx,
     | 'tuneGrass'
     | 'tuneWater'
+    | 'tuneFish'
     | 'setActiveWater'
     | 'previewWater'
     | 'tunePathRotLive'
@@ -1879,6 +1883,7 @@ export class ArchPlanLab extends BaseWorld {
     return {
       tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
       tuneWater: (cfg, apply, persist) => this._tuneWater(cfg, apply, persist),
+      tuneFish: (cfg, apply, persist) => this._tuneFish(cfg, apply, persist),
       setActiveWater: (cfg) => this.waterTool?.setActiveCfg(cfg),
       previewWater: (cfg) => this.waterTool?.showOutline(cfg),
       tunePathRotLive: (flatIdx, rotDeg) => this._tunePathRotLive(flatIdx, rotDeg),
@@ -2902,6 +2907,7 @@ export class ArchPlanLab extends BaseWorld {
     // dựng → ghép lại để drag/tune/handle nhắm đúng instance (gồm cả puddle).
     const wcfgs = [...renderWaters(this.site), ...renderPuddles(this.site)]
     this._siteWaters = h.waters.map((surf, i) => ({ cfg: wcfgs[i], surf }))
+    this._siteFish = h.fish // 🐟 dispose theo siteShaders (clearSite); update(dt) mỗi frame onUpdate
     for (const x of this._siteWaters) x.surf.setCamera(this.camera) // dispose() tự free RTT reflector (né leak)
     // 💧 Mặt nước sang layer riêng + reflector LOẠI layer đó khỏi RTT (virtualCamera=camera.clone() copy layers
     // → phải disable mỗi frame trong setTime) → 2+ hồ KHÔNG render-lẫn-nhau → hết đơ gương (_inReflector). KI-012.
@@ -3458,6 +3464,14 @@ export class ArchPlanLab extends BaseWorld {
     if (persist) this.store.autosave(this.state, this.site)
   }
 
+  // 🐟 Chỉnh đàn cá LIVE (tốc bơi/xáo màu — CPU-param/uniform, 0 rebuild) của ĐÚNG hồ cfg. No-op nếu hồ
+  // chưa bật cá (fishOn=false → không có instance).
+  private _tuneFish(cfg: WaterConfig, apply: (f: PondFish) => void, persist: boolean): void {
+    const fish = this._siteFish.find((x) => x.cfg === cfg)?.fish
+    if (fish) apply(fish)
+    if (persist) this.store.autosave(this.state, this.site)
+  }
+
   private _clearSite(): void {
     for (const g of this.siteGeos) g.dispose()
     for (const m of this.siteMats) m.dispose()
@@ -3468,6 +3482,7 @@ export class ArchPlanLab extends BaseWorld {
     // 🌿 KHÔNG đụng _siteGrass ở đây: cỏ sống trong _grassGroup BỀN, dispose/dựng lại do _syncGrass quản
     // theo chữ ký → giữ nguyên scatter qua các rebuild không-liên-quan-cỏ (đây là cốt lõi né lag).
     this._siteWaters = [] // dispose thật do siteShaders lo (mỗi WaterSurface trong đó); _activeWater giữ (cfg ref)
+    this._siteFish = [] // 🐟 PondFish cũng trong siteShaders (dispose vòng trên)
     // 🪨 path-zone StoneScatter cũng trong siteShaders (đã dispose vòng trên) — KHÔNG track riêng (sống trong groundLayers)
     this.siteGroup.clear()
   }

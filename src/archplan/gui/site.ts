@@ -1913,6 +1913,66 @@ function surfaceOnRow(ctx: APGuiCtx, w: WaterConfig): HTMLElement {
   })
 }
 
+// 🐟 ĐÀN CÁ KOI trong lòng hồ (PondFish — chỉ pool/pond có basin; puddle phẳng → caller bỏ qua).
+// Bật/Số cá = REBUILD commit (tạo/huỷ instance, đi đường applySite như mọi structural); Tốc bơi +
+// Xáo màu = LIVE qua tuneFish (CPU-param/uniform — 0 rebuild, đúng PERFORMANCE.md). Slider luôn hiện
+// (cá tắt → live no-op, giá trị áp khi bật — né stale-GUI vì applySite không rebuild pane).
+function fishRows(ctx: APGuiCtx, w: WaterConfig): HTMLElement {
+  const box = document.createElement('div')
+  box.appendChild(
+    toggleRow('🐟 Cá koi (đàn bơi)', w.fishOn, (on) => {
+      w.fishOn = on
+      ctx.applySite(true)
+    })
+  )
+  box.appendChild(
+    sliderRow(
+      'Số cá',
+      1,
+      30,
+      1,
+      w.fishCount,
+      (v, c) => {
+        w.fishCount = Math.round(v)
+        if (c) ctx.applySite(true)
+      },
+      1
+    )
+  )
+  for (const r of fishLiveRows(ctx, w)) box.appendChild(r)
+  return box
+}
+
+// 2 slider LIVE của cá (tốc bơi/xáo màu) — tách khỏi fishRows (Rule-50).
+function fishLiveRows(ctx: APGuiCtx, w: WaterConfig): HTMLElement[] {
+  return [
+    sliderRow(
+      'Tốc bơi %',
+      5,
+      80,
+      5,
+      w.fishSpeed * 100,
+      (v, c) => {
+        w.fishSpeed = v / 100
+        ctx.tuneFish(w, (f) => f.setSpeed(w.fishSpeed), c)
+      },
+      1
+    ),
+    sliderRow(
+      'Xáo màu cá',
+      0,
+      99,
+      1,
+      w.fishSeed,
+      (v, c) => {
+        w.fishSeed = Math.round(v)
+        ctx.tuneFish(w, (f) => f.setColorSeed(w.fishSeed), c)
+      },
+      1
+    ),
+  ]
+}
+
 // BẬC 4 "Surface" (mặt hồ): màu nước + gương/sóng/rung/đục — uniform LIVE qua tuneWater(w,…), KHÔNG dựng lại.
 function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void {
   host.append(
@@ -1950,6 +2010,7 @@ function buildSurfaceTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): void
     )
   }
   host.appendChild(waveSizeRow(ctx, w))
+  if (w.kind !== 'puddle') host.appendChild(fishRows(ctx, w)) // 🐟 chỉ hồ LÕM (vũng không lòng)
 }
 type SurfKey = 'reflectivity' | 'flow' | 'distortion' | 'detail' | 'refract' | 'tint'
 
