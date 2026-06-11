@@ -12,6 +12,7 @@ import type {
   CoverageStats,
   FenceConfig,
   GroundLayer,
+  GroundMixParams,
   SiteState,
   WaterConfig,
 } from 'threejs-modules/site/state'
@@ -27,6 +28,11 @@ export type MixPaintTarget =
   | 'base'
   | { water: WaterConfig; face: 'floor' | 'wall' }
   | { fence: FenceConfig }
+  // 🎨 GENERIC mặt đứng KHÔNG cọ vẽ (mapping 'wall') — trỏ THẲNG params object (vd seg.mix tường building,
+  // foundMix móng). Consumer mới dùng thẳng dạng này: KHÔNG thêm nhánh Lab (cấy = render hook + GUI).
+  | { wallMix: GroundMixParams }
+  // 🎨 GENERIC mặt NẰM KHÔNG cọ vẽ (mapping 'xz' world — vd slabMix sàn building).
+  | { flatMix: GroundMixParams }
 
 // Cùng target HỒ (cùng WaterConfig ref + cùng face)? — tách hàm giữ sameMixTarget dưới trần complexity.
 function sameWaterTarget(a: MixPaintTarget, b: MixPaintTarget): boolean {
@@ -40,6 +46,13 @@ function sameFenceTarget(a: MixPaintTarget, b: MixPaintTarget): boolean {
   return 'fence' in a && 'fence' in b && a.fence === b.fence
 }
 
+// Cùng target wallMix/flatMix generic (cùng GroundMixParams ref)?
+function sameWallMixTarget(a: MixPaintTarget, b: MixPaintTarget): boolean {
+  if (typeof a === 'string' || typeof b === 'string') return false
+  if ('flatMix' in a) return 'flatMix' in b && a.flatMix === b.flatMix
+  return 'wallMix' in a && 'wallMix' in b && a.wallMix === b.wallMix
+}
+
 // So 2 target mix (null-safe): zone/'base' = identity; water = cùng WaterConfig ref + cùng face;
 // fence = cùng FenceConfig ref. Wrapper object khác nhau nhưng trỏ cùng config → CÙNG target.
 export function sameMixTarget(
@@ -48,7 +61,7 @@ export function sameMixTarget(
 ): boolean {
   if (a === b) return true
   if (!a || !b) return false
-  return sameWaterTarget(a, b) || sameFenceTarget(a, b)
+  return sameWaterTarget(a, b) || sameFenceTarget(a, b) || sameWallMixTarget(a, b)
 }
 
 // Highlight 3D khi click tab GUI: flash viền wireframe vàng nhạt quanh phần đang chỉnh ~0.6s.

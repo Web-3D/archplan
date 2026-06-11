@@ -2596,6 +2596,9 @@ export class ArchPlanLab extends BaseWorld {
         underWoodMat: this._underWoodMatForBuild(), // 🪵 gỗ khung-dưới (Old Plywood, tách deck)
         underBarkMat: this._underBarkMatForBuild(), // 🌳 vỏ cây khung-dưới (Tree Bark, tuỳ chọn 2)
         groundDrops: this._groundDropsForBuild(), // 🌊 lòng hồ → cột chống móng đâm sâu tới đáy
+        wallMixMat: (mix, range) => this._wallMixMat(mix, range), // 🎨 tường building bật mix (seg.mix)
+        slabMixMat: (mix) => this._groundMixFor({ flatMix: mix }), // 🎨 sàn (mapping 'xz' — nằm như nền)
+        foundMixMat: (mix, range) => this._wallMixMat(mix, range), // 🎨 móng concrete (mapping 'wall' + range)
       },
       this.moveMode, // LOD tường phẳng KHI ở Move mode → tintable + rẻ khi kéo (brick là thủ phạm CPU); tắt = gạch
       this._hiddenFloors, // 🙈 tầng ẩn → bỏ dựng mesh/pick (giữ chiều cao stacking)
@@ -2814,6 +2817,8 @@ export class ArchPlanLab extends BaseWorld {
     if ('water' in target)
       return target.face === 'floor' ? target.water.floorMix : target.water.wallMix
     if ('fence' in target) return target.fence.mix
+    if ('wallMix' in target) return target.wallMix // generic mặt đứng (tường building seg.mix, foundMix…)
+    if ('flatMix' in target) return target.flatMix // generic mặt nằm (slabMix sàn building…)
     return target.mix
   }
 
@@ -2830,7 +2835,7 @@ export class ArchPlanLab extends BaseWorld {
   private _mixSpaceOf(target: MixPaintTarget): 'xz' | 'uv' | 'wall' {
     if (typeof target === 'string') return 'xz'
     if ('water' in target) return target.face === 'wall' ? 'uv' : 'xz'
-    if ('fence' in target) return 'wall'
+    if ('fence' in target || 'wallMix' in target) return 'wall'
     return 'xz'
   }
 
@@ -2987,7 +2992,8 @@ export class ArchPlanLab extends BaseWorld {
       return { ox: -sx / 2, oz: -sz / 2, sx, sz }
     }
     if ('water' in target) return this._mixWaterRect(target)
-    if ('fence' in target) return { ox: 0, oz: 0, sx: 1, sz: 1 }
+    if ('fence' in target || 'wallMix' in target || 'flatMix' in target)
+      return { ox: 0, oz: 0, sx: 1, sz: 1 }
     return this._mixZoneRect(target)
   }
 
@@ -3006,7 +3012,30 @@ export class ArchPlanLab extends BaseWorld {
       if (w.wallMix) live.add(w.wallMix)
     }
     for (const f of this.site.fences) if (f.mix) live.add(f.mix)
+    this._collectBuildingMix(live) // 🎨 tường building (seg.mix) — tách hàm (complexity)
     return live
+  }
+
+  // 🎨 Gom mix params tường BUILDING (mọi floor → instance → segment) vào set sống.
+  private _collectBuildingMix(live: Set<GroundMixParams>): void {
+    const insts = this.state.floors.flatMap((fl) => fl.instances)
+    for (const inst of insts) {
+      for (const seg of inst.segments) if (seg.mix) live.add(seg.mix)
+      if (inst.structure.slabMix) live.add(inst.structure.slabMix) // 🎨 sàn
+      if (inst.structure.foundMix) live.add(inst.structure.foundMix) // 🎨 móng concrete
+    }
+  }
+
+  // 🎨 Material MIX cho 1 TƯỜNG BUILDING (callback từ wallAssembly — nhận params + dải cao tường thật
+  // của place). Target generic { wallMix } → cache/space/prune đi đường chung; range set tại đây
+  // (assembler biết yBase/h — Lab không phải tự suy floor stacking).
+  private _wallMixMat(
+    mix: GroundMixParams,
+    range: { footY: number; h: number }
+  ): THREE.Material | null {
+    const mat = this._groundMixFor({ wallMix: mix })
+    if (mat) this._zoneMix.get(mix)?.gmix.setWallRange(range.footY, range.h)
+    return mat
   }
 
   // Dọn cache mix có params đã RỜI state (zone xóa / mix tắt / hồ-rào xóa) — gọi mỗi lần gom opts.
@@ -3053,7 +3082,7 @@ export class ArchPlanLab extends BaseWorld {
     if (t === 'base') return o.userData.isBaseGround === true
     if ('water' in t)
       return o.userData.waterMixRef === t.water && o.userData.waterMixFace === t.face
-    if ('fence' in t) return false
+    if ('fence' in t || 'wallMix' in t || 'flatMix' in t) return false // generic không cọ vẽ
     const idx = (this.site.groundLayers ?? []).indexOf(t)
     return o.userData.groundLayerIdx === idx
   }

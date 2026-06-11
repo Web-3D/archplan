@@ -544,8 +544,28 @@ function ensureMixCss(): void {
   if (document.getElementById('ap-mix-css')) return
   const s = document.createElement('style')
   s.id = 'ap-mix-css'
-  const D = '.ap-scan-panel.ap-site-panel '
+  // Scope theo HOST board (.ap-mix-host — buildMixBoard tự gắn): board sống ở site panel LẪN lil-gui
+  // building (khu Wall). Vars --gr-* khai báo ngay trên host (đè = cùng giá trị trong site panel, có giá trị
+  // trong lil-gui) → look nâu Lab đồng nhất mọi nơi.
+  const D = '.ap-mix-host '
   s.textContent =
+    `.ap-mix-host{--gr-bg-1:#3e2f1c;--gr-bg-2:#5c4423;--gr-bg-3:#8a6a2f;--gr-bg-4:#b58a3c;` +
+    `--gr-bg-5:#e0b860;--gr-accent:#b5532a;--gr-text:#f5ead2}` +
+    // Đè style input của lil-gui core + theme building (board sống trong .lil-gui → input trắng to vỡ hàng).
+    // Inject SAU css lib → cùng/hơn specificity là thắng. Track mảnh + thumb nhỏ + ô số gọn = look site panel.
+    `${D}input[type='range']{-webkit-appearance:none;appearance:none;flex:1;min-width:0;width:auto;` +
+    `height:3px;background:var(--gr-bg-3);border-radius:2px;border:none;padding:0;margin:0}` +
+    `${D}input[type='range']::-webkit-slider-thumb{-webkit-appearance:none;width:9px;height:9px;` +
+    `border-radius:50%;background:var(--gr-bg-5);border:none;cursor:pointer}` +
+    `${D}.ap-mm-input{width:46px;flex:0 0 auto;box-sizing:border-box;height:auto;padding:1px 3px;` +
+    `font:9px/1.3 'Segoe UI',system-ui,sans-serif;background:var(--gr-bg-1);color:var(--gr-text);` +
+    `border:1px solid var(--gr-bg-4);border-radius:3px;text-align:right}` +
+    `${D}input[type='checkbox']{width:11px;height:11px;margin:0;accent-color:var(--gr-accent)}` +
+    `${D}.ap-tab-add{width:100%;height:auto;min-width:0;padding:2px 0;font-size:9px;` +
+    `background:var(--gr-bg-2);color:var(--gr-text);border:1px solid var(--gr-bg-4);border-radius:3px;cursor:pointer}` +
+    `${D}span{font:9px/1.4 'Segoe UI',system-ui,sans-serif}` + // label hàng (slider/toggle/select) đồng cỡ board
+    `${D}.ap-ground-sel{width:100%;box-sizing:border-box;font:9px/1.4 'Segoe UI',system-ui,sans-serif;` +
+    `color:var(--gr-text);background:var(--gr-bg-2);border:1px solid var(--gr-bg-4);border-radius:3px;padding:2px 4px;cursor:pointer}` +
     `${D}.ap-mix-row{display:flex;align-items:center;gap:5px;margin:0}` +
     `${D}.ap-mix-tag{flex:0 0 auto;width:15px;height:15px;display:flex;align-items:center;justify-content:center;` +
     `font-size:8px;border-radius:3px;background:var(--gr-bg-1);border:1px solid var(--gr-bg-4);color:var(--gr-bg-5);cursor:pointer}` +
@@ -1050,7 +1070,7 @@ const DEL_SLOT = '__del' // option sentinel: chọn = xóa lớp (gộp nút ✕
 // 🧱 Target mix nằm trên MẶT ĐỨNG (vách hồ / tường rào)? → slot có select Quy luật trọng lực + slider Trọng lực.
 function isVerticalMixTarget(t: MixPaintTarget): boolean {
   if (typeof t === 'string') return false
-  return 'fence' in t || ('water' in t && t.face === 'wall')
+  return 'fence' in t || 'wallMix' in t || ('water' in t && t.face === 'wall') // wallMix = tường building…
 }
 
 // 🧱 Quy luật trọng lực per-slot (tường rêu phong — kiểu Substance generators). '' = none.
@@ -1062,21 +1082,22 @@ const MIX_RULE_OPTS: [string, '' | 'foot' | 'streak' | 'moss'][] = [
 ]
 
 // 🎨 select đổi key slot HOẶC xóa lớp (option sentinel '__del' — gộp nút ✕ cũ vào dropdown để hàng gọn).
+// commit = applySite (site) HOẶC ctx.build (tường building) — board dùng được cả 2 hệ.
 function onSlotSel(
-  ctx: APGuiCtx,
   mix: GroundMixParams,
   i: number,
   sel: HTMLSelectElement,
-  redraw: () => void
+  redraw: () => void,
+  commit: () => void
 ): void {
   if (sel.value === DEL_SLOT) {
     mix.slots.splice(i, 1)
     redraw()
-    ctx.applySite(true)
+    commit()
     return
   }
   mix.slots[i].key = sel.value as GroundMaterialKey
-  ctx.applySite(true) // _groundMixFor tự load lazy ĐÚNG key thiếu — không prefetch cả kho (lag dropdown)
+  commit() // _groundMixFor tự load lazy ĐÚNG key thiếu — không prefetch cả kho (lag dropdown)
 }
 
 // 🎨 1 SLOT lớp mix (NgQuan 2026-06-11 "bỏ button cọ + ✕"): tag số (click → chọn slot vẽ) + select texture
@@ -1088,7 +1109,7 @@ function mkMixSlotRow(
   mix: GroundMixParams,
   i: number,
   active: boolean,
-  cb: { redraw: () => void; onPick: () => void }
+  cb: { redraw: () => void; onPick: () => void; commit: () => void }
 ): HTMLElement {
   const slot = mix.slots[i]
   const box = document.createElement('div')
@@ -1109,7 +1130,7 @@ function mkMixSlotRow(
   sel.appendChild(new Option('✕ Xóa lớp', DEL_SLOT))
   sel.value = slot.key
   sel.addEventListener('click', (e) => e.stopPropagation())
-  sel.addEventListener('change', () => onSlotSel(ctx, mix, i, sel, cb.redraw))
+  sel.addEventListener('change', () => onSlotSel(mix, i, sel, cb.redraw, cb.commit))
   head.append(tag, sel)
   const sl = sliderRow(
     'Ngưỡng',
@@ -1120,22 +1141,22 @@ function mkMixSlotRow(
     (v, c) => {
       slot.bias = v
       ctx.tuneMixLive?.(target) // 🖌 stage 3: bias = uniform → kéo LIVE không recompile
-      if (c) ctx.applySite(true)
+      if (c) cb.commit()
     },
     1
   )
   sl.addEventListener('click', (e) => e.stopPropagation())
   box.append(head, sl)
-  if (isVerticalMixTarget(target)) box.appendChild(mkSlotRuleRow(ctx, mix.slots[i]))
+  if (isVerticalMixTarget(target)) box.appendChild(mkSlotRuleRow(mix.slots[i], cb.commit))
   return box
 }
 
-// 🧱 Hàng "Quy luật" 1 slot (CHỈ mặt đứng — vách hồ/tường rào): rule bake vào graph → đổi = applySite
-// (structural như đổi texture). Cường độ chỉnh ở slider "Trọng lực" của board. Tách giữ mkMixSlotRow ≤50 dòng.
-function mkSlotRuleRow(ctx: APGuiCtx, slot: GroundMixParams['slots'][number]): HTMLElement {
+// 🧱 Hàng "Quy luật" 1 slot (CHỈ mặt đứng — vách hồ/tường rào/tường building): rule bake vào graph →
+// đổi = commit (structural như đổi texture). Cường độ chỉnh ở slider "Trọng lực" của board.
+function mkSlotRuleRow(slot: GroundMixParams['slots'][number], commit: () => void): HTMLElement {
   const rr = selectRow('Quy luật', MIX_RULE_OPTS, slot.rule ?? '', (v) => {
     slot.rule = v === '' ? undefined : v
-    ctx.applySite(true)
+    commit()
   })
   rr.addEventListener('click', (e) => e.stopPropagation())
   return rr
@@ -1194,7 +1215,12 @@ function mkMixBrushRows(
 // 6 slider chung của board (height-lerp/biên/scale/macro/úa/xa) — uniform LIVE (tuneMixLive). Tách hàm giữ
 // buildMixBoard gọn (rule-50). Mỗi slider kéo = live, buông = applySite commit autosave.
 // 🧱 Mặt đứng: +slider "Trọng lực" (cường độ rule foot/streak/moss per-slot — cũng uniform live).
-function mkMixSliders(ctx: APGuiCtx, target: MixPaintTarget, mix: GroundMixParams): HTMLElement[] {
+function mkMixSliders(
+  ctx: APGuiCtx,
+  target: MixPaintTarget,
+  mix: GroundMixParams,
+  commit: () => void
+): HTMLElement[] {
   const us: [string, number, number, number, keyof GroundMixParams][] = [
     ['Theo cao độ', 0, 0.8, 0.05, 'heightK'], // height-lerp proxy — 0 = fade đều
     ['Mềm biên', 0.01, 0.5, 0.01, 'maskSoft'],
@@ -1214,24 +1240,27 @@ function mkMixSliders(ctx: APGuiCtx, target: MixPaintTarget, mix: GroundMixParam
       (v, c) => {
         ;(mix[key] as number) = v
         ctx.tuneMixLive?.(target) // 🖌 stage 3: uniform live — kéo mượt không rebuild
-        if (c) ctx.applySite(true)
+        if (c) commit()
       },
       1
     )
   )
 }
 
-// 🎨 BẢNG TRỘN MIX per-target (PhotoGroundMix — target = zone Z1+ · 'base' · đáy/vách hồ · tường rào):
+// 🎨 BẢNG TRỘN MIX per-target (PhotoGroundMix — zone Z1+ · 'base' · đáy/vách hồ · tường rào · tường building):
 // Nền chính + ≤4 slot (block tách) + hàng cọ (🖌 chung) + 6 slider chung. activeSlot = slot đang chọn (GUI-only,
-// closure sống qua redraw); 🖌 vẽ slot đó. Stage 3: mọi slider = uniform LIVE (tuneMixLive), buông applySite.
-// paintable=false (tường rào — mapping 'wall' không cọ vẽ) → ẨN hàng cọ, chỉ procedural.
+// closure sống qua redraw); 🖌 vẽ slot đó. Stage 3: mọi slider = uniform LIVE (tuneMixLive), buông commit.
+// paintable=false (mapping 'wall' không cọ vẽ) → ẨN hàng cọ. commit default = applySite (site-kit);
+// tường BUILDING bơm ctx.build (history+persist hệ nhà). Gắn class ap-mix-host (CSS theo board, mọi panel).
 function buildMixBoard(
   pane: HTMLElement,
   ctx: APGuiCtx,
   target: MixPaintTarget,
   mix: GroundMixParams,
-  paintable = true
+  paintable = true,
+  commit: () => void = () => ctx.applySite(true)
 ): void {
+  pane.classList.add('ap-mix-host') // CSS mix scoped theo host (board sống cả ngoài site panel)
   let active = 0
   let syncBrush = (): void => {}
   const list = document.createElement('div')
@@ -1244,13 +1273,13 @@ function buildMixBoard(
   const addBtn = addInstanceButton('lớp mix', () => {
     mix.slots.push({ key: 'construction-gravel', bias: 0.55, seed: 13.7 + mix.slots.length * 18 })
     redraw()
-    ctx.applySite(true)
+    commit()
   })
   function redraw(): void {
     if (active >= mix.slots.length) active = Math.max(0, mix.slots.length - 1)
     list.replaceChildren(
       ...mix.slots.map((_, i) =>
-        mkMixSlotRow(ctx, target, mix, i, i === active, { redraw, onPick: () => pick(i) })
+        mkMixSlotRow(ctx, target, mix, i, i === active, { redraw, onPick: () => pick(i), commit })
       )
     )
     addBtn.disabled = mix.slots.length >= 4
@@ -1261,7 +1290,7 @@ function buildMixBoard(
   pane.appendChild(
     selectRow('Nền chính', MIX_TEX_OPTS, mix.base, (v) => {
       mix.base = v
-      ctx.applySite(true)
+      commit()
     })
   )
   redraw()
@@ -1271,33 +1300,38 @@ function buildMixBoard(
     syncBrush = brush.sync
     brushRows.push(...brush.rows)
   }
-  pane.append(list, addBtn, ...brushRows, ...mkMixSliders(ctx, target, mix))
+  pane.append(list, addBtn, ...brushRows, ...mkMixSliders(ctx, target, mix, commit))
 }
 
-// 🎨 Section MIX gắn được vào pane BẤT KỲ (đáy/vách hồ, tường rào — stage 4): toggle bật/tắt + board.
-// get/set thao tác field GroundMixParams trong state (vd w.floorMix). Tắt khi đang vẽ target này → thoát cọ.
-// defBase = texture nền mặc định lúc bật lần đầu. paintable=false → board ẩn hàng cọ (tường rào).
-function mkMixSection(
+// 🎨 Section MIX gắn được vào pane BẤT KỲ (đáy/vách hồ, tường rào, tường BUILDING — stage 4): toggle + board.
+// get/set thao tác field GroundMixParams trong state (vd w.floorMix / seg.mix). Tắt khi đang vẽ target này →
+// thoát cọ. defBase = texture nền mặc định lúc bật. paintable=false → ẩn hàng cọ. targetOf = LẤY LẠI target
+// mỗi render (target {wallMix} trỏ params object — đổi sau toggle). commit default = applySite; building bơm
+// ctx.build. EXPORT cho gui/sections.ts (khu Wall material building) — cấy ghép = 1 call này + render hook.
+export function mkMixSection(
   ctx: APGuiCtx,
-  target: MixPaintTarget,
+  targetOf: () => MixPaintTarget,
   get: () => GroundMixParams | undefined,
   set: (m: GroundMixParams | undefined) => void,
-  o: { defBase: GroundMaterialKey; paintable: boolean }
+  o: { defBase: GroundMaterialKey; paintable: boolean; commit?: () => void }
 ): HTMLElement {
+  ensureMixCss() // board có thể sống NGOÀI site panel (lil-gui building) — tự đảm bảo style
+  const commit = o.commit ?? ((): void => ctx.applySite(true))
   const wrap = document.createElement('div')
+  wrap.classList.add('ap-mix-host')
   const render = (): void => {
     wrap.replaceChildren()
     wrap.appendChild(
       toggleRow('Mix (Lab)', get() !== undefined, (on) => {
         set(on ? (get() ?? makeGroundMixParams(o.defBase)) : undefined)
         const c = ctx.getMixPaint?.()
-        if (!on && c && sameMixTarget(c.target, target)) ctx.setMixPaint?.(null, 0) // đang vẽ → thoát
+        if (!on && c && sameMixTarget(c.target, targetOf())) ctx.setMixPaint?.(null, 0) // đang vẽ → thoát
         render()
-        ctx.applySite(true)
+        commit()
       })
     )
     const m = get()
-    if (m) buildMixBoard(wrap, ctx, target, m, o.paintable)
+    if (m) buildMixBoard(wrap, ctx, targetOf(), m, o.paintable, commit)
   }
   render()
   return wrap
@@ -1848,7 +1882,7 @@ function mkBottomFloorPane(ctx: APGuiCtx, w: WaterConfig): HTMLElement {
   floor.appendChild(
     mkMixSection(
       ctx,
-      { water: w, face: 'floor' },
+      () => ({ water: w, face: 'floor' }),
       () => w.floorMix,
       (m) => (w.floorMix = m),
       { defBase: 'thai-beach-sand-2k', paintable: true }
@@ -1866,7 +1900,7 @@ function buildBottomTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): Tabs 
   walls.appendChild(
     mkMixSection(
       ctx,
-      { water: w, face: 'wall' },
+      () => ({ water: w, face: 'wall' }),
       () => w.wallMix,
       (m) => (w.wallMix = m),
       { defBase: 'stone-wall', paintable: true } // 🧱 bộ tường (nhóm chung kho) — vách hồ đá xếp
@@ -2009,7 +2043,7 @@ function buildFenceControls(body: HTMLElement, ctx: APGuiCtx, f: FenceConfig): v
   body.appendChild(
     mkMixSection(
       ctx,
-      { fence: f },
+      () => ({ fence: f }),
       () => f.mix,
       (m) => (f.mix = m),
       { defBase: 'cinder-blocks-wall', paintable: false } // 🧱 khớp wallTex cinder cũ (bộ tường nhóm chung kho)
