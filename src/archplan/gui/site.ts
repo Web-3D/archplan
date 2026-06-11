@@ -10,9 +10,11 @@
  *            (ui/Tabs) → trả { panel, dispose } cho caller dispose (Water domain quản Tabs động + lồng).
  */
 
+import type { PondFish } from 'threejs-modules/components/PondFish'
 import type {
   BorderMaterialKey,
   FenceConfig,
+  FishSchool,
   GroundLayer,
   GroundMaterialKey,
   GroundMixParams,
@@ -32,6 +34,7 @@ import {
   GROUND_THICK_MIN,
   isGroundTexKey,
   makeFence,
+  makeFishSchool,
   makeGroundLayer,
   makePavingParams,
   makeStonePathParams,
@@ -2594,8 +2597,186 @@ function instanceTabs(
   }
 }
 
-// Sub-tab "Water" → BẬC 2 folder-style Pool|Pond|Puddle (tông xanh curated --wt-*, tách tông nâu Ground);
-// MỖI loại có BẬC 3 hàng tab instance (Pl/Pd/Pe + ＋). Trả { panel, dispose } — dispose gỡ type-Tabs + 3 controller.
+// ── 🐟 BẦY CÁ KOI — hàng tab instance RIÊNG (F1 F2… ＋), mỗi tab 1 bầy chỉnh riêng (NgQuan 2026-06-11).
+// Bầy ĐỘC LẬP hồ: vùng bơi tròn đặt tự do X/Z (thường thả vào lòng hồ — default rơi đúng hồ default).
+// Mọi slider = LIVE qua tuneFish (move mesh / setter PondFish — 0 rebuild); riêng SỐ CÁ = commit rebuild.
+
+// Spec slider 1 bầy: [label, min, max, step, mf, get, set, live(f) | null=commit-rebuild].
+type FishSlider = [
+  string,
+  number,
+  number,
+  number,
+  number,
+  () => number,
+  (v: number) => void,
+  ((f: PondFish) => void) | null,
+]
+
+// Vị trí + vùng bơi (X/Z/R/Sâu — m hiển thị, state mm). X/Z live = move GỐC mesh (cả đàn dời theo,
+// wander local không reset); Sâu live = setDepthY (đo XUỐNG từ mặt nền rim).
+function fishAreaSpecs(fs: FishSchool): FishSlider[] {
+  return [
+    [
+      'X m',
+      -20,
+      20,
+      0.1,
+      1000,
+      () => fs.offsetX / 1000,
+      (v) => (fs.offsetX = Math.round(v * 1000)),
+      (f) => {
+        f.getMesh().position.x = fs.offsetX / 1000
+      },
+    ],
+    [
+      'Z m',
+      -20,
+      20,
+      0.1,
+      1000,
+      () => fs.offsetZ / 1000,
+      (v) => (fs.offsetZ = Math.round(v * 1000)),
+      (f) => {
+        f.getMesh().position.z = fs.offsetZ / 1000
+      },
+    ],
+    [
+      'R vùng m',
+      0.3,
+      10,
+      0.1,
+      1000,
+      () => fs.radius / 1000,
+      (v) => (fs.radius = Math.round(v * 1000)),
+      (f) => f.setAreaRadius(fs.radius / 1000),
+    ],
+    [
+      'Sâu m',
+      0.05,
+      2,
+      0.05,
+      1000,
+      () => fs.depth / 1000,
+      (v) => (fs.depth = Math.round(v * 1000)),
+      (f) => f.setDepthY(-fs.depth / 1000),
+    ],
+  ]
+}
+
+// Đàn + ngoại hình (Số cá = null → commit rebuild; còn lại live setter).
+function fishLookSpecs(fs: FishSchool): FishSlider[] {
+  return [
+    ['Số cá', 1, 30, 1, 1, () => fs.count, (v) => (fs.count = Math.round(v)), null],
+    [
+      'Cỡ cá m',
+      0.08,
+      0.5,
+      0.01,
+      1000,
+      () => fs.size / 1000,
+      (v) => (fs.size = Math.round(v * 1000)),
+      (f) => f.setFishLength(fs.size / 1000),
+    ],
+    [
+      'Tốc bơi %',
+      5,
+      80,
+      5,
+      1,
+      () => fs.speed * 100,
+      (v) => (fs.speed = v / 100),
+      (f) => f.setSpeed(fs.speed),
+    ],
+    [
+      'Xáo màu',
+      0,
+      99,
+      1,
+      1,
+      () => fs.seed,
+      (v) => (fs.seed = Math.round(v)),
+      (f) => f.setColorSeed(fs.seed),
+    ],
+  ]
+}
+
+// Pane 1 bầy: Show + 8 slider (spec) + ✕ Remove.
+function buildFishPane(ctx: APGuiCtx, fs: FishSchool, remove: () => void): HTMLElement {
+  const pane = document.createElement('div')
+  pane.appendChild(
+    toggleRow('🐟 Show (render)', fs.enabled, (on) => {
+      fs.enabled = on
+      ctx.applySite(true)
+    })
+  )
+  for (const [label, min, max, step, mf, get, set, live] of [
+    ...fishAreaSpecs(fs),
+    ...fishLookSpecs(fs),
+  ]) {
+    pane.appendChild(
+      sliderRow(
+        label,
+        min,
+        max,
+        step,
+        get(),
+        (v, c) => {
+          set(v)
+          if (live) ctx.tuneFish(fs, live, c)
+          else if (c) ctx.applySite(true)
+        },
+        mf
+      )
+    )
+  }
+  pane.appendChild(removeRow('✕ Remove', remove))
+  return pane
+}
+
+// BẬC 3 — hàng tab bầy cá (F1 F2… + ＋) trong host (= panel type 🐟 Cá). Mirror instanceTabs (hồ) nhưng
+// cho site.fishSchools; chưa cần setActive/3D-drag (v1 — bầy chỉnh qua slider).
+function fishSchoolTabs(host: HTMLElement, ctx: APGuiCtx): { dispose: () => void } {
+  let tabs: Tabs | null = null
+  const rebuild = (focus = 0): void => {
+    tabs?.dispose()
+    host.replaceChildren()
+    const items: TabItem[] = []
+    ctx.site.fishSchools.forEach((fs, i) => {
+      const remove = (): void => {
+        ctx.site.fishSchools.splice(ctx.site.fishSchools.indexOf(fs), 1)
+        rebuild(Math.max(0, i - 1))
+        ctx.applySite(true)
+      }
+      const pane = buildFishPane(ctx, fs, remove)
+      host.appendChild(pane)
+      items.push({ label: `F${i + 1}`, panel: pane, title: `Bầy cá ${i + 1}` })
+    })
+    const addBtn = addInstanceButton('bầy cá', () => {
+      const fs = makeFishSchool()
+      fs.offsetX = ctx.site.fishSchools.length * 2000 // stagger né chồng bầy cũ
+      ctx.site.fishSchools.push(fs)
+      rebuild(ctx.site.fishSchools.length - 1)
+      ctx.applySite(true)
+    })
+    tabs = new Tabs(host, items, {
+      classes: {
+        bar: 'ap-tab-bar ap-water-itabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-water-isub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+      addEl: addBtn,
+      initial: focus,
+    })
+  }
+  rebuild()
+  return { dispose: (): void => tabs?.dispose() }
+}
+
+// Sub-tab "Water" → BẬC 2 folder-style Pool|Pond|Puddle|🐟Cá (tông xanh curated --wt-*, tách tông nâu Ground);
+// MỖI loại có BẬC 3 hàng tab instance (Pl/Pd/Pe/F + ＋). Trả { panel, dispose } — dispose gỡ type-Tabs + 4 controller.
 function buildWaterDomain(ctx: APGuiCtx): {
   panel: HTMLElement
   dispose: () => void
@@ -2606,7 +2787,8 @@ function buildWaterDomain(ctx: APGuiCtx): {
   const poolSub = document.createElement('div')
   const pondSub = document.createElement('div')
   const puddleSub = document.createElement('div')
-  waterSub.append(poolSub, pondSub, puddleSub)
+  const fishSub = document.createElement('div')
+  waterSub.append(poolSub, pondSub, puddleSub, fishSub)
 
   const typeTabs = new Tabs(
     waterSub,
@@ -2614,6 +2796,7 @@ function buildWaterDomain(ctx: APGuiCtx): {
       { label: 'Pool', panel: poolSub, title: 'Reflective pools (tier C)' },
       { label: 'Pond', panel: pondSub, title: 'Ponds (như Pool)' },
       { label: 'Puddle', panel: puddleSub, title: 'Puddles — mặt nước phẳng (no depth/edge)' },
+      { label: '🐟 Cá', panel: fishSub, title: 'Bầy cá koi — mỗi tab 1 bầy (F1 F2…)' },
     ],
     {
       classes: {
@@ -2631,11 +2814,12 @@ function buildWaterDomain(ctx: APGuiCtx): {
     instanceTabs(pondSub, ctx, 'pond', 'Pd'),
     instanceTabs(puddleSub, ctx, 'puddle', 'Pe'),
   ]
+  const fishCtl = fishSchoolTabs(fishSub, ctx) // 🐟 controller riêng (không selectCfg — chưa cần 3D-drag)
   return {
     panel: waterSub,
     dispose: (): void => {
       typeTabs.dispose()
-      for (const c of ctls) c.dispose()
+      for (const c of [...ctls, fishCtl]) c.dispose()
     },
     // Click hồ 3D → mở type-tab theo kind + tab instance của cfg. Trả false nếu cfg không khớp instance nào.
     navigateToWater: (cfg: WaterConfig): boolean => {

@@ -12,6 +12,7 @@ import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import type {
   CoverageStats,
   FenceConfig,
+  FishSchool,
   GroundLayer,
   GroundMixParams,
   SiteState,
@@ -114,9 +115,9 @@ export interface APGuiCtx {
   // 💧 Tinh chỉnh hồ nước LIVE (màu/gương/sóng) trên WaterSurface của ĐÚNG instance cfg. No-op nếu hồ đó
   // chưa render (pool tắt / pond/puddle placeholder). cfg = config của tab instance đang chỉnh.
   tuneWater(cfg: WaterConfig, apply: (w: WaterSurface) => void, persist: boolean): void
-  // 🐟 Chỉnh đàn cá LIVE (tốc bơi setSpeed / xáo màu setColorSeed — 0 rebuild) của ĐÚNG hồ cfg. No-op
-  // nếu hồ chưa bật cá (fishOn=false → chưa có PondFish instance).
-  tuneFish(cfg: WaterConfig, apply: (f: PondFish) => void, persist: boolean): void
+  // 🐟 Chỉnh bầy cá LIVE (vị trí/vùng/sâu/cỡ/tốc/màu — transform mesh + setter PondFish, 0 rebuild) của
+  // ĐÚNG bầy cfg (tab F1 F2…). No-op nếu bầy chưa render (enabled=false).
+  tuneFish(cfg: FishSchool, apply: (f: PondFish) => void, persist: boolean): void
   // 💧 Chọn pool active (= tab instance đang mở) → 3D drag/handle nhắm hồ này. Gọi khi đổi tab Pl.
   setActiveWater(cfg: WaterConfig): void
   // 🪨 XOAY path-zone LIVE: CHỈ set mesh.rotation.y (transform thuần — KHÔNG rebuild gì → né water-RTT = tụt fps).

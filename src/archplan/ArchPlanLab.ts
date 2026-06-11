@@ -170,6 +170,7 @@ import {
   coverageStats,
   defaultSiteState,
   type FenceConfig,
+  type FishSchool,
   GROUND_PRESETS,
   type GroundMaterialKey,
   type GroundMixParams,
@@ -666,7 +667,7 @@ export class ArchPlanLab extends BaseWorld {
   // 💧 Hồ ĐANG SỐNG (đa-instance): cfg↔surf zip theo renderWaters(site). _activeWater = pool của tab đang
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
-  private _siteFish: { cfg: WaterConfig; fish: PondFish }[] = [] // 🐟 đàn cá mỗi hồ fishOn — update(dt) trong onUpdate
+  private _siteFish: { cfg: FishSchool; fish: PondFish }[] = [] // 🐟 bầy cá (instance độc lập hồ) — update(dt) trong onUpdate
   private _siteGroundMesh: THREE.Mesh | null = null // 🏔️ ref mesh nền base → LIVE-rebuild geometry-only (terrain drag)
   private _activeWater: WaterConfig | null = null
   private labExp: { dispose: () => void } | null = null // 🔀 thí nghiệm Lab đang active (Mái / Particles)
@@ -3465,9 +3466,9 @@ export class ArchPlanLab extends BaseWorld {
     if (persist) this.store.autosave(this.state, this.site)
   }
 
-  // 🐟 Chỉnh đàn cá LIVE (tốc bơi/xáo màu — CPU-param/uniform, 0 rebuild) của ĐÚNG hồ cfg. No-op nếu hồ
-  // chưa bật cá (fishOn=false → không có instance).
-  private _tuneFish(cfg: WaterConfig, apply: (f: PondFish) => void, persist: boolean): void {
+  // 🐟 Chỉnh bầy cá LIVE (vị trí/vùng/sâu/cỡ/tốc/màu — transform + setter, 0 rebuild) của ĐÚNG bầy cfg.
+  // No-op nếu bầy chưa render (enabled=false).
+  private _tuneFish(cfg: FishSchool, apply: (f: PondFish) => void, persist: boolean): void {
     const fish = this._siteFish.find((x) => x.cfg === cfg)?.fish
     if (fish) apply(fish)
     if (persist) this.store.autosave(this.state, this.site)
