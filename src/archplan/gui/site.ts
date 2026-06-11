@@ -2723,6 +2723,7 @@ function buildFishPane(ctx: APGuiCtx, fs: FishSchool, remove: () => void): HTMLE
         get(),
         (v, c) => {
           set(v)
+          ctx.previewFish(fs) // tia-Y bám theo X/Z/Sâu đang kéo
           if (live) ctx.tuneFish(fs, live, c)
           else if (c) ctx.applySite(true)
         },
@@ -2734,9 +2735,49 @@ function buildFishPane(ctx: APGuiCtx, fs: FishSchool, remove: () => void): HTMLE
   return pane
 }
 
+// Nút ＋ thêm bầy cá (tách khỏi fishSchoolTabs — Rule-50): stagger vị trí + flash tia-Y bầy mới.
+function fishAddButton(ctx: APGuiCtx, rebuild: (focus?: number) => void): HTMLButtonElement {
+  return addInstanceButton('bầy cá', () => {
+    const fs = makeFishSchool()
+    fs.offsetX = ctx.site.fishSchools.length * 2000 // stagger né chồng bầy cũ
+    ctx.site.fishSchools.push(fs)
+    rebuild(ctx.site.fishSchools.length - 1)
+    ctx.applySite(true)
+    ctx.previewFish(fs) // bầy mới ở đâu — flash ngay
+  })
+}
+
+// BẬC 2 type-Tabs Pool|Pond|Puddle|🐟Cá (tách khỏi buildWaterDomain — Rule-50).
+function makeWaterTypeTabs(
+  waterSub: HTMLElement,
+  subs: { pool: HTMLElement; pond: HTMLElement; puddle: HTMLElement; fish: HTMLElement }
+): Tabs {
+  return new Tabs(
+    waterSub,
+    [
+      { label: 'Pool', panel: subs.pool, title: 'Reflective pools (tier C)' },
+      { label: 'Pond', panel: subs.pond, title: 'Ponds (như Pool)' },
+      { label: 'Puddle', panel: subs.puddle, title: 'Puddles — mặt nước phẳng (no depth/edge)' },
+      { label: '🐟 Cá', panel: subs.fish, title: 'Bầy cá koi — mỗi tab 1 bầy (F1 F2…)' },
+    ],
+    {
+      classes: {
+        bar: 'ap-tab-bar ap-water-tabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-water-sub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+    }
+  )
+}
+
 // BẬC 3 — hàng tab bầy cá (F1 F2… + ＋) trong host (= panel type 🐟 Cá). Mirror instanceTabs (hồ) nhưng
 // cho site.fishSchools; chưa cần setActive/3D-drag (v1 — bầy chỉnh qua slider).
-function fishSchoolTabs(host: HTMLElement, ctx: APGuiCtx): { dispose: () => void } {
+function fishSchoolTabs(
+  host: HTMLElement,
+  ctx: APGuiCtx
+): { dispose: () => void; selectIdx: (idx: number) => void } {
   let tabs: Tabs | null = null
   const rebuild = (focus = 0): void => {
     tabs?.dispose()
@@ -2752,13 +2793,7 @@ function fishSchoolTabs(host: HTMLElement, ctx: APGuiCtx): { dispose: () => void
       host.appendChild(pane)
       items.push({ label: `F${i + 1}`, panel: pane, title: `Bầy cá ${i + 1}` })
     })
-    const addBtn = addInstanceButton('bầy cá', () => {
-      const fs = makeFishSchool()
-      fs.offsetX = ctx.site.fishSchools.length * 2000 // stagger né chồng bầy cũ
-      ctx.site.fishSchools.push(fs)
-      rebuild(ctx.site.fishSchools.length - 1)
-      ctx.applySite(true)
-    })
+    const addBtn = fishAddButton(ctx, rebuild)
     tabs = new Tabs(host, items, {
       classes: {
         bar: 'ap-tab-bar ap-water-itabs',
@@ -2769,10 +2804,20 @@ function fishSchoolTabs(host: HTMLElement, ctx: APGuiCtx): { dispose: () => void
       injectCss: false,
       addEl: addBtn,
       initial: focus,
+      onChange: (idx) => {
+        const fs = ctx.site.fishSchools[idx]
+        if (fs) ctx.previewFish(fs) // 🐟 đổi tab F → flash tia-Y vị trí bầy (cá ẩn dưới nền)
+      },
     })
   }
   rebuild()
-  return { dispose: (): void => tabs?.dispose() }
+  return {
+    dispose: (): void => tabs?.dispose(),
+    // Chọn tab F theo idx (click đàn cá 3D → GUI nhảy tới — Focus/code1).
+    selectIdx: (idx: number): void => {
+      tabs?.select(Math.max(0, Math.min(idx, ctx.site.fishSchools.length - 1)), { trusted: false })
+    },
+  }
 }
 
 // Sub-tab "Water" → BẬC 2 folder-style Pool|Pond|Puddle|🐟Cá (tông xanh curated --wt-*, tách tông nâu Ground);
@@ -2781,6 +2826,7 @@ function buildWaterDomain(ctx: APGuiCtx): {
   panel: HTMLElement
   dispose: () => void
   navigateToWater: (cfg: WaterConfig) => boolean
+  navigateToFish: (idx: number) => void
 } {
   const waterSub = document.createElement('div')
   waterSub.classList.add('ap-water-domain')
@@ -2790,24 +2836,12 @@ function buildWaterDomain(ctx: APGuiCtx): {
   const fishSub = document.createElement('div')
   waterSub.append(poolSub, pondSub, puddleSub, fishSub)
 
-  const typeTabs = new Tabs(
-    waterSub,
-    [
-      { label: 'Pool', panel: poolSub, title: 'Reflective pools (tier C)' },
-      { label: 'Pond', panel: pondSub, title: 'Ponds (như Pool)' },
-      { label: 'Puddle', panel: puddleSub, title: 'Puddles — mặt nước phẳng (no depth/edge)' },
-      { label: '🐟 Cá', panel: fishSub, title: 'Bầy cá koi — mỗi tab 1 bầy (F1 F2…)' },
-    ],
-    {
-      classes: {
-        bar: 'ap-tab-bar ap-water-tabs',
-        tab: 'ap-tab-btn',
-        panel: 'ap-water-sub',
-        active: 'ap-tab-active',
-      },
-      injectCss: false,
-    }
-  )
+  const typeTabs = makeWaterTypeTabs(waterSub, {
+    pool: poolSub,
+    pond: pondSub,
+    puddle: puddleSub,
+    fish: fishSub,
+  })
   const kindIdx: Record<WaterKind, number> = { pool: 0, pond: 1, puddle: 2 }
   const ctls = [
     instanceTabs(poolSub, ctx, 'pool', 'Pl'),
@@ -2826,6 +2860,11 @@ function buildWaterDomain(ctx: APGuiCtx): {
       const ki = kindIdx[cfg.kind]
       typeTabs.select(ki, { trusted: false })
       return ctls[ki].selectCfg(cfg)
+    },
+    // Click đàn cá 3D → mở type-tab 🐟 Cá (idx 3) + tab F của bầy.
+    navigateToFish: (idx: number): void => {
+      typeTabs.select(3, { trusted: false })
+      fishCtl.selectIdx(idx)
     },
   }
 }
@@ -2880,6 +2919,7 @@ interface SitePanel {
   navigateToWater: (cfg: WaterConfig) => boolean
   navigateToFence: (idx: number) => void
   navigateToGroundLayer: (idx: number) => void
+  navigateToFish: (idx: number) => void // 🐟 click đàn cá 3D → Water ▸ type-tab Cá ▸ tab F idx
 }
 
 export function setupSitePanel(ctx: APGuiCtx, container: Element | null): SitePanel {
@@ -2926,6 +2966,11 @@ export function setupSitePanel(ctx: APGuiCtx, container: Element | null): SitePa
     navigateToGroundLayer: (idx: number): void => {
       tabs.select(0, { trusted: false })
       ground.navigateToLayer(idx)
+    },
+    // Click đàn cá 3D → mở sub-tab "Water" (index 3) + type-tab 🐟 Cá + tab F idx.
+    navigateToFish: (idx: number): void => {
+      tabs.select(3, { trusted: false })
+      water.navigateToFish(idx)
     },
   }
 }

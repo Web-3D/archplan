@@ -130,6 +130,17 @@ Gò nặn-tay (`terrain.mounds[]`, cộng vào `heightAt` Σ-gò) = site element
 
 > 3 tool SITE (💧 water / 🟫 ground-free / ⛰️ mound) chia sẻ **`SiteDragTool` interface** (isDragging/dragMove/endDrag/cancelDrag/rebuildHandles/dispose) → lab dispatch qua LOOP `_siteDragTools()` (né complexity>10). tryStart riêng tên (tryStartDrag/Vertex/Handle) → helper `_tryStartSiteTool`.
 
+### 5d. SITE element — BẦY CÁ 🐟 (FishSchool / PondFish)
+
+Bầy cá (`site.fishSchools[]` ↔ `_siteFish[]` cfg↔PondFish) = site element rời, ĐỘC LẬP hồ — InstancedMesh
+trong `siteGroup`, update(dt) mỗi frame ở `onUpdate` (vẫy GPU, wander CPU).
+
+| Tương tác | Bầy cá làm sao |
+|---|---|
+| **👆 Focus** | click trúng ĐÀN CÁ 3D → mở drawer Ground → sub-tab Water → type-tab **🐟 Cá** → tab **F idx** + flash tia-Y. Raycast **RIÊNG list mesh cá TRƯỚC hồ** (`_tryClickFish` đầu `_clickFocusChain` — cá bơi DƯỚI mặt nước trong suốt nên KHÔNG so distance với nước/nền: thấy cá là trúng cá). Anchor: `_tryClickFish`/`_navigateToFish` (lab) → site `navigateToFish` → water domain `navigateToFish` (typeTabs idx 3) → `fishSchoolTabs.selectIdx`. |
+| **📍 Marker tia-Y** | cá CHÌM dưới nền → khó biết bầy ở đâu khi chỉnh GUI. `ctx.previewFish(fs)` (lab `_previewFish`) = FLASH **Line đứng vàng `depthTest:false`** (nhìn xuyên đất/nước, renderOrder 999) tại (offsetX, offsetZ), từ +1m trên nền cắm xuống quá đàn 20cm, tự ẩn 1.5s. Kích: đổi tab F (Tabs onChange) · kéo BẤT KỲ slider pane cá (bám live theo X/Z/Sâu) · thêm bầy ＋ · click trúng cá 3D. |
+| **🤚 Move / 🎨 Paint / P Pick** | KHÔNG (v1) — vị trí chỉnh qua slider X/Z (live move gốc mesh, cả đàn dời theo). Nâng cấp sau: body-drag như hồ nếu cần. |
+
 ---
 
 ## Phím tắt

@@ -435,6 +435,7 @@ export class ArchPlanLab extends BaseWorld {
   private drawerTabs: Tabs | null = null // tab ngang đầu drawer (🏠 Building | 🌳 Ground | 🎛️ Lab)
   private _siteDispose: (() => void) | null = null // teardown tab CON panel Ground (outer + Garden domain + Water domain)
   private _siteNavigate: ((cfg: WaterConfig) => boolean) | null = null // click hồ 3D → nhảy GUI tới tab hồ đó
+  private _siteNavigateFish: ((idx: number) => void) | null = null // 🐟 click đàn cá 3D → nhảy GUI tới tab F idx
   private _siteNavigateFence: ((idx: number) => void) | null = null // 🧱 click rào 3D → nhảy GUI tới lớp rào idx
   private _siteNavigateLayer: ((idx: number) => void) | null = null // 🟫 click tầng ground 3D → nhảy GUI Ground▸Gn
   private _activeCutIdx = -1 // 🟫 layer cut đang active (focus tab / click / kéo) → mảng cut HIỆN XÁM; -1 = ẩn hết
@@ -551,6 +552,12 @@ export class ArchPlanLab extends BaseWorld {
   private _fenceMats: THREE.Material[] = []
   private _fenceShaders: { dispose(): void }[] = []
   private _fenceSig = ''
+  // 🌉 CẦU — group BỀN riêng (như rào): dirty-check _bridgeSig (= JSON bridges[]) → đổi cầu CHỈ dựng lại
+  // cầu (rẻ, box thuần), KHÔNG đụng nước-RTT/cỏ. '' = chưa dựng.
+  private readonly _bridgeGroup = new THREE.Group()
+  private _bridgeGeos: THREE.BufferGeometry[] = []
+  private _bridgeMats: THREE.Material[] = []
+  private _bridgeSig = ''
   // 🚪 Pick-box CỔNG vô hình (group riêng → KHÔNG lẫn raycast _tryClickFence). Move mode kéo box → trượt cổng
   // dọc cạnh (ghi gatePos). Dựng lại trong _syncFence (mỗi fence có gate). _gateDrag = phiên kéo đang chạy.
   private readonly _gatePickGroup = new THREE.Group()
@@ -668,6 +675,9 @@ export class ArchPlanLab extends BaseWorld {
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
   private _siteFish: { cfg: FishSchool; fish: PondFish }[] = [] // 🐟 bầy cá (instance độc lập hồ) — update(dt) trong onUpdate
+  private _fishMarker: THREE.Line | null = null // 🐟 tia trục-Y flash vị trí bầy (cá chìm dưới nền — cần mốc)
+  private _fishMarkerMat: THREE.LineBasicMaterial | null = null
+  private _fishMarkerTimer = 0
   private _siteGroundMesh: THREE.Mesh | null = null // 🏔️ ref mesh nền base → LIVE-rebuild geometry-only (terrain drag)
   private _activeWater: WaterConfig | null = null
   private labExp: { dispose: () => void } | null = null // 🔀 thí nghiệm Lab đang active (Mái / Particles)
@@ -1060,6 +1070,7 @@ export class ArchPlanLab extends BaseWorld {
   // Tách khỏi _maybeClickFocus (complexity ≤10 sau khi thêm nhánh 🪣).
   private _clickFocusChain(e: PointerEvent): void {
     this._setActiveCut(-1) // 🟫 click = deselect cut (ẩn xám); _tryClickLayer→navTo bật lại nếu trúng cut
+    if (this._tryClickFish(e)) return // 🐟 cá TRƯỚC hồ — cá bơi DƯỚI mặt nước trong suốt (ray riêng mesh cá)
     if (this.waterTool?.tryClick(e)) return // 💧 click trúng hồ → trỏ GUI hồ
     if (this._tryClickFence(e)) return // 🧱 click trúng rào → trỏ GUI Fence
     if (this._tryClickLayer(e)) return // 🟫 click trúng tầng ground → trỏ GUI Ground▸Gn
@@ -1156,6 +1167,30 @@ export class ArchPlanLab extends BaseWorld {
   private _navigateToWater(cfg: WaterConfig): void {
     this.drawerTabs?.select(1, { trusted: false }) // Building|Ground|Lab → Ground (chứa panel sân vườn)
     this._siteNavigate?.(cfg)
+  }
+
+  // 🐟 Click trúng ĐÀN CÁ (raycast RIÊNG list mesh cá — cá bơi dưới mặt nước trong suốt nên không so
+  // khoảng cách với nước/nền: thấy cá là trúng cá). Trả false → nhường hồ/rào/building.
+  private _tryClickFish(e: PointerEvent): boolean {
+    if (this._siteFish.length === 0) return false
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const hit = this._ray.intersectObjects(
+      this._siteFish.map((x) => x.fish.getMesh()),
+      false
+    )[0]
+    const entry = hit && this._siteFish.find((x) => x.fish.getMesh() === hit.object)
+    if (!entry) return false
+    const idx = this.site.fishSchools.indexOf(entry.cfg)
+    if (idx < 0) return false
+    this._navigateToFish(idx)
+    this._previewFish(entry.cfg) // flash tia-Y tại bầy — xác nhận trúng con nào
+    return true
+  }
+
+  // 🐟 Click trúng đàn cá 3D → mở GUI: drawer "Ground" (idx1) → sub-tab "Water" → type-tab 🐟 Cá → tab F idx.
+  private _navigateToFish(idx: number): void {
+    this.drawerTabs?.select(1, { trusted: false }) // Building|Ground|Lab → Ground
+    this._siteNavigateFish?.(idx)
   }
 
   // 🧱 Click trúng RÀO trong 3D → mở GUI: drawer "Ground" (idx1) → sub-tab "Fence" → instance lớp idx.
@@ -1345,6 +1380,7 @@ export class ArchPlanLab extends BaseWorld {
     this.scene.add(this.siteGroup) // 🌳 nền + lô (dưới building)
     this.scene.add(this._grassGroup) // 🌿 cỏ — group BỀN, KHÔNG xoá mỗi rebuild (dirty-check riêng)
     this.scene.add(this._fenceGroup) // 🧱 rào — group BỀN (dirty-check riêng, né rebuild nước khi kéo slider rào)
+    this.scene.add(this._bridgeGroup) // 🌉 cầu — group BỀN (dirty-check _bridgeSig riêng)
     this.scene.add(this._gatePickGroup) // 🚪 pick-box cổng vô hình (Move mode kéo trượt cổng)
     this.scene.add(this.buildingGroup)
     this.scene.add(this.pickGroup) // SPIKE: lớp pick vô hình cho brush paint
@@ -1525,6 +1561,7 @@ export class ArchPlanLab extends BaseWorld {
     this._siteGrass?.dispose() // 🌿 cỏ ở group bền (ngoài _clearSite) → dispose tường minh lúc teardown
     this._siteGrass = null
     this._clearFence() // 🧱 rào ở group bền (ngoài _clearSite) → dispose geos/mats/shaders lúc teardown
+    this._clearBridge() // 🌉 cầu ở group bền → dispose geos/mats lúc teardown
     this._disposeSurfaceTextures() // 🌱🪵🧱 ground/slab/fence texture-set + PhotoGround sàn (lab sở hữu)
     this._clearDragGroup() // 🚀 split-drag group (nếu dispose giữa phiên kéo)
     this._dragGroup = null
@@ -1533,6 +1570,11 @@ export class ArchPlanLab extends BaseWorld {
     this._disposeGround()
     this.editorGrid?.dispose()
     this.editorGrid = null
+    window.clearTimeout(this._fishMarkerTimer) // 🐟 marker tia-Y bầy cá
+    this._fishMarker?.geometry.dispose()
+    this._fishMarkerMat?.dispose()
+    this._fishMarker = null
+    this._fishMarkerMat = null
     this.heightGridSystem?.dispose()
     this.heightGridSystem = null
     this.css2dEl?.remove()
@@ -1870,6 +1912,7 @@ export class ArchPlanLab extends BaseWorld {
     | 'tuneGrass'
     | 'tuneWater'
     | 'tuneFish'
+    | 'previewFish'
     | 'setActiveWater'
     | 'previewWater'
     | 'tunePathRotLive'
@@ -1886,6 +1929,7 @@ export class ArchPlanLab extends BaseWorld {
       tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
       tuneWater: (cfg, apply, persist) => this._tuneWater(cfg, apply, persist),
       tuneFish: (cfg, apply, persist) => this._tuneFish(cfg, apply, persist),
+      previewFish: (fs) => this._previewFish(fs),
       setActiveWater: (cfg) => this.waterTool?.setActiveCfg(cfg),
       previewWater: (cfg) => this.waterTool?.showOutline(cfg),
       tunePathRotLive: (flatIdx, rotDeg) => this._tunePathRotLive(flatIdx, rotDeg),
@@ -2147,6 +2191,7 @@ export class ArchPlanLab extends BaseWorld {
     const site = setupSitePanel(ctx, drawerBody) // 🌳 Ground: sub-tab Ground|Fence|Garden|Water → { panel, dispose, navigateToWater }
     this._siteDispose = site.dispose
     this._siteNavigate = site.navigateToWater // refresh mỗi _rebuildGUI (panel dựng lại) → luôn trỏ panel hiện tại
+    this._siteNavigateFish = site.navigateToFish // 🐟 click đàn cá 3D → type-tab Cá ▸ tab F
     this._siteNavigateFence = site.navigateToFence // 🧱 click rào 3D → sub-tab Fence
     this._siteNavigateLayer = site.navigateToGroundLayer // 🟫 click tầng ground 3D → sub-tab Ground▸Gn
     this.drawerPanels = [site.panel] // chỉ Ground (Lab ở float riêng); gỡ khi teardown
@@ -2569,6 +2614,7 @@ export class ArchPlanLab extends BaseWorld {
     this._siteDispose?.() // gỡ tab CON panel Ground: outer (Ground|Fence|Tree|Water) + Water domain (Pl/Pd/Pe)
     this._siteDispose = null
     this._siteNavigate = null // panel cũ gỡ → bỏ ref navigate (gắn lại ở _buildLeftTools kế tiếp)
+    this._siteNavigateFish = null
     this._siteNavigateFence = null
     this._siteNavigateLayer = null
     // tab con cỏ (Lá đơn|Bụi cỏ + Số đo|Độ cong|Bóng đổ) + Garden Tabs do site.dispose() lo; Lab panel = preview-only (no Tabs)
@@ -2884,6 +2930,7 @@ export class ArchPlanLab extends BaseWorld {
       this._applySunToWater() // surface mới → hướng glint theo sun hiện tại
     }
     this._syncFence() // 🧱 dựng/giữ rào theo _fenceSig (kéo slider rào chỉ dựng lại rào, không đụng nước)
+    this._syncBridge() // 🌉 dựng/giữ cầu theo _bridgeSig (đổi cầu chỉ dựng lại cầu)
     this._syncGrass(exclude) // dựng/giữ cỏ theo chữ ký structural (defer lúc kéo) → set this._siteGrass
     this._applySunToGrass() // _siteGrass (mới hoặc cũ) → set hướng vệt theo sun hiện tại
     const lift = this.site.show ? this.site.groundThick / 1000 : 0
@@ -3423,6 +3470,33 @@ export class ArchPlanLab extends BaseWorld {
     this._gatePickGroup.clear()
   }
 
+  // 🌉 Dựng/GIỮ cầu theo _bridgeSig (= JSON bridges[] + cờ show). Giống lần trước → giữ; khác → dispose +
+  // dựng lại vào _bridgeGroup (box thuần, rẻ). Mirror _syncFence — cầu tách siteSig nên kéo slider cầu KHÔNG
+  // đụng nước-RTT.
+  private _syncBridge(): void {
+    const anyEnabled = this.site.bridges.some((b) => b.enabled)
+    const sig = this.site.show && anyEnabled ? JSON.stringify(this.site.bridges) : 'off'
+    if (sig === this._bridgeSig) return
+    this._bridgeSig = sig
+    this._clearBridge()
+    if (sig === 'off') return
+    const ctx: SiteRenderCtx = {
+      group: this._bridgeGroup,
+      geos: this._bridgeGeos,
+      mats: this._bridgeMats,
+      shaders: [], // cầu = box MeshStandard thuần, không shader procedural
+    }
+    for (const b of this.site.bridges) if (b.enabled) buildSiteBridge(b, this.site, ctx)
+  }
+
+  private _clearBridge(): void {
+    for (const g of this._bridgeGeos) g.dispose()
+    for (const m of this._bridgeMats) m.dispose()
+    this._bridgeGeos = []
+    this._bridgeMats = []
+    this._bridgeGroup.clear()
+  }
+
   // 🕳️ Nền backdrop editor (Plane 80×80 @ y=0, đặc) sẽ CHE đáy basin (basin chạy xuống dưới y=0). Khi có
   // hồ → thay bằng ShapeGeometry KHOÉT CÙNG lỗ hồ (pondWorldXZ lõi = single source) → nhìn xuyên thấy đáy.
   // Geo ở mặt phẳng XY như PlaneGeometry → mesh.rotation.x=-90° (đặt sẵn) lo hướng; lỗ (q.x,−q.z) khớp lõi.
@@ -3472,6 +3546,31 @@ export class ArchPlanLab extends BaseWorld {
     const fish = this._siteFish.find((x) => x.cfg === cfg)?.fish
     if (fish) apply(fish)
     if (persist) this.store.autosave(this.state, this.site)
+  }
+
+  // 🐟 FLASH tia trục-Y tại vị trí bầy cá (đổi tab F / kéo slider / click trúng cá) — cá chìm dưới nền
+  // nên cần mốc nhìn thấy: Line đứng depthTest=false (xuyên đất/nước), từ trên nền cắm xuống qua đàn,
+  // tự ẩn sau 1.5s. Lazy-create 1 lần; geometry đơn vị (0,0,0)→(0,1,0) scale Y theo độ sâu.
+  private _previewFish(fs: FishSchool): void {
+    if (!this._fishMarker) {
+      const g = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, 1, 0),
+      ])
+      this._fishMarkerMat = new THREE.LineBasicMaterial({ color: 0xffd400, depthTest: false })
+      this._fishMarker = new THREE.Line(g, this._fishMarkerMat)
+      this._fishMarker.renderOrder = 999 // vẽ trên cùng — depthTest off mới "xuyên" thấy được
+      this.scene.add(this._fishMarker)
+    }
+    const rim = this.site.show ? this.site.groundThick / 1000 : 0
+    const bot = rim - fs.depth / 1000 - 0.2 // cắm quá đàn 20cm
+    this._fishMarker.position.set(fs.offsetX / 1000, bot, fs.offsetZ / 1000)
+    this._fishMarker.scale.y = rim + 1 - bot // ngọn tia nhô 1m trên mặt nền
+    this._fishMarker.visible = true
+    window.clearTimeout(this._fishMarkerTimer)
+    this._fishMarkerTimer = window.setTimeout(() => {
+      if (this._fishMarker) this._fishMarker.visible = false
+    }, 1500)
   }
 
   private _clearSite(): void {

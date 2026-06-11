@@ -154,6 +154,9 @@ export interface APGuiCtx {
   // 💧 Hiện VIỀN form định vị (mảng mờ mặt nền) khi KÉO slider Pos/Width/Depth — live preview vị trí+kích
   // thước KHÔNG rebuild (né leak reflector). Buông slider = applySite(true) commit + tự ẩn viền.
   previewWater(cfg: WaterConfig): void
+  // 🐟 FLASH tia trục-Y tại vị trí bầy cá (đổi tab F / kéo slider) — cá chìm dưới nền nên cần mốc;
+  // marker depthTest=false (nhìn xuyên đất/nước), tự ẩn sau ~1.5s.
+  previewFish(fs: FishSchool): void
   applySun(): void
   getZGridGroup(): THREE.Group | null
   getXGridGroup(): THREE.Group | null
