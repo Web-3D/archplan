@@ -587,10 +587,10 @@ function ensureMixCss(): void {
 // 🎨 CSS EDITOR PRESET RỘNG (buildMixPresetEditor) — tách khỏi ensureMixCss giữ rule-50. D = scope host.
 function mixEditorCss(D: string): string {
   return (
-    // Khung lớp = grid 4 cột cố định (ô trống = + to). Card lớp = thumb texture + số + ✕.
-    `${D}.ap-mixL-frame{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;` +
+    // Khung lớp = grid 2×2 (NgQuan) chiếm HẾT chiều ngang. Card lớp = thumb texture (landscape) + số + ✕.
+    `${D}.ap-mixL-frame{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;` +
     `padding:4px;border:1px solid var(--gr-bg-3);border-radius:4px;background:rgba(62,47,28,.35);margin:0 0 6px}` +
-    `${D}.ap-mixL-card{position:relative;aspect-ratio:1;display:flex;align-items:center;justify-content:center;` +
+    `${D}.ap-mixL-card{position:relative;height:54px;display:flex;align-items:center;justify-content:center;` +
     `padding:0;border:1px solid var(--gr-bg-4);border-radius:4px;background:var(--gr-bg-2);cursor:pointer;overflow:hidden}` +
     `${D}.ap-mixL-card.on{border-color:var(--gr-accent);box-shadow:0 0 0 1px var(--gr-accent) inset}` +
     `${D}.ap-mixL-card img,${D}.ap-mixL-card .ap-texpal-color{width:100%;height:100%;border-radius:0;object-fit:cover}` +
@@ -599,19 +599,18 @@ function mixEditorCss(D: string): string {
     `text-shadow:0 0 2px #000;pointer-events:none}` +
     `${D}.ap-mixL-del{position:absolute;top:0;right:1px;font-size:9px;color:#fff;text-shadow:0 0 2px #000;cursor:pointer}` +
     `${D}.ap-mixL-del:hover{color:#ff9a9a}` +
-    // dưới khung lớp: cột slider (trái, co giãn) | ô preview (phải, cố định)
-    `${D}.ap-mixE-bottom{display:flex;gap:6px;align-items:flex-start}` +
-    `${D}.ap-mixE-left{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}` +
-    `${D}.ap-mixE-prev{flex:0 0 auto}` +
+    // XẾP DỌC full-width: cột slider + ô preview DƯỚI CÙNG (canvas tự cỡ, căn trái)
+    `${D}.ap-mixE-left{display:flex;flex-direction:column;gap:2px}` +
+    `${D}.ap-mixE-prev{margin-top:6px}` +
     `${D}.ap-mixE-detail{margin:2px 0;padding:3px 4px;border:1px solid var(--gr-bg-3);border-radius:4px;background:rgba(0,0,0,.12)}` +
     `${D}.ap-mixE-dlbl{font-size:9px;font-weight:600;color:var(--gr-bg-5);margin-bottom:2px}`
   )
 }
 
-// 🎨 EDITOR PRESET dạng RỘNG (NgQuan 2026-06-11 redesign khay mix): KHUNG LỚP 4 ô cố định trên (ô trống =
-// + to, bấm = thêm lớp); dưới = cột SLIDER (trái: Nền chính + lớp đang chọn + 6-7 slider chung) | ô PREVIEW
-// (phải — caller mount MixPreview vào element trả về). target = {wallMix} (preset = mặt đứng → có Quy luật/
-// Trọng lực). commit = save preset (KHÔNG đụng scene — CLONE). Trả PREVIEW HOST (div phải) cho caller gắn canvas.
+// 🎨 EDITOR PRESET dạng RỘNG (NgQuan 2026-06-11 redesign khay mix): XẾP DỌC FULL-WIDTH (khung lớp lấy hết
+// chiều ngang GUI): KHUNG LỚP 2×2 (ô trống = + to, bấm = thêm lớp) → cột SLIDER (Nền chính + lớp đang chọn
+// + 6-7 slider chung) → ô PREVIEW DƯỚI CÙNG (caller mount MixPreview vào element trả về). target = {wallMix}
+// (preset = mặt đứng → có Quy luật/Trọng lực). commit = save preset (KHÔNG đụng scene — CLONE).
 export function buildMixPresetEditor(
   host: HTMLElement,
   ctx: APGuiCtx,
@@ -633,11 +632,8 @@ export function buildMixPresetEditor(
     _renderEditorLeft(left, ctx, target, mix, st.active, { redraw, commit })
   }
   redraw()
-  const bottom = document.createElement('div')
-  bottom.className = 'ap-mixE-bottom'
   previewHost.className = 'ap-mixE-prev'
-  bottom.append(left, previewHost)
-  host.append(frame, bottom)
+  host.append(frame, left, previewHost) // dọc: khung lớp (full width) → slider → preview dưới cùng
 }
 
 // Khung lớp: 4 ô cố định — ô có lớp = card thumb, ô trống = + (bấm thêm lớp). Tách (rule-50).

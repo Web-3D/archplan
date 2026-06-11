@@ -46,20 +46,22 @@ function ensurePresetCss(): void {
     `border:1px solid var(--mp-bg-4);border-radius:6px;color:var(--mp-text);` +
     `font:10px/1.3 'Segoe UI',system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.45)}` +
     `.ap-mixpre-hd{display:flex;align-items:center;gap:4px;padding:3px 6px;cursor:grab;font-weight:600}` +
-    // KHUNG PRESET — grid 4 cột ô vuông (tên trên · thumb giữa · ✎🗑 dưới); ô + thêm preset
-    `.ap-mixP-frame{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:6px}` +
-    `.ap-mixP-card{display:flex;flex-direction:column;gap:2px;min-height:64px;padding:3px;` +
+    // KHUNG PRESET — ô VUÔNG NHỎ (NgQuan "nhỏ đi phân nửa + hình vuông"): 6 cột, aspect-ratio 1
+    // (tên trên · thumb giữa · ✎🗑 dưới); ô + thêm preset
+    `.ap-mixP-frame{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;padding:6px}` +
+    `.ap-mixP-card{aspect-ratio:1;display:flex;flex-direction:column;gap:1px;padding:2px;` +
     `border:1px solid var(--mp-bg-4);border-radius:5px;background:var(--mp-bg-2);color:var(--mp-text);` +
     `cursor:pointer;overflow:hidden}` +
     `.ap-mixP-card.on{border-color:var(--mp-accent);box-shadow:0 0 0 1px var(--mp-accent) inset}` +
-    `.ap-mixP-name{font-size:9px;font-weight:600;text-align:center;overflow:hidden;` +
+    `.ap-mixP-name{font-size:7px;font-weight:600;text-align:center;overflow:hidden;` +
     `text-overflow:ellipsis;white-space:nowrap}` +
     `.ap-mixP-name input{width:100%;box-sizing:border-box;font:inherit;background:var(--mp-bg-1);color:inherit;` +
     `border:1px solid var(--mp-bg-4);border-radius:2px;text-align:center}` +
-    `.ap-mixP-thumb{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:3px}` +
-    `.ap-mixP-thumb img,.ap-mixP-thumb .ap-texpal-color{width:100%;height:100%;object-fit:cover;border-radius:3px}` +
-    `.ap-mixP-syms{display:flex;justify-content:center;gap:10px}` +
-    `.ap-mixP-add{align-items:center;justify-content:center;font-size:22px;color:var(--mp-bg-5);` +
+    `.ap-mixP-thumb{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:2px}` +
+    `.ap-mixP-thumb img,.ap-mixP-thumb .ap-texpal-color{width:100%;height:100%;object-fit:cover;border-radius:2px}` +
+    `.ap-mixP-syms{display:flex;justify-content:center;gap:4px}` +
+    `.ap-mixP-syms .ap-mixpre-ic{font-size:9px;padding:0}` +
+    `.ap-mixP-add{align-items:center;justify-content:center;font-size:18px;color:var(--mp-bg-5);` +
     `background:rgba(0,0,0,.14);border-style:dashed}` +
     `.ap-mixpre-ic{flex-shrink:0;background:none;border:none;color:var(--mp-bg-5);cursor:pointer;font:inherit;padding:0 2px}` +
     `.ap-mixpre-ic:hover{color:#fff}` +
