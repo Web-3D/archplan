@@ -42,16 +42,16 @@ function ensurePresetCss(): void {
     // editor buildMixPresetEditor BÊN TRONG khay (.ap-mix-host khai --gr-* trên chính nó) → đè cùng palette
     `.ap-mixpre-float .ap-mix-host{--gr-bg-1:#3a1e0c;--gr-bg-2:#5e3110;--gr-bg-3:#924c16;` +
     `--gr-bg-4:#c8741f;--gr-bg-5:#f2a93b;--gr-accent:#e8c547;--gr-text:#fbebcf}` +
-    `.ap-mixpre{width:392px;max-height:67vh;overflow-y:auto;background:var(--mp-bg-1);` +
+    `.ap-mixpre{width:382px;max-height:80vh;overflow-y:auto;background:var(--mp-bg-1);` +
     `border:1px solid var(--mp-bg-4);border-radius:6px;color:var(--mp-text);` +
     `font:10px/1.3 'Segoe UI',system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.45)}` +
     // header DÍNH ĐỈNH khi cuộn (NgQuan: symbol 🧱 luôn cố định) — nền bg-1 che nội dung chạy dưới
     `.ap-mixpre-hd{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;` +
     `padding:4px 6px;cursor:grab;font-weight:600;font-size:13px;background:var(--mp-bg-1);` +
     `border-bottom:1px solid var(--mp-bg-3)}` +
-    // KHUNG PRESET — ô VUÔNG NHỎ (NgQuan "nhỏ đi phân nửa + hình vuông"): 6 cột, aspect-ratio 1
+    // KHUNG PRESET — ô VUÔNG (NgQuan: to thêm ~10px → 5 cột thay 6), aspect-ratio 1
     // (tên trên · thumb giữa · ✎🗑 dưới); ô + thêm preset
-    `.ap-mixP-frame{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;padding:6px}` +
+    `.ap-mixP-frame{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:6px}` +
     `.ap-mixP-card{aspect-ratio:1;display:flex;flex-direction:column;gap:1px;padding:2px;` +
     `border:1px solid var(--mp-bg-4);border-radius:5px;background:var(--mp-bg-2);color:var(--mp-text);` +
     `cursor:pointer;overflow:hidden}` +
