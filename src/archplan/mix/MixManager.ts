@@ -133,7 +133,7 @@ export class MixManager {
   // ✨ HOVER GHOST (NgQuan 2026-06-11 "rê tới đâu viền mờ sáng vật thể đó"): ĐỘC LẬP mode xô —
   // bật là rê đâu sáng đó (áp màu LẪN select đều chính xác). Toggle = nút ✨ khay tiện ích / Space.
   // _hoverObj = đích hiện tại (đổi mới re-ghost).
-  private _hoverOn = true
+  private _hoverOn = false // mặc định TẮT khi load (NgQuan — mọi nút khay off lúc mở trang); ✨ bật khi cần
   private _hoverObj: THREE.Object3D | null = null
   private _onEditOpen: ((sel: MixEditSel) => void) | null = null // 🎯 khay đăng ký — mở board đối tượng
   // (🧪 preview editor preset KHÔNG còn qua cache này — MixPreview canvas riêng tự giữ material,

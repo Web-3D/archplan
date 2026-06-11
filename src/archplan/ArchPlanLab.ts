@@ -451,8 +451,9 @@ export class ArchPlanLab extends BaseWorld {
     pal?: HTMLButtonElement
     mix?: HTMLButtonElement
   } = {}
-  private _paletteShown = true
-  private _mixTrayShown = true
+  // Mặc định TẮT khi load/reload (NgQuan 2026-06-11 — mọi nút khay tiện ích off lúc mở trang).
+  private _paletteShown = false
+  private _mixTrayShown = false
   private controls: OrbitControls | null = null
 
   // Đèn mặt trời + tham số (điều khiển qua panel ☀ Sun). Default ≈ vị trí cũ (10,18,10).
