@@ -1,24 +1,22 @@
 /**
  * VỊ TRÍ   — 01-Doraemon/src/sandbox/archplan/mix/PresetPanel.ts
- * VAI TRÒ  — Khay MIX DI ĐỘNG (trung tâm DUY NHẤT thao tác mix — UI inline per-panel đã tháo
- *            2026-06-11): danh sách preset (thumb base + tên, click = cầm active, ✎ = editor
- *            preset + ô preview bên phải khay, dblclick đổi tên, ＋/🗑, ⬇⬆ JSON) + 3 MODE click-3D:
- *            🪣 Áp (REF live trong phiên — chỉnh ✎ thấy trên bề mặt; buông xô = bake clone riêng)
- *            · 🧽 Gỡ · 🎯 Chỉnh (board ĐỐI TƯỢNG hiện trong khay — zone/G0/hồ có cọ vẽ).
- *            Mặc định GÓC TRÊN-TRÁI; KÉO header dời tự do (mirror PalettePanel — NgQuan 2026-06-11).
- * LIÊN HỆ  — Kho: ./presets (archplan.mixPresets.v1). Board: buildMixBoard (gui/site.ts).
- *            Mode/resolve/bake: MixManager (qua APGuiCtx setMixBucket/registerMixEditOpen).
- *            Lab mount như PalettePanel (float trên canvas, instance persist qua _rebuildGUI).
+ * VAI TRÒ  — Khay MIX DI ĐỘNG rộng (NgQuan 2026-06-11 redesign): KHUNG PRESET ô vuông (1 mặc định + 7 ô
+ *            + để thêm — tên trên, thumb giữa, ✎/🗑 dưới; bấm = chọn → nạp thẳng vào editor dưới) →
+ *            EDITOR RỘNG (khung lớp 4 ô + cột slider trái | ô preview phải, buildMixPresetEditor) →
+ *            3 MODE click-3D 🪣 Áp / 🧽 Gỡ / 🎯 Chỉnh + ⬇⬆ JSON. Bỏ dropdown — V/nút 🧱 ẩn/hiện cả khay.
+ * LIÊN HỆ  — Kho: ./presets (archplan.mixPresets.v1). Editor: buildMixPresetEditor + board 🎯: buildMixBoard
+ *            (gui/site.ts). Mode/resolve/bake: MixManager (qua APGuiCtx). Preview: Lab mount MixPreview vào
+ *            previewHostEl(). Lab mount như PalettePanel (float trên canvas, instance persist qua _rebuildGUI).
  *
- * CÁCH DÙNG: const p = new MixPresetPanel(); p.build(wrap, ctx) mỗi _rebuildGUI;
- *            p.activePreset() → preset đang cầm (🪣 Mảnh 3). p.dispose() khi Lab dispose.
- * DISPOSE:   DOM do wrap.remove() của Lab dọn; không giữ listener document.
+ * CÁCH DÙNG: const p = new MixPresetPanel(); p.build(wrap, ctx) mỗi _rebuildGUI; p.previewHostEl() cho Lab
+ *            mount canvas preview; p.activePreset() → preset đang chọn (🪣). p.dispose() khi Lab dispose.
+ * DISPOSE:   DOM do wrap.remove() của Lab dọn; không giữ listener document (chỉ fileInput ẩn ở body).
  */
 
 import { makeGroundMixParams } from 'threejs-modules/site/state'
 
 import type { APGuiCtx, MixEditSel, MixPaintTarget } from '../gui/ctx'
-import { buildMixBoard } from '../gui/site'
+import { buildMixBoard, buildMixPresetEditor } from '../gui/site'
 import { texPreviewEl } from '../gui/tex-palette'
 import {
   exportMixPresetsJson,
@@ -29,45 +27,51 @@ import {
   saveMixPresets,
 } from './presets'
 
+const PRESET_MIN_SLOTS = 8 // 1 mặc định + 7 ô + (NgQuan); phình thêm khi preset > 7
+
 function ensurePresetCss(): void {
   if (document.getElementById('ap-mixpre-css')) return
   const s = document.createElement('style')
   s.id = 'ap-mixpre-css'
   s.textContent =
-    // góc trên-trái DƯỚI khay tiện ích 🧰 (top:40); z 155 > palette 150 — ô preview mở bên phải không chìm.
-    // 🎨 Palette OKLCH NgQuan 2026-06-11 (Atelier): bg-1 nền · bg-2..4 surface · bg-5 highlight · accent · text
-    // — khai báo --mp-* tại float root (khay + ô preview cùng ăn); đổi palette sau = sửa 1 dòng vars.
+    // góc trên-trái DƯỚI khay tiện ích 🧰 (top:40). 🎨 Palette OKLCH NgQuan (Atelier) — vars --mp-* tại float
+    // root (khay + editor + preview cùng ăn). Width GẤP ĐÔI (392) + cao tối đa 2/3 màn hình (scroll trong).
     `.ap-mixpre-float{position:absolute;top:40px;left:6px;z-index:155;` +
     `--mp-bg-1:#3a1e0c;--mp-bg-2:#5e3110;--mp-bg-3:#924c16;--mp-bg-4:#c8741f;` +
     `--mp-bg-5:#f2a93b;--mp-accent:#e8c547;--mp-text:#fbebcf}` +
-    // board buildMixBoard BÊN TRONG khay (.ap-mix-host khai --gr-* trên chính nó) → đè scoped cùng palette
+    // editor buildMixPresetEditor BÊN TRONG khay (.ap-mix-host khai --gr-* trên chính nó) → đè cùng palette
     `.ap-mixpre-float .ap-mix-host{--gr-bg-1:#3a1e0c;--gr-bg-2:#5e3110;--gr-bg-3:#924c16;` +
     `--gr-bg-4:#c8741f;--gr-bg-5:#f2a93b;--gr-accent:#e8c547;--gr-text:#fbebcf}` +
-    `.ap-mixpre{width:196px;background:var(--mp-bg-1);border:1px solid var(--mp-bg-4);border-radius:6px;` +
-    `color:var(--mp-text);font:10px/1.3 'Segoe UI',system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.45)}` +
-    `.ap-mixpre-hd{display:flex;align-items:center;gap:4px;padding:3px 6px;cursor:pointer;font-weight:600}` +
-    `.ap-mixpre-body{padding:2px 6px 4px;display:flex;flex-direction:column;gap:2px;` +
-    `max-height:46vh;overflow-y:auto}` +
-    `.ap-mixpre-row{display:flex;align-items:center;gap:5px;padding:2px 3px;border:1px solid transparent;` +
-    `border-radius:4px;cursor:pointer}` +
-    `.ap-mixpre-row.on{border-color:var(--mp-accent);background:rgba(232,197,71,.14)}` +
-    `.ap-mixpre-row img,.ap-mixpre-row .ap-texpal-color{width:18px;height:18px;border-radius:3px;flex-shrink:0}` +
-    `.ap-mixpre-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}` +
-    `.ap-mixpre-name input{width:100%;font:inherit;background:var(--mp-bg-2);color:inherit;` +
-    `border:1px solid var(--mp-bg-4);border-radius:2px}` +
-    `.ap-mixpre-ic{flex-shrink:0;background:none;border:none;color:var(--mp-bg-5);cursor:pointer;` +
-    `font:inherit;padding:0 2px}` +
+    `.ap-mixpre{width:392px;max-height:67vh;overflow-y:auto;background:var(--mp-bg-1);` +
+    `border:1px solid var(--mp-bg-4);border-radius:6px;color:var(--mp-text);` +
+    `font:10px/1.3 'Segoe UI',system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.45)}` +
+    `.ap-mixpre-hd{display:flex;align-items:center;gap:4px;padding:3px 6px;cursor:grab;font-weight:600}` +
+    // KHUNG PRESET — grid 4 cột ô vuông (tên trên · thumb giữa · ✎🗑 dưới); ô + thêm preset
+    `.ap-mixP-frame{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:6px}` +
+    `.ap-mixP-card{display:flex;flex-direction:column;gap:2px;min-height:64px;padding:3px;` +
+    `border:1px solid var(--mp-bg-4);border-radius:5px;background:var(--mp-bg-2);color:var(--mp-text);` +
+    `cursor:pointer;overflow:hidden}` +
+    `.ap-mixP-card.on{border-color:var(--mp-accent);box-shadow:0 0 0 1px var(--mp-accent) inset}` +
+    `.ap-mixP-name{font-size:9px;font-weight:600;text-align:center;overflow:hidden;` +
+    `text-overflow:ellipsis;white-space:nowrap}` +
+    `.ap-mixP-name input{width:100%;box-sizing:border-box;font:inherit;background:var(--mp-bg-1);color:inherit;` +
+    `border:1px solid var(--mp-bg-4);border-radius:2px;text-align:center}` +
+    `.ap-mixP-thumb{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:3px}` +
+    `.ap-mixP-thumb img,.ap-mixP-thumb .ap-texpal-color{width:100%;height:100%;object-fit:cover;border-radius:3px}` +
+    `.ap-mixP-syms{display:flex;justify-content:center;gap:10px}` +
+    `.ap-mixP-add{align-items:center;justify-content:center;font-size:22px;color:var(--mp-bg-5);` +
+    `background:rgba(0,0,0,.14);border-style:dashed}` +
+    `.ap-mixpre-ic{flex-shrink:0;background:none;border:none;color:var(--mp-bg-5);cursor:pointer;font:inherit;padding:0 2px}` +
     `.ap-mixpre-ic:hover{color:#fff}` +
+    `.ap-mixpre-editor{padding:0 6px 4px}` +
+    `.ap-mixpre-hint{padding:8px 6px;opacity:.65;font-style:italic;text-align:center}` +
     `.ap-mixpre-ft{display:flex;gap:4px;padding:0 6px 6px}` +
     `.ap-mixpre-btn{flex:1;background:var(--mp-bg-2);border:1px solid var(--mp-bg-4);color:var(--mp-text);` +
     `border-radius:4px;cursor:pointer;font:inherit;padding:2px 0}` +
     `.ap-mixpre-btn:hover{background:var(--mp-bg-3)}` +
     `.ap-mixpre-btn.on{background:var(--mp-bg-4);border-color:var(--mp-accent)}` +
     `.ap-mixpre-status{padding:0 6px 4px;font-size:8px;opacity:.75;min-height:10px}` +
-    `.ap-mixpre-board{margin:2px 0 4px;padding:3px 4px;border:1px solid var(--mp-bg-3);border-radius:4px;` +
-    `background:rgba(0,0,0,.14)}` +
-    `.ap-mixpre-empty{opacity:.6;font-style:italic;padding:2px 3px}` +
-    // 🎯 board ĐỐI TƯỢNG (mode edit chọn từ 3D) — khung highlight cam (bg-5) phân biệt row.on accent vàng
+    // 🎯 board ĐỐI TƯỢNG (mode edit chọn từ 3D) — khung highlight cam (bg-5)
     `.ap-mixpre-edit{margin:2px 6px 4px;padding:3px 4px;border:1px solid var(--mp-bg-5);border-radius:4px;` +
     `background:rgba(242,169,59,.10)}` +
     `.ap-mixpre-edithd{display:flex;align-items:center;gap:4px;font-weight:600;margin-bottom:2px}` +
@@ -75,9 +79,8 @@ function ensurePresetCss(): void {
   document.head.appendChild(s)
 }
 
-// Vị trí khay ĐÃ KÉO (px, theo offset-parent) — MODULE-LEVEL vì instance panel bị dispose/new mỗi
-// _rebuildGUI (teardown Lab); biến module sống trọn session. null = chưa kéo (CSS góc trên-trái).
-// UI-only, reset khi reload — mirror ngữ nghĩa _palPos của PalettePanel.
+// Vị trí khay ĐÃ KÉO (px, theo offset-parent) — MODULE-LEVEL: instance panel dispose/new mỗi _rebuildGUI,
+// biến module sống trọn session. null = chưa kéo (CSS góc trên-trái). UI-only (reset khi reload).
 let floatPos: { left: number; top: number } | null = null
 
 // Target có cọ vẽ mask không (mirror _meshMatch manager): base/zone/đáy-vách hồ = có;
@@ -91,21 +94,25 @@ function paintableTarget(t: MixPaintTarget): boolean {
 export class MixPresetPanel {
   private presets: MixPreset[] = loadMixPresets()
   private activeId: string | null = null
-  private editId: string | null = null // preset đang mở bảng trộn ✎ (giữ qua render list)
   private ctx: APGuiCtx | null = null
-  private listEl: HTMLElement | null = null
+  private frameEl: HTMLElement | null = null // khung preset (ô vuông)
+  private editorEl: HTMLElement | null = null // editor rộng (khung lớp + slider + preview)
+  private readonly previewHost = document.createElement('div') // ô preview — Lab mount MixPreview vào (persist)
   private statusEl: HTMLElement | null = null
   private fileInput: HTMLInputElement | null = null
-  // 🪣🧽🎯 — 3 nút mode, sync class .on theo getMixBucketMode (tắt từ ngoài cũng cập nhật)
   private modeBtns: Partial<Record<'apply' | 'erase' | 'edit', HTMLButtonElement>> = {}
   private editSel: MixEditSel | null = null // 🎯 đối tượng đang chỉnh trong khay (board target thật)
   private editHost: HTMLElement | null = null
-  // 🖐 Kéo khay bằng header (mirror PalettePanel): phiên kéo (header chỉ để kéo — không còn collapse).
   private drag: { sx: number; sy: number; px: number; py: number; moved: boolean } | null = null
 
-  /** Preset đang CẦM (active) — nguồn CLONE cho 🪣 áp (Mảnh 3). */
+  /** Preset đang CHỌN (active) — nguồn 🪣 áp + đang sửa trong editor. */
   activePreset(): MixPreset | null {
     return this.presets.find((p) => p.id === this.activeId) ?? null
+  }
+
+  /** Ô preview (Lab mount MixPreview vào đây — element PERSIST qua select/_rebuildGUI). */
+  previewHostEl(): HTMLElement {
+    return this.previewHost
   }
 
   // Dựng DOM vào wrap (Lab gọi mỗi _rebuildGUI — wrap mới, instance + kho GIỮ).
@@ -115,41 +122,40 @@ export class MixPresetPanel {
     wrap.replaceChildren()
     const panel = document.createElement('div')
     panel.className = 'ap-mixpre'
-    // Header = NHÃN + tay kéo (NgQuan 2026-06-11 "V bung ra hết, không cần dropdown"): bỏ collapse —
-    // bật khay (V / nút 🧱) = panel hiện ĐẦY ĐỦ; tắt = ẩn cả wrap (Lab _setMixTrayShown).
     const hd = document.createElement('div')
     hd.className = 'ap-mixpre-hd'
     const ttl = document.createElement('span')
-    ttl.textContent = '🧱' // symbol-only (NgQuan đổi 🎛→🧱; né trùng Lab 🧪 / palette 🎨 trong khay tiện ích)
+    ttl.textContent = '🧱' // symbol-only (NgQuan; né trùng Lab 🧪 / palette 🎨 trong khay tiện ích)
     hd.append(ttl)
-    const body = document.createElement('div')
-    body.className = 'ap-mixpre-body'
     this._wireDrag(hd, wrap)
     if (floatPos) {
-      wrap.style.left = `${floatPos.left}px` // khôi phục vị trí đã kéo (instance new mỗi rebuild)
+      wrap.style.left = `${floatPos.left}px`
       wrap.style.top = `${floatPos.top}px`
     }
-    this.listEl = body
+    this.frameEl = document.createElement('div')
+    this.frameEl.className = 'ap-mixP-frame'
+    this.editorEl = document.createElement('div')
+    this.editorEl.className = 'ap-mixpre-editor'
     const editHost = document.createElement('div')
-    this.editHost = editHost // 🎯 board đối tượng (mode edit) — giữa list và status
+    this.editHost = editHost
     const st = document.createElement('div')
     st.className = 'ap-mixpre-status'
     this.statusEl = st
-    const ft = this._footer()
-    panel.append(hd, body, editHost, st, ft)
+    panel.append(hd, this.frameEl, this.editorEl, this._footer(), st, editHost)
     wrap.appendChild(panel)
-    ctx.registerMixBucketSync?.(() => this._syncModeBtns()) // mode tắt từ ngoài (Move/Pick/ESC) → bỏ highlight
-    ctx.registerMixEditOpen?.((sel) => this._openEditSel(sel)) // 🎯 click đích có mix → board vào khay
-    this._renderList()
-    this._renderEdit() // _rebuildGUI giữ board đối tượng đang mở
-    this._syncPreview() // 🧪 _rebuildGUI giữ editor preset mở → dựng lại tấm preview
+    ctx.registerMixBucketSync?.(() => this._syncModeBtns())
+    ctx.registerMixEditOpen?.((sel) => this._openEditSel(sel))
+    this._renderFrame()
+    this._renderEditor()
+    this._renderEdit()
   }
 
   dispose(): void {
-    this.ctx?.setMixPreview?.(null) // 🧪 gỡ tấm preview trước khi buông ctx
+    this.ctx?.setMixPreview?.(null)
     this.fileInput?.remove()
     this.fileInput = null
-    this.listEl = null
+    this.frameEl = null
+    this.editorEl = null
     this.statusEl = null
     this.editHost = null
     this.editSel = null
@@ -160,7 +166,11 @@ export class MixPresetPanel {
     if (this.statusEl) this.statusEl.textContent = msg
   }
 
-  // ── 🖐 Kéo khay (header) — dời WRAP float (ô preview bên phải đi theo); <4px = click thu/mở ──────
+  private _save(): void {
+    saveMixPresets(this.presets)
+  }
+
+  // ── 🖐 Kéo khay (header) — dời WRAP float (editor + preview đi theo) ─────────────────────────────
   private _wireDrag(hd: HTMLElement, wrap: HTMLElement): void {
     hd.title = 'Mix presets (V hiện/ẩn) — kéo để dời khay'
     hd.addEventListener('pointerdown', (e) => this._dragStart(e, wrap, hd))
@@ -189,7 +199,7 @@ export class MixPresetPanel {
     const dy = e.clientY - d.sy
     if (!d.moved && dx * dx + dy * dy < 16) return // <4px = chưa coi là kéo
     d.moved = true
-    floatPos = { left: d.px + dx, top: d.py + dy } // module-level — giữ qua _rebuildGUI
+    floatPos = { left: d.px + dx, top: d.py + dy }
     wrap.style.left = `${floatPos.left}px`
     wrap.style.top = `${floatPos.top}px`
   }
@@ -200,76 +210,120 @@ export class MixPresetPanel {
     if (hd.hasPointerCapture(e.pointerId)) hd.releasePointerCapture(e.pointerId)
   }
 
-  private _save(): void {
-    saveMixPresets(this.presets)
-  }
-
-  // 🔎 Đồng bộ Ô PREVIEW (canvas bên phải khay) theo editor đang mở (✎): mở = preview CHÍNH preset.mix
-  // (slider live); đóng/xóa = ẩn ô. Gọi lại sau commit board (đổi texture/rule = structural → rebuild material).
+  // 🔎 Ô preview = mix của preset đang chọn (slider live). Không chọn = ẩn ô.
   private _syncPreview(): void {
-    const p = this.presets.find((q) => q.id === this.editId) ?? null
-    this.ctx?.setMixPreview?.(p ? p.mix : null)
+    this.ctx?.setMixPreview?.(this.activePreset()?.mix ?? null)
   }
 
-  private _renderList(): void {
-    const list = this.listEl
-    if (!list) return
-    list.replaceChildren()
-    if (this.presets.length === 0) {
-      const empty = document.createElement('div')
-      empty.className = 'ap-mixpre-empty'
-      empty.textContent = 'Chưa có preset — bấm ＋'
-      list.appendChild(empty)
-      return
-    }
-    for (const p of this.presets) {
-      list.appendChild(this._row(p))
-      if (this.editId === p.id) list.appendChild(this._editBoard(p))
+  // ── KHUNG PRESET — ô vuông (tên trên · thumb · ✎🗑 dưới); ô + thêm preset ───────────────────────
+  private _renderFrame(): void {
+    const frame = this.frameEl
+    if (!frame) return
+    frame.replaceChildren()
+    const n = Math.max(PRESET_MIN_SLOTS, this.presets.length + 1)
+    for (let i = 0; i < n; i++) {
+      frame.appendChild(
+        i < this.presets.length ? this._presetCard(this.presets[i]) : this._addCard()
+      )
     }
   }
 
-  // 1 hàng preset: [thumb base][tên (dblclick = đổi)][✎][🗑]. Click hàng = CẦM (active).
-  private _row(p: MixPreset): HTMLElement {
-    const row = document.createElement('div')
-    row.className = p.id === this.activeId ? 'ap-mixpre-row on' : 'ap-mixpre-row'
-    row.addEventListener('click', () => {
-      this.activeId = p.id
-      // đang cầm 🪣 → đổi "đạn" sang preset mới (manager tự bake phiên ref của preset cũ)
-      if (this.ctx?.getMixBucketMode?.() === 'apply')
-        this.ctx.setMixBucket?.({ mode: 'apply', src: p.mix })
-      this._renderList()
-    })
-    const name = document.createElement('span')
-    name.className = 'ap-mixpre-name'
+  // 1 ô preset: tên (dblclick đổi) trên · thumb base giữa · ✎(đổi tên)/🗑(xóa) dưới. Bấm ô = chọn → editor.
+  private _presetCard(p: MixPreset): HTMLElement {
+    const card = document.createElement('button')
+    card.type = 'button'
+    card.className = p.id === this.activeId ? 'ap-mixP-card on' : 'ap-mixP-card'
+    card.addEventListener('click', () => this._select(p))
+    const name = document.createElement('div')
+    name.className = 'ap-mixP-name'
     name.textContent = p.name
-    name.title = `${p.name} — dblclick đổi tên`
+    name.title = `${p.name} — bấm chọn · dblclick đổi tên`
     name.addEventListener('dblclick', (e) => {
       e.stopPropagation()
       this._renameInline(p, name)
     })
-    const edit = this._icon(
-      '✎',
-      'Sửa preset (bảng trộn — ô preview hiện bên phải khay, lưu thẳng kho)',
-      () => {
-        this.editId = this.editId === p.id ? null : p.id
-        this._renderList()
-        this._syncPreview() // 🧪 mở = dựng tấm, đóng = gỡ
-      }
+    const thumb = document.createElement('div')
+    thumb.className = 'ap-mixP-thumb'
+    thumb.appendChild(texPreviewEl(p.mix.base))
+    const syms = document.createElement('div')
+    syms.className = 'ap-mixP-syms'
+    syms.append(
+      this._icon('✎', 'Đổi tên preset', () => this._renameInline(p, name)),
+      this._icon('🗑', 'Xóa preset (bề mặt đã áp giữ nguyên — CLONE)', () => this._delete(p))
     )
-    const del = this._icon('🗑', 'Xóa preset (đối tượng đã áp giữ nguyên — CLONE)', () => {
-      if (!window.confirm(`Xóa preset "${p.name}"? (bề mặt đã áp giữ nguyên — clone riêng)`)) return
-      // đang cầm 🪣 chính preset này → buông xô trước (manager bake refs về clone — không mồ côi)
-      if (this.activeId === p.id && this.ctx?.getMixBucketMode?.() === 'apply')
-        this.ctx.setMixBucket?.(null)
-      this.presets = this.presets.filter((q) => q.id !== p.id)
-      if (this.activeId === p.id) this.activeId = null
-      if (this.editId === p.id) this.editId = null
+    card.append(name, thumb, syms)
+    return card
+  }
+
+  // Ô + thêm preset (như ô + của khung lớp). Tạo preset mới + chọn ngay.
+  private _addCard(): HTMLElement {
+    const card = document.createElement('button')
+    card.type = 'button'
+    card.className = 'ap-mixP-card ap-mixP-add'
+    card.textContent = '+'
+    card.title = 'Tạo preset mới'
+    card.addEventListener('click', () => {
+      const p: MixPreset = {
+        id: newPresetId(),
+        name: `Preset ${this.presets.length + 1}`,
+        mix: makeGroundMixParams('grass-o'),
+      }
+      this.presets.push(p)
       this._save()
-      this._renderList()
-      this._syncPreview() // 🧪 xóa preset đang ✎ → gỡ tấm
+      this._select(p)
     })
-    row.append(texPreviewEl(p.mix.base), name, edit, del)
-    return row
+    return card
+  }
+
+  // Chọn preset → active + nạp vào editor + preview; đang cầm 🪣 thì đổi "đạn" sang preset mới.
+  private _select(p: MixPreset): void {
+    this.activeId = p.id
+    if (this.ctx?.getMixBucketMode?.() === 'apply')
+      this.ctx.setMixBucket?.({ mode: 'apply', src: p.mix })
+    this._renderFrame()
+    this._renderEditor()
+    this._syncPreview()
+  }
+
+  private _delete(p: MixPreset): void {
+    if (!window.confirm(`Xóa preset "${p.name}"? (bề mặt đã áp giữ nguyên — clone riêng)`)) return
+    if (this.activeId === p.id && this.ctx?.getMixBucketMode?.() === 'apply')
+      this.ctx.setMixBucket?.(null) // buông xô trước (manager bake refs về clone — không mồ côi)
+    this.presets = this.presets.filter((q) => q.id !== p.id)
+    if (this.activeId === p.id) this.activeId = null
+    this._save()
+    this._renderFrame()
+    this._renderEditor()
+    this._syncPreview()
+  }
+
+  // ── EDITOR rộng — khung lớp 4 ô + slider trái | preview phải (buildMixPresetEditor) ─────────────
+  private _renderEditor(): void {
+    const host = this.editorEl
+    if (!host) return
+    host.replaceChildren()
+    const p = this.activePreset()
+    const ctx = this.ctx
+    if (!p || !ctx) {
+      const hint = document.createElement('div')
+      hint.className = 'ap-mixpre-hint'
+      hint.textContent = 'Chọn 1 ô preset ở trên để sửa các lớp'
+      host.appendChild(hint)
+      return
+    }
+    buildMixPresetEditor(
+      host,
+      ctx,
+      p.mix,
+      () => {
+        // commit (đổi lớp/texture/slider) = lưu kho + cập nhật thumb ô preset + preview. KHÔNG dựng lại
+        // editor (slider đang kéo) — buildMixPresetEditor tự redraw nội bộ khi thêm/xóa/đổi texture.
+        this._save()
+        this._renderFrame()
+        this._syncPreview()
+      },
+      this.previewHost
+    )
   }
 
   private _icon(sym: string, title: string, onClick: () => void): HTMLButtonElement {
@@ -300,62 +354,16 @@ export class MixPresetPanel {
     inp.addEventListener('blur', () => {
       p.name = inp.value.trim() || p.name
       this._save()
-      this._renderList()
+      this._renderFrame()
     })
     name.replaceChildren(inp)
     inp.focus()
     inp.select()
   }
 
-  // Bảng trộn sửa preset — target {wallMix} để hiện CẢ Quy luật/Trọng lực (preset mang rule sẵn;
-  // mặt nằm tự bỏ qua rule khi render). paintable=false (preset không có mặt 3D để cọ).
-  // commit = save kho + vẽ lại hàng (thumb base đổi) — KHÔNG đụng scene (CLONE: đối tượng đã áp giữ nguyên).
-  private _editBoard(p: MixPreset): HTMLElement {
-    const box = document.createElement('div')
-    box.className = 'ap-mixpre-board'
-    if (this.ctx)
-      buildMixBoard(box, this.ctx, { wallMix: p.mix }, p.mix, false, () => {
-        this._save()
-        this._renderList()
-        this._syncPreview() // 🧪 structural (đổi texture/rule) → tấm rebuild material; slider thường = live sẵn
-      })
-    return box
-  }
-
   private _footer(): HTMLElement {
     const ft = document.createElement('div')
     ft.className = 'ap-mixpre-ft'
-    const add = this._btn('＋ Mới', 'Tạo preset mới (sửa bằng ✎)', () => {
-      const p: MixPreset = {
-        id: newPresetId(),
-        name: `Preset ${this.presets.length + 1}`,
-        mix: makeGroundMixParams('grass-o'),
-      }
-      this.presets.push(p)
-      this.activeId = p.id
-      this.editId = p.id
-      this._save()
-      this._renderList()
-      this._syncPreview() // 🧪 preset mới mở editor luôn → tấm hiện ngay
-    })
-    const exp = this._btn(
-      '⬇',
-      'Export JSON (localStorage per-origin — file là đường chuyển máy)',
-      () => this._export()
-    )
-    const imp = this._btn('⬆', 'Import JSON (merge vào kho — id trùng tự cấp mới)', () =>
-      this._ensureFileInput().click()
-    )
-    ft.append(add, exp, imp)
-    const wrap = document.createElement('div')
-    wrap.append(ft, this._modesRow())
-    return wrap
-  }
-
-  // Hàng 3 mode click-3D + ✨ toggle viền sáng hover. Tách khỏi _footer (rule-50).
-  private _modesRow(): HTMLElement {
-    const modes = document.createElement('div')
-    modes.className = 'ap-mixpre-ft'
     const ap = this._btn(
       '🪣 Áp',
       'Cầm preset đang chọn — click đích 3D để áp (REF live trong phiên; buông xô = chốt clone riêng). ESC/chuột phải thoát',
@@ -371,13 +379,19 @@ export class MixPresetPanel {
     )
     this.modeBtns = { apply: ap, erase: er, edit: ed }
     this._syncModeBtns()
-    // (✨ hover ghost đã DỜI ra khay tiện ích góc trên-trái — Space; độc lập mode xô)
-    modes.append(ap, er, ed)
-    return modes
+    const exp = this._btn(
+      '⬇',
+      'Export JSON (localStorage per-origin — file là đường chuyển máy)',
+      () => this._export()
+    )
+    const imp = this._btn('⬆', 'Import JSON (merge vào kho — id trùng tự cấp mới)', () =>
+      this._ensureFileInput().click()
+    )
+    ft.append(ap, er, ed, exp, imp)
+    return ft
   }
 
-  // 🪣🧽🎯 Bật/tắt 1 mode (bấm lại nút đang on = tắt). 'apply' cần preset active; manager tự bake
-  // phiên apply cũ khi đổi mode (REF → clone riêng từng bề mặt).
+  // 🪣🧽🎯 Bật/tắt 1 mode (bấm lại nút đang on = tắt). 'apply' cần preset active; manager tự bake phiên cũ.
   private _setMode(mode: 'apply' | 'erase' | 'edit'): void {
     if (this.ctx?.getMixBucketMode?.() === mode) {
       this.ctx.setMixBucket?.(null)
@@ -390,15 +404,14 @@ export class MixPresetPanel {
     this._syncModeBtns()
   }
 
-  // Cầm 🪣 với preset active — thiếu thì nhắc. Tách khỏi _setMode (complexity ≤10).
   private _armApply(): void {
     const p = this.activePreset()
     if (!p) {
-      this._flash('Chọn 1 preset trước (click hàng) rồi mới 🪣')
+      this._flash('Chọn 1 ô preset trước rồi mới 🪣')
       return
     }
     this.ctx?.setMixBucket?.({ mode: 'apply', src: p.mix })
-    this._flash(`🪣 ${p.name} — click đích 3D (✎ chỉnh = live trên bề mặt; buông xô = chốt)`)
+    this._flash(`🪣 ${p.name} — click đích 3D (sửa lớp = live trên bề mặt; buông xô = chốt)`)
   }
 
   private _syncModeBtns(): void {
@@ -407,7 +420,7 @@ export class MixPresetPanel {
   }
 
   // 🎯 Click đích có mix (mode edit) → board ĐỐI TƯỢNG vào khay: target thật (zone/G0/hồ = CÓ cọ vẽ),
-  // commit đúng hệ (build = ctx.build / site = applySite). ✕ đóng tay; chọn đích khác = board chuyển.
+  // commit đúng hệ. Giữ buildMixBoard (board stack — đối tượng thật, có cọ; khác editor preset rộng).
   private _openEditSel(sel: MixEditSel): void {
     this.editSel = sel
     this._renderEdit()
@@ -469,7 +482,7 @@ export class MixPresetPanel {
     inp.style.display = 'none'
     inp.addEventListener('change', () => {
       const f = inp.files?.[0]
-      inp.value = '' // chọn lại cùng file lần sau vẫn bắn change
+      inp.value = ''
       if (f) void this._import(f)
     })
     document.body.appendChild(inp)
@@ -482,7 +495,7 @@ export class MixPresetPanel {
       const got = importMixPresetsJson(await f.text(), this.presets)
       this.presets.push(...got)
       this._save()
-      this._renderList()
+      this._renderFrame()
       this._flash(`Import ${got.length} preset từ ${f.name}`)
     } catch (e) {
       this._flash(`Import lỗi: ${e instanceof Error ? e.message : String(e)}`)

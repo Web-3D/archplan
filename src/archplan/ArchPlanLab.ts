@@ -739,7 +739,7 @@ export class ArchPlanLab extends BaseWorld {
   private _uiHotkey(e: KeyboardEvent): boolean {
     if (this._isPlainX(e)) {
       e.preventDefault()
-      this.palette?.togglePanel()
+      this._setPaletteShown(!this._paletteShown) // ẩn/hiện CẢ bảng palette (đồng bộ nút 🎨 khay)
       return true
     }
     if (this._isPlainR(e)) {
@@ -2203,7 +2203,8 @@ export class ArchPlanLab extends BaseWorld {
         tileOf: (k) => GROUND_TEX_SPEC[k]?.tile ?? 2,
       })
       void this._mixPreview.init() // WebGPU init async — fallback màu hiện tới khi sẵn sàng
-      if (this.mixPreWrap) this._mixPreview.mount(this.mixPreWrap)
+      const host = this.mixPresetPanel?.previewHostEl()
+      if (host) this._mixPreview.mount(host) // 🔎 vào khung preview editor (bên phải cột slider)
     }
     this._mixPreview?.sync(mix)
   }
@@ -2219,7 +2220,9 @@ export class ArchPlanLab extends BaseWorld {
     this.mixPreWrap = wrap
     if (!this.mixPresetPanel) this.mixPresetPanel = new MixPresetPanel()
     this.mixPresetPanel.build(wrap, ctx)
-    this._mixPreview?.mount(wrap) // 🔎 ô preview sống qua rebuild — gắn lại vào wrap mới (giữ WebGPU context)
+    // 🔎 ô preview gắn vào KHUNG previewHost của panel (bên phải cột slider editor) — element persist qua
+    // select/_rebuildGUI nên canvas WebGPU giữ nguyên (chỉ re-parent khi editor dựng lại).
+    this._mixPreview?.mount(this.mixPresetPanel.previewHostEl())
   }
 
   // 🧰 KHAY TIỆN ÍCH góc TRÊN-TRÁI (NgQuan 2026-06-11 — gom nút float rải rác về 1 thanh icon đều):

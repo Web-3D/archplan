@@ -37,10 +37,7 @@ export class PalettePanel {
   private _palKey: ((e: KeyboardEvent) => void) | null = null
   private _palSearchInput: HTMLInputElement | null = null
   private _swatchGrid: HTMLElement | null = null
-  private _panelBody: HTMLElement | null = null // body panel (cur + lưới swatch) — toggle thả xuống (phím X)
-  private _panelTtl: HTMLButtonElement | null = null // nút tiêu đề ▸/▾ 🎨 Palette
   private _palMix: HTMLElement | null = null // giếng pha ở tâm bảng — hiển thị màu cọ đang cầm
-  private _palMoved = false
   private _palDrag: {
     sx: number
     sy: number
@@ -89,23 +86,14 @@ export class PalettePanel {
     p.className = 'ap-scan-panel ap-palette-panel'
     const ttl = document.createElement('button')
     ttl.className = 'ap-scan-title'
-    ttl.textContent = '▾ 🎨' // symbol-only; mặc định MỞ (NgQuan 2026-06-11 "bật là bung ra luôn" — nút 🎨 khay = hiện/ẩn)
-    ttl.title =
-      'Palette màu — click thu/mở (X) · kéo để dời · nút 🎨 khay tiện ích = hiện/ẩn cả bảng'
+    ttl.textContent = '🎨' // symbol-only, KHÔNG caret: bỏ collapse nội bộ — ẩn/hiện CẢ bảng qua nút 🎨 khay / X
+    ttl.title = 'Palette màu — kéo để dời · ẩn/hiện cả bảng = nút 🎨 khay tiện ích hoặc phím X'
     const body = document.createElement('div')
     const cur = document.createElement('button')
     cur.className = 'ap-pal-current'
     cur.addEventListener('click', () => this._togglePaletteBrowser())
     this._palCurrentBtn = cur
-    this._panelBody = body
-    this._panelTtl = ttl
-    ttl.addEventListener('click', () => {
-      if (this._palMoved) {
-        this._palMoved = false // vừa kéo xong → bỏ qua toggle thu/mở lần này
-        return
-      }
-      this.togglePanel()
-    })
+    // Title = TAY KÉO (bỏ click thu/mở: khay tiện ích 🧰 + phím X giờ ẩn/hiện cả bảng, đồng bộ nút ngoài).
     ttl.addEventListener('pointerdown', (e) => this._palDragStart(e, p, ttl))
     ttl.addEventListener('pointermove', (e) => this._palDragMove(e))
     ttl.addEventListener('pointerup', (e) => this._palDragEnd(e, ttl))
@@ -158,17 +146,8 @@ export class PalettePanel {
     else this._openPaletteBrowser()
   }
 
-  /** Thả/thu MENU panel 🎨 Palette (body = lưới swatch) — gọi từ nút tiêu đề HOẶC phím tắt X (ArchPlanLab).
-   *  KHÁC _togglePaletteBrowser (popover tìm-kiếm-màu) — X mở menu thả xuống, không phải search. */
-  togglePanel(): void {
-    const body = this._panelBody
-    const ttl = this._panelTtl
-    if (!body || !ttl) return
-    const open = body.style.display !== 'none'
-    body.style.display = open ? 'none' : ''
-    ttl.textContent = `${open ? '▸' : '▾'} 🎨` // symbol-only như build()
-    if (open) this.closeBrowser() // thu menu → đóng luôn popover search nếu đang mở
-  }
+  // (togglePanel — collapse body nội bộ — ĐÃ BỎ 2026-06-11: ẩn/hiện CẢ bảng palette qua khay tiện ích 🧰
+  //  / phím X (Lab _setPaletteShown — đồng bộ nút 🎨 ngoài). Body luôn hiện khi bảng hiện.)
 
   // Mở popover browser bên phải panel: header + search + danh sách nhóm theo style.
   private _openPaletteBrowser(): void {
@@ -344,7 +323,6 @@ export class PalettePanel {
 
   private _palDragEnd(e: PointerEvent, title: HTMLElement): void {
     if (!this._palDrag) return
-    if (this._palDrag.moved) this._palMoved = true // chặn click thu/mở ngay sau kéo
     this._palDrag = null
     if (title.hasPointerCapture(e.pointerId)) title.releasePointerCapture(e.pointerId)
   }

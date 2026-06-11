@@ -75,7 +75,7 @@ const GROUND_OPTS: [string, GroundMaterialKey][] = [
 import type { APGuiCtx, MixPaintTarget } from './ctx'
 import { sameMixTarget } from './ctx' // so target mix (wrapper water/fence tạo mới mỗi build pane — KHÔNG ===)
 import { confirmPopup } from './roof-lab' // ↺ reset nét cọ mix — tái dùng popup confirm (ap-roof-confirm)
-import { GROUND_TEX_GROUPS, texPaletteRow } from './tex-palette' // 🎨 palette swatch thumb thay <select> 17 mục
+import { GROUND_TEX_GROUPS, texPaletteRow, texPreviewEl } from './tex-palette' // 🎨 palette swatch thumb + thumb đơn
 import { buildGrassTweak } from './tweak' // 🌿 slider chi tiết cỏ — DỜI vào Garden ▸ Grass (preview ở lại tab Lab)
 
 // onChange(value, commit): commit=false khi kéo (live), true khi buông/đổi select/tick.
@@ -579,8 +579,179 @@ function ensureMixCss(): void {
     // Scope HẸP .ap-ground-domain: chỉ hệ Ground (đừng lây Fence/Water itabs).
     '.ap-ground-domain .ap-zone-itabs>.ap-fence-itabs>.ap-tab-btn{background:rgba(62,47,28,.55);border-color:rgba(181,138,60,.3);color:#c9a877}' +
     '.ap-ground-domain .ap-zone-itabs>.ap-fence-itabs>.ap-tab-btn.ap-tab-active{background:var(--gr-bg-2);border-color:rgba(181,138,60,.55);border-bottom-color:transparent;color:var(--gr-text)}' +
-    '.ap-ground-domain .ap-zone-itabs>.ap-fence-isub{background:var(--gr-bg-2)}'
+    '.ap-ground-domain .ap-zone-itabs>.ap-fence-isub{background:var(--gr-bg-2)}' +
+    mixEditorCss(D)
   document.head.appendChild(s)
+}
+
+// 🎨 CSS EDITOR PRESET RỘNG (buildMixPresetEditor) — tách khỏi ensureMixCss giữ rule-50. D = scope host.
+function mixEditorCss(D: string): string {
+  return (
+    // Khung lớp = grid 4 cột cố định (ô trống = + to). Card lớp = thumb texture + số + ✕.
+    `${D}.ap-mixL-frame{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;` +
+    `padding:4px;border:1px solid var(--gr-bg-3);border-radius:4px;background:rgba(62,47,28,.35);margin:0 0 6px}` +
+    `${D}.ap-mixL-card{position:relative;aspect-ratio:1;display:flex;align-items:center;justify-content:center;` +
+    `padding:0;border:1px solid var(--gr-bg-4);border-radius:4px;background:var(--gr-bg-2);cursor:pointer;overflow:hidden}` +
+    `${D}.ap-mixL-card.on{border-color:var(--gr-accent);box-shadow:0 0 0 1px var(--gr-accent) inset}` +
+    `${D}.ap-mixL-card img,${D}.ap-mixL-card .ap-texpal-color{width:100%;height:100%;border-radius:0;object-fit:cover}` +
+    `${D}.ap-mixL-add{font-size:20px;color:var(--gr-bg-5);background:rgba(0,0,0,.12);border-style:dashed}` +
+    `${D}.ap-mixL-tag{position:absolute;top:1px;left:2px;font-size:8px;font-weight:700;color:#fff;` +
+    `text-shadow:0 0 2px #000;pointer-events:none}` +
+    `${D}.ap-mixL-del{position:absolute;top:0;right:1px;font-size:9px;color:#fff;text-shadow:0 0 2px #000;cursor:pointer}` +
+    `${D}.ap-mixL-del:hover{color:#ff9a9a}` +
+    // dưới khung lớp: cột slider (trái, co giãn) | ô preview (phải, cố định)
+    `${D}.ap-mixE-bottom{display:flex;gap:6px;align-items:flex-start}` +
+    `${D}.ap-mixE-left{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}` +
+    `${D}.ap-mixE-prev{flex:0 0 auto}` +
+    `${D}.ap-mixE-detail{margin:2px 0;padding:3px 4px;border:1px solid var(--gr-bg-3);border-radius:4px;background:rgba(0,0,0,.12)}` +
+    `${D}.ap-mixE-dlbl{font-size:9px;font-weight:600;color:var(--gr-bg-5);margin-bottom:2px}`
+  )
+}
+
+// 🎨 EDITOR PRESET dạng RỘNG (NgQuan 2026-06-11 redesign khay mix): KHUNG LỚP 4 ô cố định trên (ô trống =
+// + to, bấm = thêm lớp); dưới = cột SLIDER (trái: Nền chính + lớp đang chọn + 6-7 slider chung) | ô PREVIEW
+// (phải — caller mount MixPreview vào element trả về). target = {wallMix} (preset = mặt đứng → có Quy luật/
+// Trọng lực). commit = save preset (KHÔNG đụng scene — CLONE). Trả PREVIEW HOST (div phải) cho caller gắn canvas.
+export function buildMixPresetEditor(
+  host: HTMLElement,
+  ctx: APGuiCtx,
+  mix: GroundMixParams,
+  commit: () => void,
+  previewHost: HTMLElement
+): void {
+  ensureMixCss()
+  host.classList.add('ap-mix-host')
+  const target: MixPaintTarget = { wallMix: mix } // mặt đứng generic — board có Quy luật/Trọng lực
+  const st = { active: 0 }
+  const frame = document.createElement('div')
+  frame.className = 'ap-mixL-frame'
+  const left = document.createElement('div')
+  left.className = 'ap-mixE-left'
+  const redraw = (): void => {
+    if (st.active >= mix.slots.length) st.active = Math.max(0, mix.slots.length - 1)
+    _renderLayerFrame(frame, mix, st, { redraw, commit })
+    _renderEditorLeft(left, ctx, target, mix, st.active, { redraw, commit })
+  }
+  redraw()
+  const bottom = document.createElement('div')
+  bottom.className = 'ap-mixE-bottom'
+  previewHost.className = 'ap-mixE-prev'
+  bottom.append(left, previewHost)
+  host.append(frame, bottom)
+}
+
+// Khung lớp: 4 ô cố định — ô có lớp = card thumb, ô trống = + (bấm thêm lớp). Tách (rule-50).
+function _renderLayerFrame(
+  frame: HTMLElement,
+  mix: GroundMixParams,
+  st: { active: number },
+  cb: { redraw: () => void; commit: () => void }
+): void {
+  frame.replaceChildren()
+  for (let i = 0; i < 4; i++) {
+    frame.appendChild(
+      i < mix.slots.length ? _mixLayerCard(mix, i, st, cb) : _mixAddLayerCard(mix, cb)
+    )
+  }
+}
+
+// 1 card lớp: thumb texture (đại diện) + số + ✕ xóa. Bấm card = chọn lớp đang sửa (left detail theo nó).
+function _mixLayerCard(
+  mix: GroundMixParams,
+  i: number,
+  st: { active: number },
+  cb: { redraw: () => void; commit: () => void }
+): HTMLElement {
+  const card = document.createElement('button')
+  card.type = 'button'
+  card.className = i === st.active ? 'ap-mixL-card on' : 'ap-mixL-card'
+  card.appendChild(texPreviewEl(mix.slots[i].key))
+  const tag = document.createElement('span')
+  tag.className = 'ap-mixL-tag'
+  tag.textContent = String(i + 1)
+  const del = document.createElement('span')
+  del.className = 'ap-mixL-del'
+  del.textContent = '✕'
+  del.title = 'Xóa lớp'
+  del.addEventListener('click', (e) => {
+    e.stopPropagation()
+    mix.slots.splice(i, 1)
+    cb.redraw()
+    cb.commit()
+  })
+  card.append(tag, del)
+  card.addEventListener('click', () => {
+    st.active = i
+    cb.redraw()
+  })
+  return card
+}
+
+// Ô trống = + to (bấm = thêm lớp mới, tối đa 4). Tách (rule-50).
+function _mixAddLayerCard(
+  mix: GroundMixParams,
+  cb: { redraw: () => void; commit: () => void }
+): HTMLElement {
+  const card = document.createElement('button')
+  card.type = 'button'
+  card.className = 'ap-mixL-card ap-mixL-add'
+  card.textContent = '+'
+  card.title = 'Thêm lớp mix'
+  card.addEventListener('click', () => {
+    if (mix.slots.length >= 4) return
+    mix.slots.push({ key: 'construction-gravel', bias: 0.55, seed: 13.7 + mix.slots.length * 18 })
+    cb.redraw()
+    cb.commit()
+  })
+  return card
+}
+
+// Cột trái editor: Nền chính + (lớp đang chọn: texture + Ngưỡng + Quy luật) + 6-7 slider chung.
+function _renderEditorLeft(
+  left: HTMLElement,
+  ctx: APGuiCtx,
+  target: MixPaintTarget,
+  mix: GroundMixParams,
+  active: number,
+  cb: { redraw: () => void; commit: () => void }
+): void {
+  left.replaceChildren()
+  left.appendChild(mkMixBaseRow(mix, cb.commit))
+  if (mix.slots[active]) left.appendChild(_mixActiveDetail(ctx, target, mix, active, cb))
+  for (const s of mkMixSliders(ctx, target, mix, cb.commit)) left.appendChild(s)
+}
+
+// Chi tiết lớp đang chọn: nhãn + texture (palette + ✕ xóa) + Ngưỡng + Quy luật (mặt đứng). Tách (rule-50).
+function _mixActiveDetail(
+  ctx: APGuiCtx,
+  target: MixPaintTarget,
+  mix: GroundMixParams,
+  active: number,
+  cb: { redraw: () => void; commit: () => void }
+): HTMLElement {
+  const wrap = document.createElement('div')
+  wrap.className = 'ap-mixE-detail'
+  const lbl = document.createElement('div')
+  lbl.className = 'ap-mixE-dlbl'
+  lbl.textContent = `Lớp ${active + 1}`
+  wrap.append(lbl, mkSlotTexSel(mix, active, cb))
+  wrap.appendChild(
+    sliderRow(
+      'Ngưỡng',
+      0,
+      1,
+      0.05,
+      mix.slots[active].bias,
+      (v, c) => {
+        mix.slots[active].bias = v
+        ctx.tuneMixLive?.(target)
+        if (c) cb.commit()
+      },
+      1
+    )
+  )
+  if (isVerticalMixTarget(target)) wrap.appendChild(mkSlotRuleRow(mix.slots[active], cb.commit))
+  return wrap
 }
 
 // Registry Tabs hệ Ground: tabs[] (dispose) + mid (level→Tabs add/cut) + inst (`lv:op`→Tabs Z/C) cho navigate

@@ -41,11 +41,10 @@ function ensurePreviewCss(): void {
   const s = document.createElement('style')
   s.id = 'ap-mixprev-css'
   s.textContent =
-    // cột dính mép PHẢI panel khay (trong .ap-mixpre-float) — kéo khay = preview đi theo.
-    // Màu = vars --mp-* (palette OKLCH NgQuan, khai ở .ap-mixpre-float — PresetPanel); fallback nâu cũ.
-    `.ap-mixprev{position:absolute;left:100%;top:0;margin-left:4px;padding:4px;` +
-    `background:var(--mp-bg-1,#3e2f1c);border:1px solid var(--mp-bg-4,#b58a3c);border-radius:6px;` +
-    `box-shadow:0 4px 12px rgba(0,0,0,.45)}` +
+    // IN-FLOW trong ô preview của editor (.ap-mixE-prev — bên phải cột slider; redesign NgQuan 2026-06-11).
+    // Màu = vars --mp-* (palette OKLCH, khai ở .ap-mixpre-float — PresetPanel); fallback nâu cũ.
+    `.ap-mixprev{padding:4px;background:var(--mp-bg-1,#3e2f1c);border:1px solid var(--mp-bg-4,#b58a3c);` +
+    `border-radius:6px}` +
     `.ap-mixprev-ttl{font:600 10px/1.3 'Segoe UI',system-ui,sans-serif;color:var(--mp-text,#f5ead2);` +
     `margin:0 0 3px 2px}` +
     `.ap-mixprev canvas{display:block;width:${SIZE}px;height:${SIZE}px;border-radius:4px}`
