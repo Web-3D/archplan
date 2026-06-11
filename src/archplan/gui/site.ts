@@ -76,6 +76,7 @@ const GROUND_OPTS: [string, GroundMaterialKey][] = [
 import type { APGuiCtx, MixPaintTarget } from './ctx'
 import { sameMixTarget } from './ctx' // so target mix (wrapper water/fence tạo mới mỗi build pane — KHÔNG ===)
 import { confirmPopup } from './roof-lab' // ↺ reset nét cọ mix — tái dùng popup confirm (ap-roof-confirm)
+import { GROUND_TEX_GROUPS, texPaletteRow } from './tex-palette' // 🎨 palette swatch thumb thay <select> 17 mục
 import { buildGrassTweak } from './tweak' // 🌿 slider chi tiết cỏ — DỜI vào Garden ▸ Grass (preview ở lại tab Lab)
 
 // onChange(value, commit): commit=false khi kéo (live), true khi buông/đổi select/tick.
@@ -233,7 +234,7 @@ function mkBaseMixSection(ctx: APGuiCtx): HTMLElement {
     if (site.groundMix) buildMixBoard(wrap, ctx, 'base', site.groundMix)
     else
       wrap.appendChild(
-        selectRow(
+        texPaletteRow(
           'Surface',
           GROUND_OPTS,
           site.ground,
@@ -241,7 +242,7 @@ function mkBaseMixSection(ctx: APGuiCtx): HTMLElement {
             site.ground = v
             ctx.applySite(true)
           },
-          () => ctx.prefetchGroundTextures?.()
+          { groups: GROUND_TEX_GROUPS, onOpen: () => ctx.prefetchGroundTextures?.() }
         )
       )
   }
@@ -569,8 +570,6 @@ function ensureMixCss(): void {
     `${D}.ap-mix-row{display:flex;align-items:center;gap:5px;margin:0}` +
     `${D}.ap-mix-tag{flex:0 0 auto;width:15px;height:15px;display:flex;align-items:center;justify-content:center;` +
     `font-size:8px;border-radius:3px;background:var(--gr-bg-1);border:1px solid var(--gr-bg-4);color:var(--gr-bg-5);cursor:pointer}` +
-    `${D}.ap-mix-sel{flex:1;min-width:0;padding:1px 3px;border:1px solid var(--gr-bg-4);border-radius:3px;` +
-    `background:var(--gr-bg-2);color:var(--gr-text);font:9px ui-monospace,'Cascadia Mono',monospace;cursor:pointer}` +
     // khu slot = block tách bạch với 6 slider chung bên dưới (viền + nền nhẹ + bo)
     `${D}.ap-mix-slots{margin:4px 0 6px;padding:4px;border:1px solid var(--gr-bg-3);border-radius:4px;background:rgba(62,47,28,.35)}` +
     `${D}.ap-mix-layer{margin:3px 0;padding:3px 4px;border-left:2px solid transparent;border-radius:2px;cursor:pointer}` +
@@ -1081,23 +1080,23 @@ const MIX_RULE_OPTS: [string, '' | 'foot' | 'streak' | 'moss'][] = [
   ['Rêu ẩm (chân)', 'moss'],
 ]
 
-// 🎨 select đổi key slot HOẶC xóa lớp (option sentinel '__del' — gộp nút ✕ cũ vào dropdown để hàng gọn).
+// 🎨 pick đổi key slot HOẶC xóa lớp (sentinel '__del' — hàng danger cuối palette thay nút ✕ cũ).
 // commit = applySite (site) HOẶC ctx.build (tường building) — board dùng được cả 2 hệ.
 function onSlotSel(
   mix: GroundMixParams,
   i: number,
-  sel: HTMLSelectElement,
+  v: string,
   redraw: () => void,
   commit: () => void
 ): void {
-  if (sel.value === DEL_SLOT) {
+  if (v === DEL_SLOT) {
     mix.slots.splice(i, 1)
     redraw()
     commit()
     return
   }
-  mix.slots[i].key = sel.value as GroundMaterialKey
-  commit() // _groundMixFor tự load lazy ĐÚNG key thiếu — không prefetch cả kho (lag dropdown)
+  mix.slots[i].key = v as GroundMaterialKey
+  commit() // _groundMixFor tự load lazy ĐÚNG key thiếu — không prefetch cả kho (lag palette)
 }
 
 // 🎨 1 SLOT lớp mix (NgQuan 2026-06-11 "bỏ button cọ + ✕"): tag số (click → chọn slot vẽ) + select texture
@@ -1124,14 +1123,7 @@ function mkMixSlotRow(
   const paint = ctx.getMixPaint?.()
   if (paint && sameMixTarget(paint.target, target) && paint.slot === i)
     tag.classList.add('ap-mix-brush-on')
-  const sel = document.createElement('select')
-  sel.className = 'ap-mix-sel'
-  for (const [label, k] of MIX_TEX_OPTS) sel.appendChild(new Option(label, k))
-  sel.appendChild(new Option('✕ Xóa lớp', DEL_SLOT))
-  sel.value = slot.key
-  sel.addEventListener('click', (e) => e.stopPropagation())
-  sel.addEventListener('change', () => onSlotSel(mix, i, sel, cb.redraw, cb.commit))
-  head.append(tag, sel)
+  head.append(tag, mkSlotTexSel(mix, i, cb))
   const sl = sliderRow(
     'Ngưỡng',
     0,
@@ -1149,6 +1141,27 @@ function mkMixSlotRow(
   box.append(head, sl)
   if (isVerticalMixTarget(target)) box.appendChild(mkSlotRuleRow(mix.slots[i], cb.commit))
   return box
+}
+
+// 🎨 Control chọn texture 1 slot: palette swatch (nhóm kho) + hàng danger '✕ Xóa lớp' (sentinel).
+// stopPropagation — click palette không nhảy chọn slot. Tách khỏi mkMixSlotRow (rule-50).
+function mkSlotTexSel(
+  mix: GroundMixParams,
+  i: number,
+  cb: { redraw: () => void; commit: () => void }
+): HTMLElement {
+  const sel = texPaletteRow<GroundMaterialKey | typeof DEL_SLOT>(
+    '',
+    MIX_TEX_OPTS,
+    mix.slots[i].key,
+    (v) => onSlotSel(mix, i, v, cb.redraw, cb.commit),
+    { groups: GROUND_TEX_GROUPS, danger: ['✕ Xóa lớp', DEL_SLOT] }
+  )
+  sel.style.flex = '1'
+  sel.style.minWidth = '0'
+  sel.style.marginBottom = '0'
+  sel.addEventListener('click', (e) => e.stopPropagation())
+  return sel
 }
 
 // 🧱 Hàng "Quy luật" 1 slot (CHỈ mặt đứng — vách hồ/tường rào/tường building): rule bake vào graph →
@@ -1286,13 +1299,7 @@ function buildMixBoard(
     syncBrush()
   }
   ctx.registerMixPaintSync?.(redraw) // 🖌 mode vẽ tắt từ ngoài (Move/Pick) → bỏ highlight tag + nút 🖌
-  // KHÔNG prefetch cả kho khi mở select (9 bộ × 4 map 2K decode = đứng hình) — _groundMixFor load lazy đúng key
-  pane.appendChild(
-    selectRow('Nền chính', MIX_TEX_OPTS, mix.base, (v) => {
-      mix.base = v
-      commit()
-    })
-  )
+  pane.appendChild(mkMixBaseRow(mix, commit))
   redraw()
   const brushRows: HTMLElement[] = []
   if (paintable) {
@@ -1301,6 +1308,21 @@ function buildMixBoard(
     brushRows.push(...brush.rows)
   }
   pane.append(list, addBtn, ...brushRows, ...mkMixSliders(ctx, target, mix, commit))
+}
+
+// 🎨 Hàng "Nền chính" board mix (palette swatch theo nhóm kho). KHÔNG prefetch cả kho khi mở palette
+// (9 bộ × 4 map 2K decode = đứng hình) — _groundMixFor load lazy đúng key. Tách khỏi buildMixBoard (rule-50).
+function mkMixBaseRow(mix: GroundMixParams, commit: () => void): HTMLElement {
+  return texPaletteRow(
+    'Nền chính',
+    MIX_TEX_OPTS,
+    mix.base,
+    (v) => {
+      mix.base = v
+      commit()
+    },
+    { groups: GROUND_TEX_GROUPS }
+  )
 }
 
 // 🎨 Section MIX gắn được vào pane BẤT KỲ (đáy/vách hồ, tường rào, tường BUILDING — stage 4): toggle + board.
@@ -1369,7 +1391,7 @@ function buildSurfaceZoneBody(
   if (layer.mix) buildMixBoard(pane, ctx, layer, layer.mix)
   else
     pane.appendChild(
-      selectRow(
+      texPaletteRow(
         'Surface',
         GROUND_OPTS,
         layer.material,
@@ -1377,7 +1399,7 @@ function buildSurfaceZoneBody(
           layer.material = v
           ctx.applySite(true)
         },
-        () => ctx.prefetchGroundTextures?.()
+        { groups: GROUND_TEX_GROUPS, onOpen: () => ctx.prefetchGroundTextures?.() }
       )
     )
   pane.appendChild(groundFormRow(ctx, layer)) // circle=đường kính, ellipse=trục X
@@ -1662,6 +1684,7 @@ function waterSlider(
 }
 
 // Hàng chọn chất liệu. Đổi → applySite (rebuild để áp material). opts: floor/wall = None+Caro; edge = None.
+// ≥2 lựa chọn → palette swatch (2 cát Thái gần màu — thumb phân biệt bằng mắt); 1 mục (edge) → select cũ.
 type MatKey = 'floorMaterial' | 'wallMaterial' | 'edgeMaterial'
 function materialRow(
   host: HTMLElement,
@@ -1671,11 +1694,12 @@ function materialRow(
   key: MatKey,
   opts: [string, WaterMaterialKey][] = MATERIAL_OPTS
 ): void {
+  const set = (v: WaterMaterialKey): void => {
+    w[key] = v
+    ctx.applySite(true)
+  }
   host.appendChild(
-    selectRow(label, opts, w[key], (v) => {
-      w[key] = v
-      ctx.applySite(true)
-    })
+    opts.length > 1 ? texPaletteRow(label, opts, w[key], set) : selectRow(label, opts, w[key], set)
   )
 }
 
@@ -2033,7 +2057,7 @@ function buildFenceControls(body: HTMLElement, ctx: APGuiCtx, f: FenceConfig): v
     ['Stone', 'stone'],
   ]
   body.appendChild(
-    selectRow('Wall mat', wallTexOpts, f.wallTex ?? 'plain', (v) => {
+    texPaletteRow('Wall mat', wallTexOpts, f.wallTex ?? 'plain', (v) => {
       f.wallTex = v
       ctx.applySite(true)
     })
