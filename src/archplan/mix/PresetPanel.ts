@@ -34,35 +34,42 @@ function ensurePresetCss(): void {
   const s = document.createElement('style')
   s.id = 'ap-mixpre-css'
   s.textContent =
-    // góc trên-trái (drawer Tools đã dời xuống đáy); z 155 > palette 150 — ô preview mở bên phải không chìm
-    `.ap-mixpre-float{position:absolute;top:6px;left:6px;z-index:155}` +
-    `.ap-mixpre{width:196px;background:#3e2f1c;border:1px solid #b58a3c;border-radius:6px;` +
-    `color:#f5ead2;font:10px/1.3 'Segoe UI',system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.45)}` +
+    // góc trên-trái (drawer Tools đã dời xuống đáy); z 155 > palette 150 — ô preview mở bên phải không chìm.
+    // 🎨 Palette OKLCH NgQuan 2026-06-11 (Atelier): bg-1 nền · bg-2..4 surface · bg-5 highlight · accent · text
+    // — khai báo --mp-* tại float root (khay + ô preview cùng ăn); đổi palette sau = sửa 1 dòng vars.
+    `.ap-mixpre-float{position:absolute;top:6px;left:6px;z-index:155;` +
+    `--mp-bg-1:#3a1e0c;--mp-bg-2:#5e3110;--mp-bg-3:#924c16;--mp-bg-4:#c8741f;` +
+    `--mp-bg-5:#f2a93b;--mp-accent:#e8c547;--mp-text:#fbebcf}` +
+    // board buildMixBoard BÊN TRONG khay (.ap-mix-host khai --gr-* trên chính nó) → đè scoped cùng palette
+    `.ap-mixpre-float .ap-mix-host{--gr-bg-1:#3a1e0c;--gr-bg-2:#5e3110;--gr-bg-3:#924c16;` +
+    `--gr-bg-4:#c8741f;--gr-bg-5:#f2a93b;--gr-accent:#e8c547;--gr-text:#fbebcf}` +
+    `.ap-mixpre{width:196px;background:var(--mp-bg-1);border:1px solid var(--mp-bg-4);border-radius:6px;` +
+    `color:var(--mp-text);font:10px/1.3 'Segoe UI',system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.45)}` +
     `.ap-mixpre-hd{display:flex;align-items:center;gap:4px;padding:3px 6px;cursor:pointer;font-weight:600}` +
     `.ap-mixpre-body{padding:2px 6px 4px;display:flex;flex-direction:column;gap:2px;` +
     `max-height:46vh;overflow-y:auto}` +
     `.ap-mixpre-row{display:flex;align-items:center;gap:5px;padding:2px 3px;border:1px solid transparent;` +
     `border-radius:4px;cursor:pointer}` +
-    `.ap-mixpre-row.on{border-color:#b5532a;background:rgba(181,83,42,.18)}` +
+    `.ap-mixpre-row.on{border-color:var(--mp-accent);background:rgba(232,197,71,.14)}` +
     `.ap-mixpre-row img,.ap-mixpre-row .ap-texpal-color{width:18px;height:18px;border-radius:3px;flex-shrink:0}` +
     `.ap-mixpre-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}` +
-    `.ap-mixpre-name input{width:100%;font:inherit;background:#2c2114;color:inherit;` +
-    `border:1px solid #b58a3c;border-radius:2px}` +
-    `.ap-mixpre-ic{flex-shrink:0;background:none;border:none;color:#e0b860;cursor:pointer;` +
+    `.ap-mixpre-name input{width:100%;font:inherit;background:var(--mp-bg-2);color:inherit;` +
+    `border:1px solid var(--mp-bg-4);border-radius:2px}` +
+    `.ap-mixpre-ic{flex-shrink:0;background:none;border:none;color:var(--mp-bg-5);cursor:pointer;` +
     `font:inherit;padding:0 2px}` +
     `.ap-mixpre-ic:hover{color:#fff}` +
     `.ap-mixpre-ft{display:flex;gap:4px;padding:0 6px 6px}` +
-    `.ap-mixpre-btn{flex:1;background:#5c4423;border:1px solid #b58a3c;color:#f5ead2;border-radius:4px;` +
-    `cursor:pointer;font:inherit;padding:2px 0}` +
-    `.ap-mixpre-btn:hover{background:#6a4a24}` +
-    `.ap-mixpre-btn.on{background:#b5532a;border-color:#e0b860}` +
+    `.ap-mixpre-btn{flex:1;background:var(--mp-bg-2);border:1px solid var(--mp-bg-4);color:var(--mp-text);` +
+    `border-radius:4px;cursor:pointer;font:inherit;padding:2px 0}` +
+    `.ap-mixpre-btn:hover{background:var(--mp-bg-3)}` +
+    `.ap-mixpre-btn.on{background:var(--mp-bg-4);border-color:var(--mp-accent)}` +
     `.ap-mixpre-status{padding:0 6px 4px;font-size:8px;opacity:.75;min-height:10px}` +
-    `.ap-mixpre-board{margin:2px 0 4px;padding:3px 4px;border:1px solid #8a6a2f;border-radius:4px;` +
+    `.ap-mixpre-board{margin:2px 0 4px;padding:3px 4px;border:1px solid var(--mp-bg-3);border-radius:4px;` +
     `background:rgba(0,0,0,.14)}` +
     `.ap-mixpre-empty{opacity:.6;font-style:italic;padding:2px 3px}` +
-    // 🎯 board ĐỐI TƯỢNG (mode edit chọn từ 3D) — khung accent phân biệt với editor preset
-    `.ap-mixpre-edit{margin:2px 6px 4px;padding:3px 4px;border:1px solid #b5532a;border-radius:4px;` +
-    `background:rgba(181,83,42,.10)}` +
+    // 🎯 board ĐỐI TƯỢNG (mode edit chọn từ 3D) — khung highlight cam (bg-5) phân biệt row.on accent vàng
+    `.ap-mixpre-edit{margin:2px 6px 4px;padding:3px 4px;border:1px solid var(--mp-bg-5);border-radius:4px;` +
+    `background:rgba(242,169,59,.10)}` +
     `.ap-mixpre-edithd{display:flex;align-items:center;gap:4px;font-weight:600;margin-bottom:2px}` +
     `.ap-mixpre-edithd span{flex:1}`
   document.head.appendChild(s)

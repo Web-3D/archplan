@@ -41,10 +41,13 @@ function ensurePreviewCss(): void {
   const s = document.createElement('style')
   s.id = 'ap-mixprev-css'
   s.textContent =
-    // cột dính mép PHẢI panel khay (trong .ap-mixpre-float) — kéo khay = preview đi theo
-    `.ap-mixprev{position:absolute;left:100%;top:0;margin-left:4px;padding:4px;background:#3e2f1c;` +
-    `border:1px solid #b58a3c;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.45)}` +
-    `.ap-mixprev-ttl{font:600 10px/1.3 'Segoe UI',system-ui,sans-serif;color:#f5ead2;margin:0 0 3px 2px}` +
+    // cột dính mép PHẢI panel khay (trong .ap-mixpre-float) — kéo khay = preview đi theo.
+    // Màu = vars --mp-* (palette OKLCH NgQuan, khai ở .ap-mixpre-float — PresetPanel); fallback nâu cũ.
+    `.ap-mixprev{position:absolute;left:100%;top:0;margin-left:4px;padding:4px;` +
+    `background:var(--mp-bg-1,#3e2f1c);border:1px solid var(--mp-bg-4,#b58a3c);border-radius:6px;` +
+    `box-shadow:0 4px 12px rgba(0,0,0,.45)}` +
+    `.ap-mixprev-ttl{font:600 10px/1.3 'Segoe UI',system-ui,sans-serif;color:var(--mp-text,#f5ead2);` +
+    `margin:0 0 3px 2px}` +
     `.ap-mixprev canvas{display:block;width:${SIZE}px;height:${SIZE}px;border-radius:4px}`
   document.head.appendChild(s)
 }
@@ -75,7 +78,7 @@ export class MixPreview {
     // Tấm đứng 2×2m tâm gốc (XY, normal +Z → mapping 'wall' lấy (x,y) world — tấm ĐỨNG YÊN nên không trôi)
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2))
     this.scene.add(this.mesh)
-    this.scene.background = new THREE.Color(0x2c2114) // nâu nền khay — tấm nổi trên panel
+    this.scene.background = new THREE.Color(0x2b1609) // bg-1 palette khay tối 1 nấc — tấm nổi trên panel
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10)
     this.camera.position.set(0, 0, 2.6) // khít tấm 2×2 (fov 45 @2.6 → nửa cao ~1.08)
     this.scene.add(new THREE.HemisphereLight(0xf3efe6, 0x4a3b26, 1.4))
