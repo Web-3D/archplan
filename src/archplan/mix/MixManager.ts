@@ -21,6 +21,7 @@ import { PhotoGroundMix } from 'threejs-modules/shaders/ground/PhotoGroundMix'
 import { pondWorldXZ } from 'threejs-modules/site/render/fromState'
 import { shapeToLocalPolygon } from 'threejs-modules/site/shapes'
 import {
+  type BridgeConfig,
   type GroundLayer,
   type GroundMaterialKey,
   type GroundMixParams,
@@ -101,6 +102,8 @@ export interface MixManagerDeps {
   buildingHits(e: PointerEvent): THREE.Intersection[]
   /** 🪣 Raycast group RÀO (mesh con — walk-up cha tìm userData.fenceIdx). */
   fenceHits(e: PointerEvent): THREE.Intersection[]
+  /** 🌉 Raycast group CẦU (mặt ván — userData.bridgeRef + bridgeDeck) cho 🎯 mix. */
+  bridgeHits(e: PointerEvent): THREE.Intersection[]
   /** 🪣 Commit hệ SITE sau khi áp (G0/zone/hồ/rào) — applySite(true). */
   commitSite(): void
   /** 🪣 Commit hệ BUILDING sau khi áp (tường/móng/sàn) — ctx.build (history + persist + render). */
@@ -369,11 +372,17 @@ export class MixManager {
     const site = this.deps.site()
     if (site.groundMix) live.add(site.groundMix)
     for (const l of site.groundLayers ?? []) if (l.mix) live.add(l.mix)
+    this._collectAccentMix(live, site)
+  }
+
+  // Mix hồ (đáy/vách) + rào + cầu — tách khỏi _collectSiteMix (complexity ≤10).
+  private _collectAccentMix(live: Set<GroundMixParams>, site: SiteState): void {
     for (const w of site.waters) {
       if (w.floorMix) live.add(w.floorMix)
       if (w.wallMix) live.add(w.wallMix)
     }
     for (const f of site.fences) if (f.mix) live.add(f.mix)
+    for (const br of site.bridges) if (br.mix) live.add(br.mix) // 🌉 mặt ván cầu bật mix
   }
 
   // 🎨 Gom mix params tường BUILDING (mọi floor → instance → segment) vào set sống.
@@ -643,10 +652,28 @@ export class MixManager {
   // Ứng viên 3 lớp (pick-box building / rào / site) → hit GẦN NHẤT map được.
   // stable sort: dist bằng → building > rào > site (thứ tự mảng).
   private _resolveAt(e: PointerEvent): MixSel | null {
-    const cands = [this._selBuilding(e), this._selFence(e), this._selSite(e)]
+    const cands = [this._selBuilding(e), this._selFence(e), this._selBridge(e), this._selSite(e)]
       .filter((c): c is MixSel => c !== null)
       .sort((a, b) => a.dist - b.dist)
     return cands[0] ?? null
+  }
+
+  // 🌉 Mặt ván cầu: hit mang userData.bridgeRef → b.mix (target generic {flatMix} mapping 'xz' như sàn).
+  private _selBridge(e: PointerEvent): MixSel | null {
+    for (const hit of this.deps.bridgeHits(e)) {
+      const b = hit.object.userData.bridgeRef as BridgeConfig | undefined
+      if (!b) continue
+      return {
+        dist: hit.distance,
+        kind: 'site',
+        label: 'Cầu — mặt ván',
+        obj: hit.object,
+        get: () => b.mix,
+        set: (p) => (b.mix = p),
+        targetOf: () => (b.mix ? { flatMix: b.mix } : null),
+      }
+    }
+    return null
   }
 
   // 🏠 Pick-box building: segIdx = tường (seg.mix) · key 'found'/'slab' = móng/sàn (structure).

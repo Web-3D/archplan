@@ -621,6 +621,10 @@ export class ArchPlanLab extends BaseWorld {
       this._ray.setFromCamera(this._ndc(e), this.camera)
       return this._ray.intersectObjects(this._fenceGroup.children, true)
     },
+    bridgeHits: (e) => {
+      this._ray.setFromCamera(this._ndc(e), this.camera)
+      return this._ray.intersectObjects(this._bridgeGroup.children, true) // 🌉 mặt ván cầu (🎯 mix)
+    },
     commitSite: () => this._applySite(true),
     commitBuilding: () => this._buildScene(), // cùng đường ctx.build (commit hệ nhà)
     bucketCursor: (c) => {
@@ -3486,7 +3490,12 @@ export class ArchPlanLab extends BaseWorld {
       mats: this._bridgeMats,
       shaders: [], // cầu = box MeshStandard thuần, không shader procedural
     }
-    for (const b of this.site.bridges) if (b.enabled) buildSiteBridge(b, this.site, ctx)
+    for (const b of this.site.bridges) {
+      if (!b.enabled) continue
+      // 🎨 mặt ván bật mix → material PhotoGroundMix 'xz' (như sàn); null (chưa mix / texture đang load) = gỗ/đá
+      const deckMat = b.mix ? this._mix.matFor({ flatMix: b.mix }) : null
+      buildSiteBridge(b, this.site, ctx, deckMat)
+    }
   }
 
   private _clearBridge(): void {
