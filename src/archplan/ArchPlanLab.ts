@@ -598,6 +598,20 @@ export class ArchPlanLab extends BaseWorld {
     lockOrbit: (locked) => {
       if (this.controls) this.controls.enabled = !locked
     },
+    // 🪣 bucket: 2 lớp raycast thêm (pick-box building + rào) + commit 2 hệ + cursor hint
+    buildingHits: (e) => {
+      this._ray.setFromCamera(this._ndc(e), this.camera)
+      return this._ray.intersectObjects(this.pickGroup.children, false)
+    },
+    fenceHits: (e) => {
+      this._ray.setFromCamera(this._ndc(e), this.camera)
+      return this._ray.intersectObjects(this._fenceGroup.children, true)
+    },
+    commitSite: () => this._applySite(true),
+    commitBuilding: () => this._buildScene(), // cùng đường ctx.build (commit hệ nhà)
+    bucketCursor: (on) => {
+      this.canvas.style.cursor = on ? 'copy' : ''
+    },
   })
   // 🪨 Texture đá RÀO/VIỀN hồ: maps + TexturedSurface (triplanar) CACHE 1 lần/key (lab-lifetime) → bơm
   // ctx.borderMatByKey. Lab sở hữu maps + surf → dispose onDispose. Load ASYNC khi hồ dùng borderMaterial≠none.
@@ -710,7 +724,7 @@ export class ArchPlanLab extends BaseWorld {
       this._setMoveMode(!this.moveMode)
       return
     }
-    if (this._escClearSel(e)) return // 🧲 Esc (Move mode) = xả nhóm shape — click-trống KHÔNG xả
+    if (this._onEscape(e)) return // 🪣 buông xô áp preset / 🧲 xả nhóm shape (Move mode)
     // X trơn = thả/thu MENU 🎨 Palette (lưới swatch), KHÔNG phải popover tìm-kiếm-màu (né Ctrl/Meta/Alt+X).
     if (this._isPlainX(e)) {
       e.preventDefault()
@@ -728,6 +742,16 @@ export class ArchPlanLab extends BaseWorld {
   // Gõ trong input/textarea → phím tắt nhường (guard tách riêng cho gọn complexity _onKeyDown).
   private _isTypingTarget(e: KeyboardEvent): boolean {
     return e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
+  }
+  // Esc: ưu tiên 🪣 buông xô áp preset (panel tự bỏ highlight qua sync) → 🧲 xả nhóm chọn (Move mode).
+  // Gom 1 guard để _onKeyDown giữ complexity ≤10.
+  private _onEscape(e: KeyboardEvent): boolean {
+    if (e.code !== 'Escape') return false
+    if (this._mix.bucketOn) {
+      this._mix.bucketOff()
+      return true
+    }
+    return this._escClearSel(e)
   }
   // 🧲 Esc trong Move mode + ĐANG có nhóm chọn → xả nhóm (true = đã xử). Guard kiểu _isPlainF.
   private _escClearSel(e: KeyboardEvent): boolean {
@@ -999,14 +1023,29 @@ export class ArchPlanLab extends BaseWorld {
     const dx = e.clientX - this._downPos.x
     const dy = e.clientY - this._downPos.y
     if (dx * dx + dy * dy >= 25) return // kéo/orbit, không phải click
+    if (this._mix.bucketOn) {
+      this._mix.bucketApplyAt(e) // 🪣 click = áp preset vào đích (CLONE) — hụt cũng nuốt (đang cầm xô)
+      return
+    }
+    this._clickFocusChain(e)
+  }
+
+  // Chuỗi focus click thường: deselect cut → ưu tiên hồ → rào → tầng ground → building element.
+  // Tách khỏi _maybeClickFocus (complexity ≤10 sau khi thêm nhánh 🪣).
+  private _clickFocusChain(e: PointerEvent): void {
     this._setActiveCut(-1) // 🟫 click = deselect cut (ẩn xám); _tryClickLayer→navTo bật lại nếu trúng cut
     if (this.waterTool?.tryClick(e)) return // 💧 click trúng hồ → trỏ GUI hồ
     if (this._tryClickFence(e)) return // 🧱 click trúng rào → trỏ GUI Fence
     if (this._tryClickLayer(e)) return // 🟫 click trúng tầng ground → trỏ GUI Ground▸Gn
     this.manipulate?.clickFocus(e) // building element → trỏ folder tương ứng
   }
-  // Chuột phải khi đang pick/paint/move → thoát mode + chặn menu chuột phải
+  // Chuột phải khi đang pick/paint/move/🪣 → thoát mode + chặn menu chuột phải
   private readonly _onContextMenu = (e: MouseEvent): void => {
+    if (this._mix.bucketOn) {
+      e.preventDefault()
+      this._mix.bucketOff() // 🪣 buông xô
+      return
+    }
     if (this.paintMode) {
       e.preventDefault()
       this._setPaintMode(false)
@@ -1036,6 +1075,7 @@ export class ArchPlanLab extends BaseWorld {
     if (on) {
       this._setMoveMode(false) // 3 mode loại trừ
       this._mix.paintOff() // 🖌 đang vẽ mask mix → thoát (UI tự bỏ highlight qua sync)
+      this._mix.bucketOff() // 🪣 đang cầm xô → buông
     }
     if (this.controls) this.controls.enabled = !on
     if (!on) this.coordPicker?.setVisible(false)
@@ -1049,6 +1089,7 @@ export class ArchPlanLab extends BaseWorld {
       this._setPickMode(false) // 3 mode loại trừ
       this._setMoveMode(false)
       this._mix.paintOff() // 🖌
+      this._mix.bucketOff() // 🪣
     }
     if (this.controls) this.controls.enabled = !on
   }
@@ -1066,6 +1107,7 @@ export class ArchPlanLab extends BaseWorld {
       this.palette?.markSwatch(null)
       this._setPickMode(false)
       this._mix.paintOff() // 🖌 đang vẽ mask mix → thoát
+      this._mix.bucketOff() // 🪣
     }
     if (this.controls) this.controls.enabled = !on
     this._syncMoveToggle?.(on) // đổi class nút 🤚 (ap-move-on) — text bỏ, chỉ symbol
@@ -1810,7 +1852,8 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
-  // 🖌 7 callback VẼ MASK MIX (stage 3) — tách spread để _makeGuiCtx gọn (rule-50), cùng pattern _siteTuneGuiCtx.
+  // 🖌🪣 10 callback MIX (cọ vẽ mask stage 3 + xô áp preset Mảnh 3) — tách spread để _makeGuiCtx gọn
+  // (rule-50), cùng pattern _siteTuneGuiCtx. Tất cả delegate thẳng MixManager.
   private _mixPaintGuiCtx(): Pick<
     APGuiCtx,
     | 'setMixPaint'
@@ -1820,6 +1863,9 @@ export class ArchPlanLab extends BaseWorld {
     | 'clearMixPaint'
     | 'tuneMixLive'
     | 'registerMixPaintSync'
+    | 'setMixBucket'
+    | 'getMixBucketOn'
+    | 'registerMixBucketSync'
   > {
     return {
       setMixPaint: (target, slot) => this._mix.setPaint(target, slot),
@@ -1829,6 +1875,9 @@ export class ArchPlanLab extends BaseWorld {
       clearMixPaint: (target, slot) => this._mix.clearPaint(target, slot),
       tuneMixLive: (target) => this._mix.tuneLive(target),
       registerMixPaintSync: (fn) => this._mix.registerSync(fn),
+      setMixBucket: (src) => this._mix.setBucket(src),
+      getMixBucketOn: () => this._mix.bucketOn,
+      registerMixBucketSync: (fn) => this._mix.registerBucketSync(fn),
     }
   }
 

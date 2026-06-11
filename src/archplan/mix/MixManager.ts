@@ -31,7 +31,7 @@ import {
 
 import type { MixPaintTarget } from '../gui/ctx'
 import { PaintMask } from '../gui/ground-paint'
-import type { BuildingState } from '../state/state'
+import type { BuildingState, ShapeInstance } from '../state/state'
 
 /** 1 entry cache mix: material + sig structural + mask vẽ tay (sống qua rebuild material). */
 type MixEntry = { gmix: PhotoGroundMix; sig: string; pm: PaintMask }
@@ -52,10 +52,20 @@ export interface MixManagerDeps {
   raycastHits(e: PointerEvent): THREE.Intersection[]
   /** Persist state+site (buông nét cọ / xóa nét). */
   autosave(): void
-  /** Tắt 3 mode loại trừ (pick/move/paint) khi bật mode vẽ mix. */
+  /** Tắt 3 mode loại trừ (pick/move/paint) khi bật mode vẽ mix / 🪣. */
   offOtherModes(): void
   /** Khóa/mở orbit theo mode vẽ (true = khóa). */
   lockOrbit(locked: boolean): void
+  /** 🪣 Raycast pick-box BUILDING (ud: instId + segIdx tường / key 'found'|'slab'|'roof'|'stairs'). */
+  buildingHits(e: PointerEvent): THREE.Intersection[]
+  /** 🪣 Raycast group RÀO (mesh con — walk-up cha tìm userData.fenceIdx). */
+  fenceHits(e: PointerEvent): THREE.Intersection[]
+  /** 🪣 Commit hệ SITE sau khi áp (G0/zone/hồ/rào) — applySite(true). */
+  commitSite(): void
+  /** 🪣 Commit hệ BUILDING sau khi áp (tường/móng/sàn) — ctx.build (history + persist + render). */
+  commitBuilding(): void
+  /** 🪣 Cursor hint trên canvas khi mode xô bật ('copy') / tắt (''). */
+  bucketCursor(on: boolean): void
 }
 
 export class MixManager {
@@ -70,6 +80,11 @@ export class MixManager {
   private _stroking = false
   private readonly _brush = { size: 0.6, erase: false } // cọ: bán kính m world + chế độ tẩy (UI board đẩy vào)
   private _syncPaint: (() => void) | null = null // UI đăng ký — bỏ highlight 🖌 khi mode bị tắt từ ngoài
+  // 🪣 Mode XÔ ÁP preset (Mảnh 3 plan palette): cầm mix NGUỒN (ref preset sống — sửa ✎ xong áp lấy bản mới)
+  // → click 3D = structuredClone vào field mix của đích (chốt: CLONE — file save tự chứa). KHÔNG khóa
+  // orbit (click đơn <5px qua _maybeClickFocus; kéo = orbit như thường). null = tắt.
+  private _bucket: GroundMixParams | null = null
+  private _syncBucket: (() => void) | null = null // PresetPanel đăng ký — sync nút 🪣 khi tắt từ ngoài
 
   constructor(private readonly deps: MixManagerDeps) {}
 
@@ -360,9 +375,12 @@ export class MixManager {
     this._syncPaint = fn
   }
 
-  // Bật/tắt mode vẽ: target ≠ null = vẽ slot đó (orbit khóa, tắt 3 mode kia); null = thoát (orbit lại).
+  // Bật/tắt mode vẽ: target ≠ null = vẽ slot đó (orbit khóa, tắt 3 mode kia + 🪣); null = thoát (orbit lại).
   setPaint(target: MixPaintTarget | null, slot: number): void {
-    if (target) this.deps.offOtherModes() // các setter mode bật lại orbit — khóa lại ngay dưới
+    if (target) {
+      this.deps.offOtherModes() // các setter mode bật lại orbit — khóa lại ngay dưới
+      this.bucketOff() // 🪣 loại trừ với cọ
+    }
     this._paint = target ? { target, slot } : null
     this._stroking = false
     this.deps.lockOrbit(!!target)
@@ -455,6 +473,174 @@ export class MixManager {
     const hit = this._hitOf(target)
     const mix = this._paramsOf(target)
     if (hit && mix) this._applyUniforms(hit.gmix, mix)
+  }
+
+  // ── 🪣 XÔ ÁP PRESET — cầm mix nguồn, click 3D = CLONE vào đích (Mảnh 3-4) ──────────────────────────
+
+  /** Mode 🪣 đang bật (click qua _maybeClickFocus sẽ áp thay vì focus GUI). */
+  get bucketOn(): boolean {
+    return this._bucket !== null
+  }
+
+  /** PresetPanel đăng ký sync nút 🪣 (mode tắt từ ngoài: Move/Pick/Paint/cọ bật, ESC, chuột phải). */
+  registerBucketSync(fn: () => void): void {
+    this._syncBucket = fn
+  }
+
+  // Bật 🪣 với mix nguồn (REF preset sống — sửa preset xong áp lấy bản mới) / null = tắt.
+  // Bật = tắt 3 mode kia + cọ; KHÔNG khóa orbit (click đơn — kéo vẫn xoay được quanh nhà).
+  setBucket(src: GroundMixParams | null): void {
+    if (src) {
+      this.deps.offOtherModes()
+      this.paintOff()
+    }
+    this._bucket = src
+    this.deps.bucketCursor(src !== null)
+    this._syncBucket?.()
+  }
+
+  /** Thoát 🪣 từ NGOÀI (mode khác bật / ESC / chuột phải) — mirror paintOff, báo panel sync nút. */
+  bucketOff(): void {
+    if (!this._bucket) return
+    this._bucket = null
+    this.deps.bucketCursor(false)
+    this._syncBucket?.()
+  }
+
+  // Click 3D khi 🪣 bật: ứng viên 3 lớp (pick-box building / rào / site) → lấy hit GẦN NHẤT map được
+  // → CLONE preset vào field mix của đích + commit đúng hệ. false = click hụt (không áp gì).
+  bucketApplyAt(e: PointerEvent): boolean {
+    const src = this._bucket
+    if (!src) return false
+    const cands = [
+      this._bucketBuilding(e, src),
+      this._bucketFence(e, src),
+      this._bucketSite(e, src),
+    ]
+      .filter((c): c is { dist: number; apply: () => void } => c !== null)
+      .sort((a, b) => a.dist - b.dist) // stable: dist bằng → building > rào > site (thứ tự mảng)
+    if (cands.length === 0) return false
+    cands[0].apply()
+    return true
+  }
+
+  // 🏠 Pick-box building: segIdx = tường (seg.mix) · key 'found'/'slab' = móng/sàn (structure).
+  // 'roof'/'stairs' không nhận mix → null (nhường rào/site phía sau nếu gần hơn... thực tế mái che = không áp).
+  private _bucketBuilding(
+    e: PointerEvent,
+    src: GroundMixParams
+  ): { dist: number; apply: () => void } | null {
+    const hit = this.deps.buildingHits(e)[0]
+    if (!hit) return null
+    const ud = hit.object.userData as { instId?: string; segIdx?: number; key?: string }
+    const inst = typeof ud.instId === 'string' ? this._findInst(ud.instId) : null
+    if (!inst) return null
+    const set = this._bucketBuildingSet(inst, ud, src)
+    if (!set) return null
+    return {
+      dist: hit.distance,
+      apply: () => {
+        set()
+        this.deps.commitBuilding()
+      },
+    }
+  }
+
+  // Setter field mix theo ud — null nếu phần không nhận mix (roof/stairs). Tách (complexity).
+  private _bucketBuildingSet(
+    inst: ShapeInstance,
+    ud: { segIdx?: number; key?: string },
+    src: GroundMixParams
+  ): (() => void) | null {
+    if (typeof ud.segIdx === 'number' && inst.segments[ud.segIdx])
+      return () => (inst.segments[ud.segIdx as number].mix = structuredClone(src))
+    if (ud.key === 'found') return () => (inst.structure.foundMix = structuredClone(src))
+    if (ud.key === 'slab') return () => (inst.structure.slabMix = structuredClone(src))
+    return null
+  }
+
+  private _findInst(id: string): ShapeInstance | null {
+    for (const fl of this.deps.state().floors)
+      for (const inst of fl.instances) if (inst.id === id) return inst
+    return null
+  }
+
+  // Walk-up cha tìm userData.fenceIdx (mesh con của fence group). −1 = không thuộc rào. Tách (max-depth).
+  private _walkFenceIdx(obj: THREE.Object3D): number {
+    let o: THREE.Object3D | null = obj
+    while (o) {
+      if (typeof o.userData.fenceIdx === 'number') return o.userData.fenceIdx as number
+      o = o.parent
+    }
+    return -1
+  }
+
+  // 🧱 Rào: hit đầu thuộc rào → f.mix.
+  private _bucketFence(
+    e: PointerEvent,
+    src: GroundMixParams
+  ): { dist: number; apply: () => void } | null {
+    for (const hit of this.deps.fenceHits(e)) {
+      const idx = this._walkFenceIdx(hit.object)
+      if (idx < 0) continue
+      const f = this.deps.site().fences[idx]
+      if (!f) return null
+      return {
+        dist: hit.distance,
+        apply: () => {
+          f.mix = structuredClone(src)
+          this.deps.commitSite()
+        },
+      }
+    }
+    return null
+  }
+
+  // 🌳 Site: hit đầu tiên map được — đáy/vách hồ (waterMixRef/Face) > tầng zone (groundLayerIdx,
+  // walk-up Group paving/wall) > nền lô G0 (isBaseGround). Mặt nước/cỏ không map → thử hit kế.
+  private _bucketSite(
+    e: PointerEvent,
+    src: GroundMixParams
+  ): { dist: number; apply: () => void } | null {
+    for (const hit of this.deps.raycastHits(e)) {
+      const set = this._bucketSiteSet(hit.object, src)
+      if (set)
+        return {
+          dist: hit.distance,
+          apply: () => {
+            set()
+            this.deps.commitSite()
+          },
+        }
+    }
+    return null
+  }
+
+  // Setter field mix của 1 object site (walk-up cha) — null nếu mesh không thuộc đích nhận mix.
+  private _bucketSiteSet(obj: THREE.Object3D, src: GroundMixParams): (() => void) | null {
+    let o: THREE.Object3D | null = obj
+    while (o) {
+      const ud = o.userData
+      if (ud.waterMixRef) {
+        const w = ud.waterMixRef as { floorMix?: GroundMixParams; wallMix?: GroundMixParams }
+        return ud.waterMixFace === 'wall'
+          ? () => (w.wallMix = structuredClone(src))
+          : () => (w.floorMix = structuredClone(src))
+      }
+      if (typeof ud.groundLayerIdx === 'number') {
+        const layer = (this.deps.site().groundLayers ?? [])[ud.groundLayerIdx]
+        // CHỈ zone surface nhận mix (path/paving/wall đi builder viên riêng — addKindZone return sớm,
+        // groundMixMat không được gọi → set field cũng không render gì, gây "click không thấy đổi").
+        if (layer && (!layer.zoneKind || layer.zoneKind === 'surface'))
+          return () => (layer.mix = structuredClone(src))
+      }
+      if (ud.isBaseGround === true) {
+        const site = this.deps.site()
+        return () => (site.groundMix = structuredClone(src))
+      }
+      o = o.parent
+    }
+    return null
   }
 
   // ── DISPOSE ────────────────────────────────────────────────────────────────────────────────────────

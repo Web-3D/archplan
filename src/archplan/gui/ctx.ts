@@ -118,6 +118,11 @@ export interface APGuiCtx {
   // Kéo slider mix (Ngưỡng/Macro/…) → đẩy uniform vào material sống — KHÔNG rebuild site (stage 3 hết khựng).
   tuneMixLive?(target: MixPaintTarget): void
   registerMixPaintSync?(fn: () => void): void // UI đăng ký redraw — bỏ highlight 🖌 khi mode tắt từ ngoài
+  // 🪣 XÔ ÁP PRESET MIX (Mảnh 3 plan palette): cầm mix nguồn (ref preset sống) → click 3D = CLONE vào đích
+  // (tường building/rào/đáy-vách hồ/zone surface/G0/móng/sàn). null = buông xô. Optional như nhóm cọ.
+  setMixBucket?(src: GroundMixParams | null): void
+  getMixBucketOn?(): boolean // nút 🪣 panel preset hiện đúng trạng thái
+  registerMixBucketSync?(fn: () => void): void // panel đăng ký — bỏ highlight 🪣 khi mode tắt từ ngoài
   // 💧 Hiện VIỀN form định vị (mảng mờ mặt nền) khi KÉO slider Pos/Width/Depth — live preview vị trí+kích
   // thước KHÔNG rebuild (né leak reflector). Buông slider = applySite(true) commit + tự ẩn viền.
   previewWater(cfg: WaterConfig): void

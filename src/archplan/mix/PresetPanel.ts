@@ -54,6 +54,7 @@ function ensurePresetCss(): void {
     `.ap-mixpre-btn{flex:1;background:#5c4423;border:1px solid #b58a3c;color:#f5ead2;border-radius:4px;` +
     `cursor:pointer;font:inherit;padding:2px 0}` +
     `.ap-mixpre-btn:hover{background:#6a4a24}` +
+    `.ap-mixpre-btn.on{background:#b5532a;border-color:#e0b860}` +
     `.ap-mixpre-status{padding:0 6px 4px;font-size:8px;opacity:.75;min-height:10px}` +
     `.ap-mixpre-board{margin:2px 0 4px;padding:3px 4px;border:1px solid #8a6a2f;border-radius:4px;` +
     `background:rgba(0,0,0,.14)}` +
@@ -70,6 +71,7 @@ export class MixPresetPanel {
   private listEl: HTMLElement | null = null
   private statusEl: HTMLElement | null = null
   private fileInput: HTMLInputElement | null = null
+  private bucketBtn: HTMLButtonElement | null = null // 🪣 — sync class .on theo mode (tắt từ ngoài cũng cập nhật)
 
   /** Preset đang CẦM (active) — nguồn CLONE cho 🪣 áp (Mảnh 3). */
   activePreset(): MixPreset | null {
@@ -109,6 +111,7 @@ export class MixPresetPanel {
     panel.append(hd, body, st, ft)
     wrap.appendChild(panel)
     syncCollapse()
+    ctx.registerMixBucketSync?.(() => this._syncBucketBtn()) // 🪣 tắt từ ngoài (Move/Pick/ESC) → bỏ highlight
     this._renderList()
   }
 
@@ -248,8 +251,35 @@ export class MixPresetPanel {
     const imp = this._btn('⬆', 'Import JSON (merge vào kho — id trùng tự cấp mới)', () =>
       this._ensureFileInput().click()
     )
-    ft.append(add, exp, imp)
+    const bucket = this._btn(
+      '🪣',
+      'Áp preset đang chọn: click tường/rào/hồ/zone/nền/móng/sàn trong 3D (CLONE). ESC/chuột phải = thoát',
+      () => this._toggleBucket()
+    )
+    this.bucketBtn = bucket
+    this._syncBucketBtn()
+    ft.append(add, exp, imp, bucket)
     return ft
+  }
+
+  // 🪣 Bật/tắt xô áp: cầm REF mix preset active (manager CLONE mỗi cú áp — sửa ✎ xong áp lấy bản mới).
+  private _toggleBucket(): void {
+    if (this.ctx?.getMixBucketOn?.()) {
+      this.ctx.setMixBucket?.(null)
+    } else {
+      const p = this.activePreset()
+      if (!p) {
+        this._flash('Chọn 1 preset trước (click hàng) rồi mới 🪣')
+        return
+      }
+      this.ctx?.setMixBucket?.(p.mix)
+      this._flash(`🪣 ${p.name} — click vào đích trong 3D`)
+    }
+    this._syncBucketBtn()
+  }
+
+  private _syncBucketBtn(): void {
+    this.bucketBtn?.classList.toggle('on', this.ctx?.getMixBucketOn?.() === true)
   }
 
   private _btn(text: string, title: string, onClick: () => void): HTMLButtonElement {
