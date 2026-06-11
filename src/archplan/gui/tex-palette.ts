@@ -108,7 +108,8 @@ function ensureTexPaletteCss(): void {
 }
 
 // Ô preview nhỏ của 1 key: <img thumb> nếu có, không thì ô màu (GROUND_PRESETS → EXTRA_COLOR → xám).
-function previewEl(key: string): HTMLElement {
+// EXPORT (texPreviewEl) cho khay preset mix (mix/PresetPanel) — swatch đại diện = base của preset.
+export function texPreviewEl(key: string): HTMLElement {
   const url = THUMBS[key]
   if (url) {
     const img = document.createElement('img')
@@ -134,7 +135,7 @@ function swatchEl(label: string, key: string, on: boolean, pick: () => void): HT
   btn.title = label // hover = tên đầy đủ
   const name = document.createElement('span')
   name.textContent = label
-  btn.append(previewEl(key), name)
+  btn.append(texPreviewEl(key), name)
   btn.addEventListener('click', pick)
   return btn
 }
@@ -259,7 +260,7 @@ export function texPaletteRow<T extends string>(
   arr.textContent = '▾'
   const syncBtn = (): void => {
     name.textContent = opts.find(([, k]) => k === cur)?.[0] ?? cur
-    btn.replaceChildren(previewEl(cur), name, arr)
+    btn.replaceChildren(texPreviewEl(cur), name, arr)
   }
   syncBtn()
   if (o.onOpen) btn.addEventListener('mousedown', o.onOpen) // ⏳ prefetch như select cũ

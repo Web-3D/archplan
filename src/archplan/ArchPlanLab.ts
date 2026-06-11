@@ -195,6 +195,7 @@ import { ShapeSelection } from './interaction/selection' // 🧲 Shape Group —
 import { SunGizmo, type SunGizmoHost } from './interaction/sunGizmo' // ☀ sun = vật thể kéo trong scene
 import { WaterTool, type WaterToolHost } from './interaction/waterDrag' // 💧 kéo hồ/đỉnh/viền 3D — tách monolith
 import { MixManager } from './mix/MixManager' // 🎨 hệ mix nền (8 đích + cọ vẽ + prune) — tách Mảnh −1 plan palette
+import { MixPresetPanel } from './mix/PresetPanel' // 🧪 khay preset mix (Mảnh 2) — float như Palette
 import {
   CoordPicker,
   type GroundType,
@@ -499,6 +500,9 @@ export class ArchPlanLab extends BaseWorld {
   // _setupGUI, persist qua _rebuildGUI (giữ _palPos/vị trí kéo). Brush color + paintMode vẫn ở lab
   // (paint subsystem dùng chung) → palette set qua PaletteHost.
   private palette: PalettePanel | null = null
+  // 🧪 Khay preset mix (Mảnh 2 plan palette) — float như Palette, instance + kho GIỮ qua _rebuildGUI.
+  private mixPreWrap: HTMLElement | null = null
+  private mixPresetPanel: MixPresetPanel | null = null
   // Move tool (kéo element) + Focus (click→GUI) — tách ra interaction/manipulate.ts. moveMode + nút
   // GIỮ ở lab (điều phối 3 mode loại trừ); phiên kéo + map anchor folder nằm trong ManipulateTool.
   private manipulate: ManipulateTool | null = null
@@ -2075,7 +2079,20 @@ export class ArchPlanLab extends BaseWorld {
     this.canvas.parentElement?.appendChild(palWrap)
     this.paletteWrap = palWrap
     this._mountPalette(palWrap)
+    this._mountMixPresets(ctx) // 🧪 khay preset mix — float bên phải Palette
     this._buildFloatingMove(ctx) // 🤚 Move = nút float góc trái-dưới (cạnh thanh sáng sun)
+  }
+
+  // 🧪 Khay preset mix: wrap float mới mỗi _rebuildGUI (gỡ cái cũ — phòng leak DOM), panel instance GIỮ
+  // (kho preset + active sống qua rebuild). Mirror _mountPalette.
+  private _mountMixPresets(ctx: APGuiCtx): void {
+    this.mixPreWrap?.remove()
+    const wrap = document.createElement('div')
+    wrap.className = 'ap-mixpre-float'
+    this.canvas.parentElement?.appendChild(wrap)
+    this.mixPreWrap = wrap
+    if (!this.mixPresetPanel) this.mixPresetPanel = new MixPresetPanel()
+    this.mixPresetPanel.build(wrap, ctx)
   }
 
   // 🤚 Move = nút float CỐ ĐỊNH góc trái-dưới (cạnh thanh sáng sun ap-sun-ctrl), NGOÀI drawer → luôn
@@ -2362,6 +2379,10 @@ export class ArchPlanLab extends BaseWorld {
     this.leftTools = null
     this.paletteWrap?.remove() // 🎨 palette float tự do
     this.paletteWrap = null
+    this.mixPreWrap?.remove() // 🧪 khay preset mix float
+    this.mixPreWrap = null
+    this.mixPresetPanel?.dispose()
+    this.mixPresetPanel = null
     this.moveFloat?.remove() // 🤚 Move float góc trái-dưới
     this.moveFloat = null
   }

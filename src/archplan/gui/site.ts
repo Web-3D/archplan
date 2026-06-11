@@ -1265,7 +1265,8 @@ function mkMixSliders(
 // closure sống qua redraw); 🖌 vẽ slot đó. Stage 3: mọi slider = uniform LIVE (tuneMixLive), buông commit.
 // paintable=false (mapping 'wall' không cọ vẽ) → ẨN hàng cọ. commit default = applySite (site-kit);
 // tường BUILDING bơm ctx.build (history+persist hệ nhà). Gắn class ap-mix-host (CSS theo board, mọi panel).
-function buildMixBoard(
+// EXPORT cho mix/PresetPanel (editor preset — commit = save localStorage, KHÔNG đụng scene).
+export function buildMixBoard(
   pane: HTMLElement,
   ctx: APGuiCtx,
   target: MixPaintTarget,
@@ -1273,6 +1274,7 @@ function buildMixBoard(
   paintable = true,
   commit: () => void = () => ctx.applySite(true)
 ): void {
+  ensureMixCss() // board sống được NGOÀI site panel (lil-gui building / khay preset) — tự đảm bảo style
   pane.classList.add('ap-mix-host') // CSS mix scoped theo host (board sống cả ngoài site panel)
   let active = 0
   let syncBrush = (): void => {}
