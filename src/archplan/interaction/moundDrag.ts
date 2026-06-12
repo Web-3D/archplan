@@ -19,9 +19,20 @@ import * as THREE from 'three'
 import type { SiteState, TerrainMound } from 'threejs-modules/site/state'
 
 // 1 phiên nặn: center = dời TÂM gò (x/z); radius = đổi BÁN KÍNH gò idx. plane = mặt ngang tại cao độ handle.
+// m0 = SNAPSHOT gò gốc — right-click hủy giữa cú nặn TRẢ LẠI (NgQuan 2026-06-12).
 type MoundDragSession =
-  | { kind: 'center'; plane: THREE.Plane; idx: number }
-  | { kind: 'radius'; plane: THREE.Plane; idx: number }
+  | {
+      kind: 'center'
+      plane: THREE.Plane
+      idx: number
+      m0: { x: number; z: number; radius: number }
+    }
+  | {
+      kind: 'radius'
+      plane: THREE.Plane
+      idx: number
+      m0: { x: number; z: number; radius: number }
+    }
 
 // Host: ArchPlanLab cấp scene refs + state + moveMode + 2 đường commit (live swap-geo / full rebuild).
 export interface MoundToolHost {
@@ -80,9 +91,21 @@ export class MoundTool {
     return this._drag !== null
   }
 
-  // Buông/đổi-mode huỷ nặn (KHÔNG commit). Lab _setMoveMode gọi.
+  // Huỷ nặn (right-click giữa cú kéo / đổi mode) → TRẢ GÒ GỐC từ snapshot m0 + swap geo nền về.
+  // KHÔNG commit. (NgQuan 2026-06-12)
   cancelDrag(): void {
+    const d = this._drag
     this._drag = null
+    if (d) {
+      const m = this._mounds()[d.idx]
+      if (m) {
+        m.x = d.m0.x
+        m.z = d.m0.z
+        m.radius = d.m0.radius
+        this.host.applyTerrainLive()
+        this.rebuildHandles()
+      }
+    }
     this.hideRing()
   }
 
@@ -104,7 +127,12 @@ export class MoundTool {
     const m = typeof ud.mi === 'number' ? this._mounds()[ud.mi] : undefined
     if (!m || !ud.role) return false
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -this._handleY(m))
-    this._drag = { kind: ud.role, plane, idx: ud.mi as number }
+    this._drag = {
+      kind: ud.role,
+      plane,
+      idx: ud.mi as number,
+      m0: { x: m.x, z: m.z, radius: m.radius }, // snapshot gốc — right-click hủy trả lại
+    }
     this.host.canvas.setPointerCapture(e.pointerId)
     return true
   }

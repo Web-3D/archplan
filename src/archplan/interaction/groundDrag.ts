@@ -22,9 +22,10 @@ import type { GroundLayer, SiteState, WaterPoint } from 'threejs-modules/site/st
 
 // 1 phiên nắn ground layer free: vertex = dời 1 ĐỈNH polygon; handle = nắn 1 TAY-CẦM bezier (in/out) đỉnh idx.
 // (body-drag = dời cả layer ở lab — KHÔNG ở đây.) plane = mặt ngang tại cao độ overlay.
+// p0 = SNAPSHOT đỉnh gốc (clone cả tay-cầm) — right-click hủy giữa cú kéo TRẢ LẠI (NgQuan 2026-06-12).
 type GroundDragSession =
-  | { kind: 'vertex'; plane: THREE.Plane; idx: number }
-  | { kind: 'handle'; plane: THREE.Plane; idx: number; which: 'in' | 'out' }
+  | { kind: 'vertex'; plane: THREE.Plane; idx: number; p0: WaterPoint }
+  | { kind: 'handle'; plane: THREE.Plane; idx: number; which: 'in' | 'out'; p0: WaterPoint }
 
 // Host: ArchPlanLab cấp scene refs + state + layer active + commit. Lab giữ _activeLayerIdx + render siteGroup.
 export interface GroundToolHost {
@@ -83,9 +84,16 @@ export class GroundTool {
     return this._drag !== null
   }
 
-  // Buông/đổi-mode huỷ nắn (KHÔNG commit). Lab _setMoveMode gọi.
+  // Huỷ nắn (right-click giữa cú kéo / đổi mode) → TRẢ ĐỈNH GỐC từ snapshot p0 (thay nguyên object — giữ
+  // tay-cầm gốc, không sót field mới thêm lúc kéo). KHÔNG commit. (NgQuan 2026-06-12)
   cancelDrag(): void {
+    const d = this._drag
     this._drag = null
+    if (d) {
+      const a = this._activeLayer()
+      if (a?.layer.points?.[d.idx]) a.layer.points[d.idx] = { ...d.p0 }
+      this.rebuildHandles()
+    }
     this.hideOutline()
   }
 
@@ -103,28 +111,32 @@ export class GroundTool {
     return (a.layer.points?.length ?? 0) >= 3 ? a.layer : null
   }
 
-  // userData sphere trúng (vi=anchor / hi+which=tay-cầm) + plane → session nắn; null nếu sphere không hợp lệ.
+  // userData sphere trúng (vi=anchor / hi+which=tay-cầm) + plane → session nắn (kèm snapshot đỉnh gốc p0);
+  // null nếu sphere không hợp lệ / đỉnh không tồn tại.
   private _sessionFromUd(
     ud: { vi?: number; hi?: number; which?: 'in' | 'out' },
-    plane: THREE.Plane
+    plane: THREE.Plane,
+    pts: WaterPoint[]
   ): GroundDragSession | null {
-    if (typeof ud.hi === 'number' && ud.which)
-      return { kind: 'handle', plane, idx: ud.hi, which: ud.which }
-    if (typeof ud.vi === 'number') return { kind: 'vertex', plane, idx: ud.vi }
+    if (typeof ud.hi === 'number' && ud.which && pts[ud.hi])
+      return { kind: 'handle', plane, idx: ud.hi, which: ud.which, p0: { ...pts[ud.hi] } }
+    if (typeof ud.vi === 'number' && pts[ud.vi])
+      return { kind: 'vertex', plane, idx: ud.vi, p0: { ...pts[ud.vi] } }
     return null
   }
 
   // Nhấn Move trúng 1 handle (đỉnh/tay-cầm) của layer active free → phiên nắn. Ray set ở đây. Trả false →
   // nhường body-drag/manipulate. Chỉ raycast SPHERE (Mesh) — bỏ LineSegments nối.
   tryStartVertex(e: PointerEvent): boolean {
-    if (!this._editableLayer()) return false
+    const layer = this._editableLayer()
+    if (!layer) return false
     this.host.raycaster.setFromCamera(this._ndc(e), this.host.camera)
     const spheres = this._handles.children.filter((c) => c instanceof THREE.Mesh)
     const hit = this.host.raycaster.intersectObjects(spheres, false)[0]
     if (!hit) return false
     const ud = hit.object.userData as { vi?: number; hi?: number; which?: 'in' | 'out' }
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -this._handles.position.y)
-    const session = this._sessionFromUd(ud, plane)
+    const session = this._sessionFromUd(ud, plane, layer.points ?? [])
     if (!session) return false
     this._drag = session
     this.host.canvas.setPointerCapture(e.pointerId)

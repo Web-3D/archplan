@@ -382,7 +382,17 @@ export class MixManager {
       if (w.wallMix) live.add(w.wallMix)
     }
     for (const f of site.fences) if (f.mix) live.add(f.mix)
-    for (const br of site.bridges) if (br.mix) live.add(br.mix) // 🌉 mặt ván cầu bật mix
+    this._collectBridgeMix(live, site) // 🌉 4 bộ phận cầu — tách hàm (complexity ≤10)
+  }
+
+  // 🌉 Mix 4 bộ phận cầu (ván + vành + tay vịn + trụ con) — prune giữ material đang dùng.
+  private _collectBridgeMix(live: Set<GroundMixParams>, site: SiteState): void {
+    for (const br of site.bridges) {
+      if (br.mix) live.add(br.mix)
+      if (br.rimMix) live.add(br.rimMix)
+      if (br.railMix) live.add(br.railMix)
+      if (br.postMix) live.add(br.postMix)
+    }
   }
 
   // 🎨 Gom mix params tường BUILDING (mọi floor → instance → segment) vào set sống.
@@ -658,19 +668,33 @@ export class MixManager {
     return cands[0] ?? null
   }
 
-  // 🌉 Mặt ván cầu: hit mang userData.bridgeRef → b.mix (target generic {flatMix} mapping 'xz' như sàn).
+  // 🌉 Bộ phận cầu nhận mix theo userData.bridgePart: ván 'deck' = {flatMix} 'xz' (nằm như sàn);
+  // vành 'rim' / tay vịn 'rail' / trụ con 'post' = {wallMix} 'wall' (box đa hướng — stage 4.1 CAP_NY lo
+  // mặt ngửa, polygonOffset lo z-fight chạm). 🎯 click trúng bộ phận nào chỉnh mix RIÊNG bộ phận đó.
   private _selBridge(e: PointerEvent): MixSel | null {
+    const field = { deck: 'mix', rim: 'rimMix', rail: 'railMix', post: 'postMix' } as const
+    const label = { deck: 'mặt ván', rim: 'vành', rail: 'tay vịn', post: 'trụ con' }
     for (const hit of this.deps.bridgeHits(e)) {
-      const b = hit.object.userData.bridgeRef as BridgeConfig | undefined
-      if (!b) continue
+      const ud = hit.object.userData as {
+        bridgeRef?: BridgeConfig
+        bridgePart?: keyof typeof field
+      }
+      const b = ud.bridgeRef
+      const part = ud.bridgePart
+      if (!b || !part) continue
+      const f = field[part]
       return {
         dist: hit.distance,
         kind: 'site',
-        label: 'Cầu — mặt ván',
+        label: `Cầu — ${label[part]}`,
         obj: hit.object,
-        get: () => b.mix,
-        set: (p) => (b.mix = p),
-        targetOf: () => (b.mix ? { flatMix: b.mix } : null),
+        get: () => b[f],
+        set: (p) => (b[f] = p),
+        targetOf: () => {
+          const m = b[f]
+          if (!m) return null
+          return part === 'deck' ? { flatMix: m } : { wallMix: m }
+        },
       }
     }
     return null

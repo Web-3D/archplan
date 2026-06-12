@@ -26,6 +26,7 @@ import type { SiteState, WaterConfig, WaterPoint } from 'threejs-modules/site/st
 
 // 1 phiên kéo hồ: body = dời cả hồ (offset); vertex = nắn 1 ĐỈNH polygon; handle = nắn 1 TAY-CẦM bezier (in/out)
 // của đỉnh idx → cong cạnh kề. (chỉ shape='free'.)
+// p0 = SNAPSHOT đỉnh gốc (clone cả tay-cầm) — right-click hủy giữa cú kéo TRẢ LẠI (NgQuan 2026-06-12).
 type WaterDragSession =
   | {
       kind: 'body'
@@ -37,7 +38,14 @@ type WaterDragSession =
       ox0: number
       oz0: number
     }
-  | { kind: 'vertex'; cfg: WaterConfig; surf: WaterSurface; plane: THREE.Plane; idx: number }
+  | {
+      kind: 'vertex'
+      cfg: WaterConfig
+      surf: WaterSurface
+      plane: THREE.Plane
+      idx: number
+      p0: WaterPoint
+    }
   | {
       kind: 'handle'
       cfg: WaterConfig
@@ -45,6 +53,7 @@ type WaterDragSession =
       plane: THREE.Plane
       idx: number
       which: 'in' | 'out'
+      p0: WaterPoint
     }
 
 // Host: ArchPlanLab cấp scene refs + state hồ + callback điều hướng/commit. Lab giữ mode + render _siteWaters.
@@ -126,10 +135,28 @@ export class WaterTool {
     return this._drag !== null
   }
 
-  // Buông/đổi-mode huỷ kéo (KHÔNG commit). Lab _setMoveMode gọi.
+  // Huỷ kéo (right-click giữa cú kéo / đổi mode) → TRẢ VỊ TRÍ BAN ĐẦU (NgQuan 2026-06-12): body = offset
+  // gốc (ox0/oz0) + dời mesh về; vertex/handle = thay nguyên đỉnh bằng snapshot p0 (giữ cả tay-cầm gốc,
+  // KHÔNG Object.assign — kéo có thể đã THÊM field tay-cầm mới). KHÔNG commit.
   cancelDrag(): void {
+    const d = this._drag
     this._drag = null
+    if (d) this._revertDrag(d)
     this.hideOutline()
+  }
+
+  private _revertDrag(d: WaterDragSession): void {
+    if (d.kind === 'body') {
+      d.cfg.offsetX = d.ox0
+      d.cfg.offsetZ = d.oz0
+      const mesh = d.surf.getMesh()
+      mesh.position.set(d.ox0 / 1000, mesh.position.y, d.oz0 / 1000)
+      this._handles.position.set(mesh.position.x, mesh.position.y + 0.05, mesh.position.z)
+    } else {
+      if (d.cfg.points[d.idx]) d.cfg.points[d.idx] = { ...d.p0 }
+      this._liveShape(d.surf, d.cfg)
+    }
+    this.rebuildHandles()
   }
 
   // Buông chuột kết thúc kéo: ẩn viền + commit (rebuild đặt nước+lỗ vào vị trí mới + autosave).
@@ -204,6 +231,8 @@ export class WaterTool {
     const ud = hit.object.userData as { vi?: number; hi?: number; which?: 'in' | 'out' }
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -entry.surf.getMesh().position.y)
     if (typeof ud.hi === 'number' && ud.which) {
+      const p = entry.cfg.points[ud.hi]
+      if (!p) return false
       this._drag = {
         kind: 'handle',
         cfg: entry.cfg,
@@ -211,11 +240,21 @@ export class WaterTool {
         plane,
         idx: ud.hi,
         which: ud.which,
+        p0: { ...p }, // snapshot gốc — right-click hủy trả lại đỉnh + tay-cầm
       }
       return true
     }
     if (typeof ud.vi !== 'number') return false
-    this._drag = { kind: 'vertex', cfg: entry.cfg, surf: entry.surf, plane, idx: ud.vi }
+    const pv = entry.cfg.points[ud.vi]
+    if (!pv) return false
+    this._drag = {
+      kind: 'vertex',
+      cfg: entry.cfg,
+      surf: entry.surf,
+      plane,
+      idx: ud.vi,
+      p0: { ...pv },
+    }
     return true // pointer capture do caller tryStartDrag lo
   }
 

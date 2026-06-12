@@ -151,7 +151,7 @@ import {
   TexturedSurface,
   type TexturedSurfaceMaps,
 } from 'threejs-modules/shaders/surface/TexturedSurface' // 🧱 fence wall texture (tường dọc, triplanar) + material cache
-import { buildSiteBridge } from 'threejs-modules/site/render/bridge' // 🌉 dựng cầu (box vòm + lan can + trụ)
+import { type BridgeMixMats, buildSiteBridge } from 'threejs-modules/site/render/bridge' // 🌉 dựng cầu (box vòm + lan can + trụ)
 import {
   buildGroundLayers,
   buildSiteFence,
@@ -571,7 +571,23 @@ export class ArchPlanLab extends BaseWorld {
   // dọc cạnh (ghi gatePos). Dựng lại trong _syncFence (mỗi fence có gate). _gateDrag = phiên kéo đang chạy.
   private readonly _gatePickGroup = new THREE.Group()
   private _gatePickGeos: THREE.BufferGeometry[] = []
-  private _gateDrag: { fenceIdx: number; axis: 'x' | 'z'; plane: THREE.Plane } | null = null
+  // startGatePos = gatePos gốc trước kéo — right-click giữa cú kéo TRẢ LẠI (NgQuan 2026-06-12)
+  private _gateDrag: {
+    fenceIdx: number
+    axis: 'x' | 'z'
+    plane: THREE.Plane
+    startGatePos: number
+  } | null = null
+  // 🌉 Phiên kéo 1 CẦU bằng Move tool (mirror _layerDrag): kéo = dời sub-group.position (0 rebuild);
+  // buông = gập Δ vào offsetX/Z + _applySite (trụ đâm-hồ tính lại theo vị trí mới). Right-click = trả gốc.
+  private _bridgeDrag: {
+    idx: number
+    sub: THREE.Object3D // sub-group per-cầu trong _bridgeGroup
+    startOffX: number
+    startOffZ: number
+    startPt: THREE.Vector3
+    startPos: THREE.Vector3
+  } | null = null
   // 🟫 Phiên kéo 1 TẦNG ground (G1+) bằng Move tool: idx + mesh đang dời + offset gốc + điểm neo (mặt-phẳng
   // ngang). Kéo = dời mesh.position (0 rebuild); buông = gập vào offsetX/Z + _applySite. G0 base KHÔNG kéo.
   private _layerDrag: {
@@ -893,6 +909,7 @@ export class ArchPlanLab extends BaseWorld {
     if (this._shiftToggleSelect(e)) return // 🧲 Shift+click = chọn/bỏ khối vào nhóm, không kéo gì khác
     if (this._tryStartSiteTool(e)) return // 💧🟫⛰️ trúng tool site → tool lo
     if (this._tryStartGateDrag(e)) return // 🚪 trúng cổng → trượt dọc cạnh rào
+    if (this._tryStartBridgeDrag(e)) return // 🌉 trúng cầu (gần hơn building) → kéo dời cầu
     this.manipulate?.dragStart(e) // Move tool: nhấn-giữ element building → kéo (focus GUI ngay khi nhấn)
     if (this.manipulate?.isDragging()) return // trúng building → manipulate lo
     this._tryStartLayerDrag(e) // 🟫 không trúng building → thử kéo TẦNG ground (G1+)
@@ -927,6 +944,8 @@ export class ArchPlanLab extends BaseWorld {
   private _moveModeMove(e: PointerEvent): void {
     if (this._dragSiteTool(e)) return // 💧🟫⛰️ tool site (hồ/ground-free/gò) đang kéo/nặn → dispatch
     if (this._gateDrag) this._gateDragMove(e)
+    else if (this._bridgeDrag)
+      this._bridgeDragMove(e) // 🌉 kéo cầu
     else if (this.manipulate?.isDragging()) this.manipulate.dragMove(e)
     else if (this._layerDrag) this._layerDragMove(e) // 🟫 kéo tầng ground
   }
@@ -952,6 +971,63 @@ export class ArchPlanLab extends BaseWorld {
       if (obj) return { obj, hit: h }
     }
     return null
+  }
+
+  // 🌉 Move nhấn trúng 1 CẦU (gần hơn building pick) → bắt đầu kéo dời XZ (mirror _tryStartLayerDrag).
+  // sub-group = con trực tiếp của _bridgeGroup chứa mesh trúng. Focus GUI ngay khi nhấn (như manipulate).
+  private _tryStartBridgeDrag(e: PointerEvent): boolean {
+    if (!this.site.show || this._bridgeGroup.children.length === 0) return false
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const hit = this._ray.intersectObjects(this._bridgeGroup.children, true)[0]
+    if (!hit) return false
+    const pHit = this._ray.intersectObjects(this.pickGroup.children, false)[0]
+    if (pHit && pHit.distance < hit.distance) return false // building element gần hơn → nhường
+    const idx = this._bridgeIdxOf(hit.object)
+    const b = this.site.bridges[idx]
+    if (!b) return false
+    let sub: THREE.Object3D = hit.object
+    while (sub.parent && sub.parent !== this._bridgeGroup) sub = sub.parent
+    this.canvas.setPointerCapture(e.pointerId)
+    this._navigateToBridge(idx)
+    this._bridgeDrag = {
+      idx,
+      sub,
+      startOffX: b.offsetX,
+      startOffZ: b.offsetZ,
+      startPt: hit.point.clone(),
+      startPos: sub.position.clone(),
+    }
+    return true
+  }
+
+  // 🌉 Kéo cầu LIVE: CHỈ dời sub.position theo Δ chiếu mặt-phẳng-ngang @điểm-neo — 0 rebuild (trụ đâm-hồ
+  // tính lại lúc buông). Giữ Y (mặt nền).
+  private _bridgeDragMove(e: PointerEvent): void {
+    const d = this._bridgeDrag
+    if (!d) return
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -d.startPt.y)
+    const pt = new THREE.Vector3()
+    if (!this._ray.ray.intersectPlane(plane, pt)) return
+    d.sub.position.set(
+      d.startPos.x + (pt.x - d.startPt.x),
+      d.startPos.y,
+      d.startPos.z + (pt.z - d.startPt.z)
+    )
+  }
+
+  // 🌉 Buông: gập Δ sub.position vào offsetX/Z state → _applySite(true) rebuild cầu 1 LẦN (_bridgeSig đổi →
+  // trụ tự đâm đáy hồ ở vị trí mới) + autosave. Site (không undo) — như tầng ground/cổng.
+  private _commitBridgeDrag(): void {
+    const d = this._bridgeDrag
+    this._bridgeDrag = null
+    if (!d) return
+    const b = this.site.bridges[d.idx]
+    if (b) {
+      b.offsetX = Math.round(d.startOffX + (d.sub.position.x - d.startPos.x) * 1000)
+      b.offsetZ = Math.round(d.startOffZ + (d.sub.position.z - d.startPos.z) * 1000)
+    }
+    this._applySite(true)
   }
 
   // 🟫 Move trúng 1 TẦNG ground (G1+, mesh có userData.groundLayerIdx) → bắt đầu kéo dời XZ. G0 base KHÔNG có
@@ -1054,6 +1130,10 @@ export class ArchPlanLab extends BaseWorld {
       this._commitGateDrag()
       return true
     }
+    if (this._bridgeDrag) {
+      this._commitBridgeDrag() // 🌉 buông cầu → bake offset + rebuild (trụ đâm hồ mới) + autosave
+      return true
+    }
     if (this.manipulate?.isDragging()) {
       this.manipulate.dragEnd()
       return true
@@ -1105,12 +1185,47 @@ export class ArchPlanLab extends BaseWorld {
     }
     if (this.moveMode) {
       e.preventDefault()
+      if (this._cancelActiveDrag()) return // đang GIỮ kéo dở → trả vị trí ban đầu, GIỮ Move mode
       this._setMoveMode(false)
       return
     }
     if (!this.pickMode) return
     e.preventDefault()
     this._setPickMode(false)
+  }
+
+  // 🤚 Right-click GIỮA cú kéo (Move mode) = hủy phiên + TRẢ VỊ TRÍ BAN ĐẦU cho BẤT CỨ thứ gì move được
+  // (NgQuan 2026-06-12), KHÔNG thoát mode. Hồ/đỉnh-free/gò + building element: tool TỰ revert trong
+  // cancelDrag (session giữ snapshot gốc). Cầu/tầng: transform thuần (state chưa ghi) → copy position gốc.
+  // Cổng: gatePos ghi LIVE khi kéo → restore startGatePos + _applyFenceLive. false = không kéo gì.
+  private _cancelActiveDrag(): boolean {
+    for (const t of this._siteDragTools())
+      if (t.isDragging()) {
+        t.cancelDrag() // 💧🟫⛰️ hồ (thân/đỉnh/tay-cầm) / nắn-free / gò — tool trả snapshot gốc
+        return true
+      }
+    if (this.manipulate?.isDragging()) {
+      this.manipulate.cancelDrag() // 🏠 building element — revert x0/z0 trong session + đưa hình về
+      return true
+    }
+    if (this._bridgeDrag) {
+      this._bridgeDrag.sub.position.copy(this._bridgeDrag.startPos)
+      this._bridgeDrag = null
+      return true
+    }
+    if (this._layerDrag) {
+      this._layerDrag.mesh.position.copy(this._layerDrag.startMeshPos)
+      this._layerDrag = null
+      return true
+    }
+    if (this._gateDrag) {
+      const fence = this.site.fences[this._gateDrag.fenceIdx]
+      if (fence) fence.gatePos = this._gateDrag.startGatePos
+      this._gateDrag = null
+      this._applyFenceLive()
+      return true
+    }
+    return false
   }
 
   private _pickAt(e: PointerEvent): void {
@@ -1152,6 +1267,7 @@ export class ArchPlanLab extends BaseWorld {
     if (!on) this.shapeSel?.clear() // nhóm chỉ sống trong Move mode — rời mode = xả (ad-hoc, không persist)
     for (const t of this._siteDragTools()) t.cancelDrag() // 💧🟫⛰️ huỷ kéo/nặn tool site đang dở + ẩn viền/đĩa
     this._gateDrag = null // huỷ kéo cổng đang dở
+    this._bridgeDrag = null // 🌉 huỷ kéo cầu đang dở
     this._layerDrag = null // 🟫 huỷ kéo tầng ground đang dở
     if (on) {
       this._setPaintMode(false)
@@ -1327,6 +1443,7 @@ export class ArchPlanLab extends BaseWorld {
       fenceIdx: idx,
       axis: gs.axis,
       plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY),
+      startGatePos: fence.gatePos ?? 0, // right-click giữa cú kéo → trả lại vị trí cổng gốc
     }
     return true
   }
@@ -3654,9 +3771,20 @@ export class ArchPlanLab extends BaseWorld {
     }
     for (const b of this.site.bridges) {
       if (!b.enabled) continue
-      // 🎨 mặt ván bật mix → material PhotoGroundMix 'xz' (như sàn); null (chưa mix / texture đang load) = gỗ/đá
-      const deckMat = b.mix ? this._mix.matFor({ flatMix: b.mix }) : null
-      buildSiteBridge(b, this.site, ctx, deckMat)
+      buildSiteBridge(b, this.site, ctx, this._bridgeMixMats(b))
+    }
+  }
+
+  // 🎨 Material mix 4 BỘ PHẬN cầu: ván = {flatMix} 'xz' (nằm như sàn); vành/tay vịn/trụ con = {wallMix}
+  // 'wall' + range (footY = mặt nền, h = vồng + cao lan can → rule trọng lực rêu/ố chân cầu ăn đúng dải).
+  // null = chưa mix / texture đang load → builder rơi về mat gỗ/đá đơn.
+  private _bridgeMixMats(b: BridgeConfig): BridgeMixMats {
+    const range = { footY: this.site.groundThick / 1000, h: (b.rise + b.railHeight) / 1000 }
+    return {
+      deck: b.mix ? this._mix.matFor({ flatMix: b.mix }) : null,
+      rim: b.rimMix ? this._mix.wallMixMat(b.rimMix, range) : null,
+      rail: b.railMix ? this._mix.wallMixMat(b.railMix, range) : null,
+      post: b.postMix ? this._mix.wallMixMat(b.postMix, range) : null,
     }
   }
 

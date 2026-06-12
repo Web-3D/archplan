@@ -157,12 +157,47 @@ export class ManipulateTool {
   isDragging(): boolean {
     return this._drag !== null
   }
+  // Hủy phiên kéo (right-click giữa cú kéo / đổi mode) → TRẢ VỊ TRÍ BAN ĐẦU (NgQuan 2026-06-12): mọi
+  // session đều giữ tọa độ gốc (x0/z0/y0) → ghi ngược vào state TRƯỚC khi rebuild. Ghost nhóm chưa đụng
+  // state thật → gỡ là đủ. KHÔNG commit history.
   cancelDrag(): void {
+    const d = this._drag
     const split = this._splitActive
     this._splitActive = false
     this._drag = null
+    if (d) this._revertDragState(d)
     this.host.endGroupGhost() // ghost nhóm đang bay (nếu có) — gỡ, KHÔNG commit
-    if (split) this.host.endInstDragSplit() // dọn dragGroup + full rebuild (kẻo shape đang kéo biến mất)
+    if (split)
+      this.host.endInstDragSplit() // dọn dragGroup + full rebuild TỪ STATE ĐÃ TRẢ GỐC
+    else if (d) this._refreshAfterRevert(d)
+  }
+
+  // Ghi ngược tọa độ gốc của session vào state (KHÔNG rebuild — caller lo theo split/fast).
+  private _revertDragState(d: DragSession): void {
+    if (d.kind === 'inst') {
+      if (d.group) return // ghost: posX/posZ thật chưa đổi
+      d.inst.posX = d.x0
+      d.inst.posZ = d.z0
+    } else if (d.kind === 'colz') {
+      d.target.x = d.x0
+      d.target.z = d.z0
+    } else if (d.kind === 'bal') {
+      d.target.x = d.x0
+    } else {
+      d.target.x = d.x0
+      d.target.yOffset = d.y0
+    }
+  }
+
+  // Đưa HÌNH về theo state đã revert (nhánh KHÔNG split): fast-drag = group offset về 0 (0 rebuild);
+  // element (cột/cửa/ban công/1-shape) = build live (không history — state đã về gốc, net 0 đổi).
+  private _refreshAfterRevert(d: DragSession): void {
+    if (d.kind === 'inst' && d.group) return // ghost đã gỡ ở endGroupGhost
+    if (d.kind === 'inst' && d.fast) {
+      this.host.translateBuildingLive(0, 0)
+      return
+    }
+    this.host.buildSceneLive()
   }
 
   /** instId dưới con trỏ (pick layer) — lab dùng cho Shift+click chọn nhóm (chung raycast với Move). */
