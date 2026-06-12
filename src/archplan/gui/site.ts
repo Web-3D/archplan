@@ -2509,7 +2509,11 @@ function buildBridgePane(
 }
 
 // Sub-tab "Cầu" → hàng tab instance C1/C2… + ＋ (mirror buildFenceDomain) trên site.bridges.
-function buildBridgeDomain(ctx: APGuiCtx): { panel: HTMLElement; dispose: () => void } {
+function buildBridgeDomain(ctx: APGuiCtx): {
+  panel: HTMLElement
+  dispose: () => void
+  navigateToBridge: (idx: number) => void
+} {
   const host = document.createElement('div')
   host.classList.add('ap-fence-domain') // mượn tông nâu fence
   let tabs: Tabs | null = null
@@ -2542,7 +2546,15 @@ function buildBridgeDomain(ctx: APGuiCtx): { panel: HTMLElement; dispose: () => 
     })
   }
   rebuild()
-  return { panel: host, dispose: (): void => tabs?.dispose() }
+  return {
+    panel: host,
+    dispose: (): void => tabs?.dispose(),
+    // 👆 Click cầu 3D → chọn tab instance C của cầu trúng (clamp khi cầu vừa bị xoá).
+    navigateToBridge: (idx: number): void => {
+      const clamped = Math.max(0, Math.min(idx, ctx.site.bridges.length - 1))
+      tabs?.select(clamped, { trusted: false })
+    },
+  }
 }
 
 // Nút ✕ xoá 1 instance hồ (hàng riêng, canh phải).
@@ -3008,6 +3020,7 @@ interface SitePanel {
   navigateToFence: (idx: number) => void
   navigateToGroundLayer: (idx: number) => void
   navigateToFish: (idx: number) => void // 🐟 click đàn cá 3D → Water ▸ type-tab Cá ▸ tab F idx
+  navigateToBridge: (idx: number) => void // 🌉 click cầu 3D → sub-tab Cầu ▸ tab C idx
 }
 
 export function setupSitePanel(ctx: APGuiCtx, container: Element | null): SitePanel {
@@ -3059,6 +3072,11 @@ export function setupSitePanel(ctx: APGuiCtx, container: Element | null): SitePa
     navigateToFish: (idx: number): void => {
       tabs.select(3, { trusted: false })
       water.navigateToFish(idx)
+    },
+    // Click cầu 3D → mở sub-tab "Cầu" (index 4) + tab C idx.
+    navigateToBridge: (idx: number): void => {
+      tabs.select(4, { trusted: false })
+      bridge.navigateToBridge(idx)
     },
   }
 }
