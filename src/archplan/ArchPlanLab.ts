@@ -475,6 +475,7 @@ export class ArchPlanLab extends BaseWorld {
     color: 0xfff5e0,
     enabled: true,
     fill: 1.5, // >1: nền tổng (mặt ngang xa sun) từng tối vì fill cũ bị bóp (NgQuan 2026-06-12)
+    overcast: 0,
   }
   private sunGizmo: SunGizmo | null = null // ☀ sun = vật thể kéo trong scene (thay panel GUI)
 
@@ -1841,7 +1842,9 @@ export class ArchPlanLab extends BaseWorld {
   private _applySunToSky(): void {
     if (!this.sun || !this.sky) return
     const p = this.sun.position
-    const day = this.sky.setSun(p.x, p.y, p.z) // [0..1]: 1=trưa, 0=đêm
+    this.sky.setDayOverride(this.sunOpts.enabled ? null : 0) // sun TẮT = trời đêm (kể cả sun đang cao)
+    this.sky.setOvercast(this.sunOpts.overcast) // ☁️ trời xám theo preset/slider — nuốt đĩa nắng
+    const day = this.sky.setSun(p.x, p.y, p.z) // [0..1]: 1=trưa, 0=đêm (đã qua override)
     // × fill (sunOpts, default 1.5): mặt NGANG xa hướng sun sống bằng hemi+IBL — curve cũ (fill=1)
     // bóp fill cho bóng đậm làm nền tổng tối sầm. Slider/preset khay 🌅 chỉnh live.
     const fill = this.sunOpts.fill
@@ -1878,6 +1881,8 @@ export class ArchPlanLab extends BaseWorld {
       if (typeof o.color === 'number') this.sunOpts.color = Math.floor(o.color) & 0xffffff
       if (typeof o.enabled === 'boolean') this.sunOpts.enabled = o.enabled
       if (typeof o.fill === 'number') this.sunOpts.fill = Math.max(0, Math.min(3, o.fill))
+      if (typeof o.overcast === 'number')
+        this.sunOpts.overcast = Math.max(0, Math.min(1, o.overcast))
     } catch {
       /* JSON hỏng → giữ default */
     }
@@ -2396,7 +2401,21 @@ export class ArchPlanLab extends BaseWorld {
     const wrap = document.createElement('div')
     wrap.className = 'ap-envpre-float'
     wrap.style.display = 'none'
-    const fill = document.createElement('input')
+    // 2 slider live (chỉ sky/hemi/IBL uniform — không đụng vị trí sun, 0 rebuild)
+    const fill = this._envSlider(
+      3,
+      '🔆 Fill môi trường (hemi + IBL) — nền tổng tối/sáng. 1 = mức cũ.',
+      (v) => {
+        this.sunOpts.fill = v
+        this._applySunToSky()
+      }
+    )
+    fill.value = String(this.sunOpts.fill)
+    const over = this._envSlider(1, '☁️ U ám — trời xám dần + nuốt đĩa nắng.', (v) => {
+      this.sunOpts.overcast = v
+      this._applySunToSky()
+    })
+    over.value = String(this.sunOpts.overcast)
     for (const p of ENV_PRESETS) {
       const b = document.createElement('button')
       b.type = 'button'
@@ -2405,25 +2424,28 @@ export class ArchPlanLab extends BaseWorld {
       b.addEventListener('click', () => {
         Object.assign(this.sunOpts, p.opts)
         fill.value = String(this.sunOpts.fill) // slider bám theo preset
+        over.value = String(this.sunOpts.overcast)
         this._applySun()
         this._saveSunOpts()
       })
       wrap.appendChild(b)
     }
-    fill.type = 'range'
-    fill.min = '0'
-    fill.max = '3'
-    fill.step = '0.05'
-    fill.value = String(this.sunOpts.fill)
-    fill.title = 'Fill môi trường (hemi + IBL) — nền tổng tối/sáng. 1 = mức cũ.'
-    fill.addEventListener('input', () => {
-      this.sunOpts.fill = parseFloat(fill.value)
-      this._applySunToSky() // chỉ hemi/IBL — không đụng vị trí sun
-    })
-    fill.addEventListener('change', () => this._saveSunOpts())
-    wrap.appendChild(fill)
+    wrap.append(fill, over)
     this.canvas.parentElement?.appendChild(wrap)
     this.envTrayWrap = wrap
+  }
+
+  // Slider khay 🌅: range [0..max] step 0.05, live onInput + persist onChange. Caller set .value sau.
+  private _envSlider(max: number, title: string, onInput: (v: number) => void): HTMLInputElement {
+    const s = document.createElement('input')
+    s.type = 'range'
+    s.min = '0'
+    s.max = String(max)
+    s.step = '0.05'
+    s.title = title
+    s.addEventListener('input', () => onInput(parseFloat(s.value)))
+    s.addEventListener('change', () => this._saveSunOpts())
+    return s
   }
 
   // CSS khay 🌅 — cùng vị trí top:40 với khay mix (chỉ mở 1 trong 2 thường lệ), nút đều 28×28 như utilbar.

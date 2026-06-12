@@ -29,6 +29,7 @@ export type SunOpts = {
   color: number // màu sáng (hex) — điều khiển qua ô màu trên gizmo sun
   enabled: boolean // bật/tắt sun (nút trên gizmo) — tắt → chỉ còn hemisphere fill
   fill: number // 🌅 hệ số fill môi trường (× hemi + IBL) — 1 = mức cũ; mặt ngang xa sun tối → tăng
+  overcast: number // ☁️ mức u ám bầu trời [0..1] — sky xám dần + nuốt đĩa nắng (SkyGradient.setOvercast)
 }
 
 // 🌅 Preset ánh sáng môi trường (khay 🌅 utilTray) — 1 nút set cả bộ {elevation, intensity, color, fill},
@@ -43,23 +44,37 @@ export type EnvPreset = {
 export const ENV_PRESETS: EnvPreset[] = [
   {
     icon: '☀️',
-    label: 'Trưa — nắng đỉnh, fill sáng',
-    opts: { enabled: true, elevation: 65, intensity: 2.4, color: 0xfff5e0, fill: 1.5 },
+    label: 'Trưa — nắng đỉnh, trời trong, fill sáng',
+    opts: { enabled: true, elevation: 65, intensity: 2.4, color: 0xfff5e0, fill: 1.5, overcast: 0 },
   },
   {
     icon: '🌇',
     label: 'Hoàng hôn — nắng xiên cam, fill vừa',
-    opts: { enabled: true, elevation: 12, intensity: 1.7, color: 0xffb878, fill: 1.0 },
+    opts: {
+      enabled: true,
+      elevation: 12,
+      intensity: 1.7,
+      color: 0xffb878,
+      fill: 1.0,
+      overcast: 0.1,
+    },
   },
   {
     icon: '☁️',
-    label: 'Âm u — sun yếu xám, fill cao (sky gánh)',
-    opts: { enabled: true, elevation: 55, intensity: 0.5, color: 0xdde6ee, fill: 2.2 },
+    label: 'Âm u — sun yếu xám, trời mây đặc, fill cao (sky gánh)',
+    opts: {
+      enabled: true,
+      elevation: 55,
+      intensity: 0.5,
+      color: 0xdde6ee,
+      fill: 2.2,
+      overcast: 0.85,
+    },
   },
   {
     icon: '🌙',
-    label: 'Đêm — tắt sun, fill mờ',
-    opts: { enabled: false, fill: 0.5 },
+    label: 'Đêm — tắt sun (trời tối theo), fill mờ',
+    opts: { enabled: false, fill: 0.5, overcast: 0.15 },
   },
 ]
 
