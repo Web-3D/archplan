@@ -28,7 +28,40 @@ export type SunOpts = {
   intensity: number
   color: number // màu sáng (hex) — điều khiển qua ô màu trên gizmo sun
   enabled: boolean // bật/tắt sun (nút trên gizmo) — tắt → chỉ còn hemisphere fill
+  fill: number // 🌅 hệ số fill môi trường (× hemi + IBL) — 1 = mức cũ; mặt ngang xa sun tối → tăng
 }
+
+// 🌅 Preset ánh sáng môi trường (khay 🌅 utilTray) — 1 nút set cả bộ {elevation, intensity, color, fill},
+// mirror Environment-Light-Mixer của Unreal: rig là 1 KHỐI, không phải N đèn rời. KHÔNG đổi azimuth
+// (giữ hướng nắng user đã kéo trên gizmo). 🌙 Đêm = enabled:false (sun off, chỉ còn fill thấp).
+export type EnvPreset = {
+  icon: string
+  label: string
+  opts: Partial<Omit<SunOpts, 'azimuth'>>
+}
+
+export const ENV_PRESETS: EnvPreset[] = [
+  {
+    icon: '☀️',
+    label: 'Trưa — nắng đỉnh, fill sáng',
+    opts: { enabled: true, elevation: 65, intensity: 2.4, color: 0xfff5e0, fill: 1.5 },
+  },
+  {
+    icon: '🌇',
+    label: 'Hoàng hôn — nắng xiên cam, fill vừa',
+    opts: { enabled: true, elevation: 12, intensity: 1.7, color: 0xffb878, fill: 1.0 },
+  },
+  {
+    icon: '☁️',
+    label: 'Âm u — sun yếu xám, fill cao (sky gánh)',
+    opts: { enabled: true, elevation: 55, intensity: 0.5, color: 0xdde6ee, fill: 2.2 },
+  },
+  {
+    icon: '🌙',
+    label: 'Đêm — tắt sun, fill mờ',
+    opts: { enabled: false, fill: 0.5 },
+  },
+]
 
 // Loại nền môi trường: 'none' = ground tối + lưới tọa độ (như cũ); còn lại = vật liệu tự nhiên
 // (cung cấp màu bounce qua HemisphereLight.groundColor). sand/dirt-rock thêm sau.

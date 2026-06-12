@@ -18,7 +18,7 @@ pipeline). Mỗi mối quan tâm tách vào 1 folder concern:
 | `build/` | [build.ts](build/build.ts) | Pure math: turtle (→ `building-kit/turtle`), bbox, footprint, stair-footprint |
 | `gui/` | [gui.ts](gui/gui.ts) · [sections.ts](gui/sections.ts) · [ctx.ts](gui/ctx.ts) | Panel lil-gui + `APGuiCtx` context |
 | | [devhud.ts](gui/devhud.ts) | `DevHud` — perf HUD dev (fps/budget/leak), phím \` |
-| `scene/` | [scene.ts](scene/scene.ts) | HeightGridSystem (laser grid + labels) + HumanFigure (scale ref) |
+| `scene/` | [scene.ts](scene/scene.ts) | HeightGridSystem (laser grid + labels) + HumanFigure (scale ref) + `SunOpts`/`ENV_PRESETS` (rig ánh sáng: ☀️🌇☁️🌙 + fill — khay 🌅 utilTray) |
 | `interaction/` | [palette.ts](interaction/palette.ts) | `PalettePanel` — khay swatch atelier + cọ sơn 3D |
 | | [manipulate.ts](interaction/manipulate.ts) | `ManipulateTool` — 🤚 Move + 🎯 Focus (kéo-thả) |
 | | [highlight.ts](interaction/highlight.ts) | `HighlightOverlay` — flash viền phần đang chỉnh |

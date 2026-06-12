@@ -36,6 +36,8 @@ export class SunGizmo {
   private mat: THREE.MeshBasicMaterial | null = null
   private panelEl: HTMLElement | null = null // panel control — DOM cố định (dock góc), KHÔNG theo sun
   private btn: HTMLButtonElement | null = null
+  private intEl: HTMLInputElement | null = null // giữ ref để sync() bám opts khi nguồn NGOÀI đổi (preset 🌅)
+  private colEl: HTMLInputElement | null = null
   private axes: THREE.Group | null = null // CHỈ trục Y (dây dọi sun→lưới) — hiện khi kéo
   private axesGeo: THREE.BufferGeometry | null = null
   private axesMat: THREE.LineBasicMaterial | null = null
@@ -96,13 +98,18 @@ export class SunGizmo {
     if (this.axes) this.axes.visible = false
   }
 
-  /** Đồng bộ gizmo theo light (gọi cuối _applySun): vị trí + màu + mờ đi khi tắt. */
+  /** Đồng bộ gizmo theo light (gọi cuối _applySun): vị trí + màu + mờ đi khi tắt + DOM dock bám opts
+   *  (nguồn đổi sun có thể là NGOÀI panel — preset khay 🌅 — slider/màu/toggle phải nhảy theo). */
   sync(): void {
     if (this.isDisposed || !this.mesh || !this.mat) return
     this.mesh.position.copy(this.host.light.position)
     const on = this.host.opts.enabled
     this.mat.color.set(on ? this.host.opts.color : 0x556070)
     this.mat.opacity = on ? 1 : 0.35
+    if (this.btn) this.btn.textContent = on ? '☀' : '🌙'
+    if (this.intEl) this.intEl.value = String(this.host.opts.intensity)
+    if (this.colEl)
+      this.colEl.value = '#' + (this.host.opts.color & 0xffffff).toString(16).padStart(6, '0')
     this._updateAxisY() // đáy trục Y luôn chạm lưới (world y=0) dù sun cao/thấp
   }
 
@@ -129,6 +136,8 @@ export class SunGizmo {
     this.mat = null
     this.panelEl = null
     this.btn = null
+    this.intEl = null
+    this.colEl = null
   }
 
   private _disposeAxes(): void {
@@ -205,6 +214,7 @@ export class SunGizmo {
       this.host.apply()
     })
     int.addEventListener('change', () => this.host.persist())
+    this.intEl = int
     const col = document.createElement('input')
     col.type = 'color'
     col.className = 'ap-sun-color'
@@ -214,6 +224,7 @@ export class SunGizmo {
       this.host.apply()
     })
     col.addEventListener('change', () => this.host.persist())
+    this.colEl = col
     wrap.append(btn, int, col)
     return wrap
   }

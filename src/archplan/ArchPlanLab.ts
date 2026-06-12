@@ -168,6 +168,7 @@ import {
 } from 'threejs-modules/site/render/fromState'
 import {
   type BorderMaterialKey,
+  type BridgeConfig,
   coverageStats,
   defaultSiteState,
   type FenceConfig,
@@ -205,6 +206,7 @@ import { MixPresetPanel } from './mix/PresetPanel' // 🧪 khay preset mix (Mả
 import { EditorGrid, poolBboxes } from './scene/grid' // 🕳️ lưới editor y=0 khoét lỗ hồ — tách monolith
 import {
   CoordPicker,
+  ENV_PRESETS,
   type GroundType,
   HeightGridSystem,
   HumanFigure,
@@ -438,6 +440,7 @@ export class ArchPlanLab extends BaseWorld {
   private _siteNavigate: ((cfg: WaterConfig) => boolean) | null = null // click hồ 3D → nhảy GUI tới tab hồ đó
   private _siteNavigateFish: ((idx: number) => void) | null = null // 🐟 click đàn cá 3D → nhảy GUI tới tab F idx
   private _siteNavigateFence: ((idx: number) => void) | null = null // 🧱 click rào 3D → nhảy GUI tới lớp rào idx
+  private _siteNavigateBridge: ((idx: number) => void) | null = null // 🌉 click cầu 3D → nhảy GUI tới tab C idx
   private _siteNavigateLayer: ((idx: number) => void) | null = null // 🟫 click tầng ground 3D → nhảy GUI Ground▸Gn
   private _activeCutIdx = -1 // 🟫 layer cut đang active (focus tab / click / kéo) → mảng cut HIỆN XÁM; -1 = ẩn hết
   private _activeLayerIdx = -1 // 🟫 layer ground đang focus (add HOẶC cut) → GroundTool hiện tay-cầm nắn (free); -1 = không
@@ -453,10 +456,13 @@ export class ArchPlanLab extends BaseWorld {
     hover?: HTMLButtonElement
     pal?: HTMLButtonElement
     mix?: HTMLButtonElement
+    env?: HTMLButtonElement
   } = {}
   // Mặc định TẮT khi load/reload (NgQuan 2026-06-11 — mọi nút khay tiện ích off lúc mở trang).
   private _paletteShown = false
   private _mixTrayShown = false
+  private _envTrayShown = false
+  private envTrayWrap: HTMLElement | null = null // 🌅 khay preset ánh sáng môi trường (float bền như utilTray)
   private controls: OrbitControls | null = null
 
   // Đèn mặt trời + tham số (điều khiển qua panel ☀ Sun). Default ≈ vị trí cũ (10,18,10).
@@ -468,6 +474,7 @@ export class ArchPlanLab extends BaseWorld {
     intensity: 2.2,
     color: 0xfff5e0,
     enabled: true,
+    fill: 1.5, // >1: nền tổng (mặt ngang xa sun) từng tối vì fill cũ bị bóp (NgQuan 2026-06-12)
   }
   private sunGizmo: SunGizmo | null = null // ☀ sun = vật thể kéo trong scene (thay panel GUI)
 
@@ -1078,6 +1085,7 @@ export class ArchPlanLab extends BaseWorld {
     if (this._tryClickFish(e)) return // 🐟 cá TRƯỚC hồ — cá bơi DƯỚI mặt nước trong suốt (ray riêng mesh cá)
     if (this.waterTool?.tryClick(e)) return // 💧 click trúng hồ → trỏ GUI hồ
     if (this._tryClickFence(e)) return // 🧱 click trúng rào → trỏ GUI Fence
+    if (this._tryClickBridge(e)) return // 🌉 click trúng cầu → trỏ GUI Cầu▸Cn
     if (this._tryClickLayer(e)) return // 🟫 click trúng tầng ground → trỏ GUI Ground▸Gn
     this.manipulate?.clickFocus(e) // building element → trỏ folder tương ứng
   }
@@ -1225,6 +1233,37 @@ export class ArchPlanLab extends BaseWorld {
     if (pHit && pHit.distance < fHit.distance) return false // building element gần hơn → nhường
     this._navigateToFence(Math.max(0, this._fenceIdxOf(fHit.object)))
     return true
+  }
+
+  // 🌉 Cầu của object trúng (đi ngược parent tới sub-group mang userData.bridgeRef). -1 nếu không thuộc cầu.
+  private _bridgeIdxOf(obj: THREE.Object3D | null): number {
+    let o = obj
+    while (o && o !== this._bridgeGroup) {
+      const ref = o.userData.bridgeRef as BridgeConfig | undefined
+      if (ref) return this.site.bridges.indexOf(ref)
+      o = o.parent
+    }
+    return -1
+  }
+
+  // 👆 Click thường trúng CẦU (gần hơn building pick) → trỏ GUI Cầu (tab C của cầu trúng). Trả false → nhường.
+  private _tryClickBridge(e: PointerEvent): boolean {
+    if (!this.site.show || this._bridgeGroup.children.length === 0) return false
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const bHit = this._ray.intersectObjects(this._bridgeGroup.children, true)[0]
+    if (!bHit) return false
+    const pHit = this._ray.intersectObjects(this.pickGroup.children, false)[0]
+    if (pHit && pHit.distance < bHit.distance) return false // building element gần hơn → nhường
+    const idx = this._bridgeIdxOf(bHit.object)
+    if (idx < 0) return false
+    this._navigateToBridge(idx)
+    return true
+  }
+
+  // 🌉 Click trúng cầu 3D → mở GUI: drawer "Ground" (idx1) → sub-tab "Cầu" → instance tab C idx.
+  private _navigateToBridge(idx: number): void {
+    this.drawerTabs?.select(1, { trusted: false }) // Building|Ground|Lab → Ground
+    this._siteNavigateBridge?.(idx)
   }
 
   // 🟫 Click trúng TẦNG ground (G1+, mesh có groundLayerIdx) GẦN HƠN building pick → trỏ GUI Ground▸Gn. Trả
@@ -1557,6 +1596,8 @@ export class ArchPlanLab extends BaseWorld {
     this._hoverGhost = null
     this.utilTray?.remove() // 🧰 khay tiện ích (nút 🧪 bên trong do _disposeLabFloat gỡ trước)
     this.utilTray = null
+    this.envTrayWrap?.remove() // 🌅 khay preset ánh sáng (float bền cùng vòng đời utilTray)
+    this.envTrayWrap = null
     this._trayBtns = {}
   }
 
@@ -1801,8 +1842,11 @@ export class ArchPlanLab extends BaseWorld {
     if (!this.sun || !this.sky) return
     const p = this.sun.position
     const day = this.sky.setSun(p.x, p.y, p.z) // [0..1]: 1=trưa, 0=đêm
-    if (this.hemiLight) this.hemiLight.intensity = 0.06 + 0.29 * day
-    this.scene.environmentIntensity = 0.05 + 0.25 * day
+    // × fill (sunOpts, default 1.5): mặt NGANG xa hướng sun sống bằng hemi+IBL — curve cũ (fill=1)
+    // bóp fill cho bóng đậm làm nền tổng tối sầm. Slider/preset khay 🌅 chỉnh live.
+    const fill = this.sunOpts.fill
+    if (this.hemiLight) this.hemiLight.intensity = (0.06 + 0.29 * day) * fill
+    this.scene.environmentIntensity = (0.05 + 0.25 * day) * fill
   }
 
   // Hướng + độ dài vệt tiếp đất của bãi cỏ theo sun (live). Gọi khi sun đổi + sau mỗi lần dựng lại _siteGrass.
@@ -1833,6 +1877,7 @@ export class ArchPlanLab extends BaseWorld {
         this.sunOpts.intensity = Math.max(0, Math.min(5, o.intensity))
       if (typeof o.color === 'number') this.sunOpts.color = Math.floor(o.color) & 0xffffff
       if (typeof o.enabled === 'boolean') this.sunOpts.enabled = o.enabled
+      if (typeof o.fill === 'number') this.sunOpts.fill = Math.max(0, Math.min(3, o.fill))
     } catch {
       /* JSON hỏng → giữ default */
     }
@@ -2212,6 +2257,7 @@ export class ArchPlanLab extends BaseWorld {
     this._siteNavigate = site.navigateToWater // refresh mỗi _rebuildGUI (panel dựng lại) → luôn trỏ panel hiện tại
     this._siteNavigateFish = site.navigateToFish // 🐟 click đàn cá 3D → type-tab Cá ▸ tab F
     this._siteNavigateFence = site.navigateToFence // 🧱 click rào 3D → sub-tab Fence
+    this._siteNavigateBridge = site.navigateToBridge // 🌉 click cầu 3D → sub-tab Cầu▸Cn
     this._siteNavigateLayer = site.navigateToGroundLayer // 🟫 click tầng ground 3D → sub-tab Ground▸Gn
     this.drawerPanels = [site.panel] // chỉ Ground (Lab ở float riêng); gỡ khi teardown
     this._buildDrawerTabs(drawerBody, site.panel)
@@ -2333,9 +2379,74 @@ export class ArchPlanLab extends BaseWorld {
       this._setMixTrayShown(!this._mixTrayShown)
     )
     mix.classList.toggle('on', this._mixTrayShown)
-    this._trayBtns = { hover: hov, pal, mix }
+    const env = mk('🌅', 'Hiện / ẩn khay Ánh sáng môi trường (preset ☀️🌇☁️🌙 + fill)', () =>
+      this._setEnvTrayShown(!this._envTrayShown)
+    )
+    this._trayBtns = { hover: hov, pal, mix, env }
     this.canvas.parentElement?.appendChild(bar)
     this.utilTray = bar
+    this._setupEnvTray() // 🌅 float bền (như khay) — dựng 1 lần, ẩn mặc định
+  }
+
+  // 🌅 Khay preset ánh sáng môi trường: [☀️ Trưa][🌇 Hoàng hôn][☁️ Âm u][🌙 Đêm] + slider fill.
+  // Float BỀN (tạo 1 lần cùng utilTray — DOM chỉ bind sunOpts, không phụ thuộc ctx/_rebuildGUI).
+  // Preset = Object.assign cả bộ vào sunOpts → _applySun cascade (sky/grass/water/gizmo) + persist.
+  private _setupEnvTray(): void {
+    this._ensureEnvTrayCss()
+    const wrap = document.createElement('div')
+    wrap.className = 'ap-envpre-float'
+    wrap.style.display = 'none'
+    const fill = document.createElement('input')
+    for (const p of ENV_PRESETS) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.textContent = p.icon
+      b.title = p.label
+      b.addEventListener('click', () => {
+        Object.assign(this.sunOpts, p.opts)
+        fill.value = String(this.sunOpts.fill) // slider bám theo preset
+        this._applySun()
+        this._saveSunOpts()
+      })
+      wrap.appendChild(b)
+    }
+    fill.type = 'range'
+    fill.min = '0'
+    fill.max = '3'
+    fill.step = '0.05'
+    fill.value = String(this.sunOpts.fill)
+    fill.title = 'Fill môi trường (hemi + IBL) — nền tổng tối/sáng. 1 = mức cũ.'
+    fill.addEventListener('input', () => {
+      this.sunOpts.fill = parseFloat(fill.value)
+      this._applySunToSky() // chỉ hemi/IBL — không đụng vị trí sun
+    })
+    fill.addEventListener('change', () => this._saveSunOpts())
+    wrap.appendChild(fill)
+    this.canvas.parentElement?.appendChild(wrap)
+    this.envTrayWrap = wrap
+  }
+
+  // CSS khay 🌅 — cùng vị trí top:40 với khay mix (chỉ mở 1 trong 2 thường lệ), nút đều 28×28 như utilbar.
+  private _ensureEnvTrayCss(): void {
+    if (document.getElementById('ap-envpre-css')) return
+    const s = document.createElement('style')
+    s.id = 'ap-envpre-css'
+    s.textContent =
+      `.ap-envpre-float{position:absolute;top:40px;left:6px;z-index:156;display:flex;align-items:center;` +
+      `gap:4px;padding:4px;background:rgba(7,22,18,.88);border:1px solid rgba(201,162,78,.4);` +
+      `border-radius:9px;backdrop-filter:blur(4px);box-shadow:0 2px 8px rgba(0,0,0,.45)}` +
+      `.ap-envpre-float button{width:28px;height:28px;padding:0;display:grid;place-items:center;` +
+      `font-size:15px;line-height:1;border-radius:6px;border:1px solid rgba(180,200,188,.35);` +
+      `background:rgba(14,46,38,.92);cursor:pointer}` +
+      `.ap-envpre-float button:hover{background:rgba(14,46,38,.98);border-color:#e0b860}` +
+      `.ap-envpre-float input[type=range]{width:84px;accent-color:#e0b860;cursor:pointer}`
+    document.head.appendChild(s)
+  }
+
+  private _setEnvTrayShown(shown: boolean): void {
+    this._envTrayShown = shown
+    if (this.envTrayWrap) this.envTrayWrap.style.display = shown ? '' : 'none'
+    this._trayBtns.env?.classList.toggle('on', shown)
   }
 
   // CSS khay tiện ích — nút ĐỀU 28×28, emoji canh giữa grid, cùng viền/hover/on (vàng accent như Lab).
@@ -2635,6 +2746,7 @@ export class ArchPlanLab extends BaseWorld {
     this._siteNavigate = null // panel cũ gỡ → bỏ ref navigate (gắn lại ở _buildLeftTools kế tiếp)
     this._siteNavigateFish = null
     this._siteNavigateFence = null
+    this._siteNavigateBridge = null
     this._siteNavigateLayer = null
     // tab con cỏ (Lá đơn|Bụi cỏ + Số đo|Độ cong|Bóng đổ) + Garden Tabs do site.dispose() lo; Lab panel = preview-only (no Tabs)
     this.drawerTabs?.dispose() // gỡ tab bar drawer (KHÔNG đụng panel — caller sở hữu)
