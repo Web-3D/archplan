@@ -2306,13 +2306,14 @@ function buildFenceDomain(ctx: APGuiCtx): {
 
 // ── 🌉 CẦU (bridge bắc ngang hồ) — đa-instance site.bridges (mirror buildFenceDomain) ──────────────
 // Tham số parametric theo industry (Houdini Arch Bridge SOP / CityEngine pier / RailClone deck+pier /
-// SideFX Japanese taiko-bashi): nhịp + vồng vòm + ván + lan can (trụ con) + trụ đỡ gầm. Đặt TỰ DO trong
-// lô (không bám hồ). Slider commit-on-release (applySite — dựng lại CHỈ cầu qua _syncBridge); toggle/select
-// = áp ngay. Builder hình: site/render/bridge.ts.
+// SideFX Japanese taiko-bashi): nhịp + vồng (vòm/THẲNG boardwalk) + ván rời (dày) + vành biên + lan can
+// (tay vịn + trụ con vuông/tròn) + trụ đỡ 2-bên tự đâm đáy hồ. Đặt TỰ DO trong lô. Slider LIVE khi kéo
+// (applyBridgeLive — rebuild CHỈ cầu), buông tay commit (applySite). Builder hình: site/render/bridge.ts.
 type BridgeMKey = 'offsetX' | 'offsetZ' | 'span' | 'deckWidth' | 'rise' | 'railHeight'
 type BridgeNKey = 'plankCount' | 'postCount' | 'pierCount'
+type BridgeCmKey = 'deckThick' | 'rimSize' | 'railBeam' | 'postWidth' | 'pierWidth'
 
-// slider mét (hiển thị m, lưu mm) — buông tay (committed) mới applySite (dựng lại cầu). Tách (rule-50).
+// slider mét (hiển thị m, lưu mm) — kéo LIVE (rebuild chỉ cầu), buông tay commit. Tách (rule-50).
 function bridgeMSlider(
   ctx: APGuiCtx,
   b: BridgeConfig,
@@ -2330,12 +2331,13 @@ function bridgeMSlider(
     (v, c) => {
       b[key] = Math.round(v * 1000)
       if (c) ctx.applySite(true)
+      else ctx.applyBridgeLive()
     },
     2
   )
 }
 
-// slider số nguyên (đếm) — buông tay mới applySite.
+// slider số nguyên (đếm) — kéo LIVE, buông tay commit.
 function bridgeNSlider(
   ctx: APGuiCtx,
   b: BridgeConfig,
@@ -2353,8 +2355,33 @@ function bridgeNSlider(
     (v, c) => {
       b[key] = Math.round(v)
       if (c) ctx.applySite(true)
+      else ctx.applyBridgeLive()
     },
     0
+  )
+}
+
+// slider TIẾT DIỆN cm (hiển thị cm, lưu mm) — chi tiết nhỏ (ván/vành/tay vịn/trụ) cần bước mịn hơn slider m.
+function bridgeCmSlider(
+  ctx: APGuiCtx,
+  b: BridgeConfig,
+  label: string,
+  key: BridgeCmKey,
+  min: number,
+  max: number
+): HTMLElement {
+  return sliderRow(
+    label,
+    min,
+    max,
+    0.5,
+    b[key] / 10,
+    (v, c) => {
+      b[key] = Math.round(v * 10)
+      if (c) ctx.applySite(true)
+      else ctx.applyBridgeLive()
+    },
+    1
   )
 }
 
@@ -2374,7 +2401,57 @@ function bridgeToggle(
   )
 }
 
-// Controls 1 cầu — bộ tham số parametric. Toggle/select áp ngay; slider buông tay mới dựng lại.
+// Thân cầu: vị trí/xoay + nhịp/rộng/vồng + ván rời (số + dày) + vành biên. Tách (rule-50).
+function bridgeBodyRows(pane: HTMLElement, ctx: APGuiCtx, b: BridgeConfig): void {
+  pane.appendChild(bridgeMSlider(ctx, b, 'Pos X m', 'offsetX', -20, 20))
+  pane.appendChild(bridgeMSlider(ctx, b, 'Pos Z m', 'offsetZ', -20, 20))
+  pane.appendChild(
+    sliderRow(
+      'Xoay °',
+      0,
+      360,
+      5,
+      b.rotDeg,
+      (v, c) => {
+        b.rotDeg = v
+        if (c) ctx.applySite(true)
+        else ctx.applyBridgeLive()
+      },
+      0
+    )
+  )
+  pane.appendChild(bridgeMSlider(ctx, b, 'Dài (nhịp) m', 'span', 1, 20))
+  pane.appendChild(bridgeMSlider(ctx, b, 'Rộng mặt m', 'deckWidth', 0.6, 4))
+  pane.appendChild(bridgeMSlider(ctx, b, 'Vồng/Cao sàn m', 'rise', 0, 2))
+  pane.appendChild(bridgeNSlider(ctx, b, 'Số ván', 'plankCount', 4, 40))
+  pane.appendChild(bridgeCmSlider(ctx, b, 'Dày ván cm', 'deckThick', 2, 20))
+  pane.appendChild(bridgeCmSlider(ctx, b, 'Vành cầu cm', 'rimSize', 4, 40))
+}
+
+// Lan can: bật/cao + tay vịn + trụ con (số/tiết diện/dáng vuông-tròn). Tách (rule-50).
+function bridgeRailRows(pane: HTMLElement, ctx: APGuiCtx, b: BridgeConfig): void {
+  bridgeToggle(pane, ctx, b, 'Lan can', 'railOn')
+  pane.appendChild(bridgeMSlider(ctx, b, 'Cao lan can m', 'railHeight', 0.3, 1.5))
+  pane.appendChild(bridgeCmSlider(ctx, b, 'Tay vịn cm', 'railBeam', 2, 15))
+  pane.appendChild(bridgeNSlider(ctx, b, 'Trụ con / bên', 'postCount', 0, 20))
+  pane.appendChild(bridgeCmSlider(ctx, b, 'Trụ con cm', 'postWidth', 2, 15))
+  pane.appendChild(
+    selectRow<BridgeConfig['postShape']>(
+      'Dáng trụ con',
+      [
+        ['Vuông', 'square'],
+        ['Tròn', 'round'],
+      ],
+      b.postShape,
+      (v) => {
+        b.postShape = v
+        ctx.applySite(true)
+      }
+    )
+  )
+}
+
+// Controls 1 cầu — bộ tham số parametric. Toggle/select áp ngay; slider kéo LIVE + buông tay commit.
 function buildBridgeControls(pane: HTMLElement, ctx: APGuiCtx, b: BridgeConfig): void {
   bridgeToggle(pane, ctx, b, 'Bật cầu', 'enabled')
   pane.appendChild(
@@ -2391,31 +2468,25 @@ function buildBridgeControls(pane: HTMLElement, ctx: APGuiCtx, b: BridgeConfig):
       }
     )
   )
-  pane.appendChild(bridgeMSlider(ctx, b, 'Pos X m', 'offsetX', -20, 20))
-  pane.appendChild(bridgeMSlider(ctx, b, 'Pos Z m', 'offsetZ', -20, 20))
   pane.appendChild(
-    sliderRow(
-      'Xoay °',
-      0,
-      360,
-      5,
-      b.rotDeg,
-      (v, c) => {
-        b.rotDeg = v
-        if (c) ctx.applySite(true)
-      },
-      0
+    selectRow<BridgeConfig['shape']>(
+      'Dáng cầu',
+      [
+        ['Vòm (taiko)', 'arch'],
+        ['Thẳng (đường đi)', 'flat'],
+      ],
+      b.shape,
+      (v) => {
+        b.shape = v
+        ctx.applySite(true)
+      }
     )
   )
-  pane.appendChild(bridgeMSlider(ctx, b, 'Dài (nhịp) m', 'span', 1, 20))
-  pane.appendChild(bridgeMSlider(ctx, b, 'Rộng mặt m', 'deckWidth', 0.6, 4))
-  pane.appendChild(bridgeMSlider(ctx, b, 'Vồng vòm m', 'rise', 0, 2))
-  pane.appendChild(bridgeNSlider(ctx, b, 'Số ván', 'plankCount', 4, 40))
-  bridgeToggle(pane, ctx, b, 'Lan can', 'railOn')
-  pane.appendChild(bridgeMSlider(ctx, b, 'Cao lan can m', 'railHeight', 0.3, 1.5))
-  pane.appendChild(bridgeNSlider(ctx, b, 'Trụ con / bên', 'postCount', 0, 20))
+  bridgeBodyRows(pane, ctx, b)
+  bridgeRailRows(pane, ctx, b)
   bridgeToggle(pane, ctx, b, 'Trụ đỡ gầm', 'pierOn')
-  pane.appendChild(bridgeNSlider(ctx, b, 'Số trụ đỡ', 'pierCount', 0, 6))
+  pane.appendChild(bridgeNSlider(ctx, b, 'Hàng trụ (×2 bên)', 'pierCount', 0, 6))
+  pane.appendChild(bridgeCmSlider(ctx, b, 'Trụ đỡ cm', 'pierWidth', 4, 40))
 }
 
 // 1 pane cầu i: controls + ✕ xoá (splice site.bridges + applySite).

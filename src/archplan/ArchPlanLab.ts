@@ -1989,10 +1989,7 @@ export class ArchPlanLab extends BaseWorld {
       site: this.site,
       applySite: (persist) => this._applySite(persist),
       setActiveGroundLayer: (idx) => this._setActiveCut(idx), // 🟫 focus layer (navTo) → cut hiện xám / add ẩn cut
-      applySiteLive: () => this._applySiteLive(),
-      applyFenceLive: () => this._applyFenceLive(),
-      applyTerrainLive: () => this._applyTerrainLive(),
-      applyTerrainDetail: () => this._applyTerrainDetail(),
+      ...this._siteLiveCtx(), // 🌳 nhóm delegate LIVE-drag (site/rào/cầu/terrain) — tách giữ ≤50 dòng
       siteStats: () => this._siteStats(),
       registerSiteReadout: (fn) => (this._refreshSiteReadout = fn),
       ...this._siteTuneGuiCtx(),
@@ -2026,6 +2023,24 @@ export class ArchPlanLab extends BaseWorld {
       redo: () => this._redo(),
       highlightPart: (t) => this.highlight?.show(t),
       ...this._focusCtx(),
+    }
+  }
+
+  // Delegate LIVE-drag site (lô/rào/cầu/terrain) — tách như _floorCtx giữ _makeGuiCtx ≤50 dòng.
+  private _siteLiveCtx(): Pick<
+    APGuiCtx,
+    | 'applySiteLive'
+    | 'applyFenceLive'
+    | 'applyBridgeLive'
+    | 'applyTerrainLive'
+    | 'applyTerrainDetail'
+  > {
+    return {
+      applySiteLive: () => this._applySiteLive(),
+      applyFenceLive: () => this._applyFenceLive(),
+      applyBridgeLive: () => this._applyBridgeLive(), // 🌉 kéo slider cầu → rebuild CHỈ cầu (rẻ)
+      applyTerrainLive: () => this._applyTerrainLive(),
+      applyTerrainDetail: () => this._applyTerrainDetail(),
     }
   }
 
@@ -3474,12 +3489,25 @@ export class ArchPlanLab extends BaseWorld {
     this._gatePickGroup.clear()
   }
 
-  // 🌉 Dựng/GIỮ cầu theo _bridgeSig (= JSON bridges[] + cờ show). Giống lần trước → giữ; khác → dispose +
-  // dựng lại vào _bridgeGroup (box thuần, rẻ). Mirror _syncFence — cầu tách siteSig nên kéo slider cầu KHÔNG
-  // đụng nước-RTT.
+  // 🌉 Dựng/GIỮ cầu theo _bridgeSig (= JSON bridges[] + HỒ-drop + cờ show). Giống lần trước → giữ; khác →
+  // dispose + dựng lại vào _bridgeGroup (box thuần, rẻ). Mirror _syncFence — cầu tách siteSig nên kéo slider
+  // cầu KHÔNG đụng nước-RTT. Sig GỒM footprint+depthY hồ vì trụ cầu tự đâm tới đáy hồ (waterDropAt) —
+  // hồ đổi cỡ/sâu/vị trí thì chân trụ phải dựng lại theo.
   private _syncBridge(): void {
     const anyEnabled = this.site.bridges.some((b) => b.enabled)
-    const sig = this.site.show && anyEnabled ? JSON.stringify(this.site.bridges) : 'off'
+    const dropSig = JSON.stringify(
+      renderWaters(this.site).map((w) => [
+        w.shape,
+        w.width,
+        w.depth,
+        w.points,
+        w.offsetX,
+        w.offsetZ,
+        w.depthY,
+      ])
+    )
+    const sig =
+      this.site.show && anyEnabled ? JSON.stringify(this.site.bridges) + '|' + dropSig : 'off'
     if (sig === this._bridgeSig) return
     this._bridgeSig = sig
     this._clearBridge()
@@ -3637,6 +3665,17 @@ export class ArchPlanLab extends BaseWorld {
       this._syncFence()
       this._liveRebuild = false
       if (this.sun) this.sun.shadow.needsUpdate = true // bóng rào kéo theo
+    })
+  }
+
+  // 🌉 LIVE drag slider CẦU: rebuild CHỈ CẦU (throttle ≤1/frame) — box thuần rẻ. Mirror _applyFenceLive:
+  // KHÔNG _renderSite (nước-RTT) / cỏ / preview / readout. Buông tay → _applySite(true) commit + autosave.
+  private _applyBridgeLive(): void {
+    if (this._siteRaf) return
+    this._siteRaf = requestAnimationFrame(() => {
+      this._siteRaf = 0
+      this._syncBridge()
+      if (this.sun) this.sun.shadow.needsUpdate = true // bóng cầu kéo theo
     })
   }
 
