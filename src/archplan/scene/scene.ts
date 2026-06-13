@@ -30,6 +30,7 @@ export type SunOpts = {
   enabled: boolean // bật/tắt sun (nút trên gizmo) — tắt → chỉ còn hemisphere fill
   fill: number // 🌅 hệ số fill môi trường (× hemi + IBL) — 1 = mức cũ; mặt ngang xa sun tối → tăng
   overcast: number // ☁️ mức u ám bầu trời [0..1] — sky xám dần + nuốt đĩa nắng (SkyGradient.setOvercast)
+  fog: number // 🌫️ sương mù [0..1] — chiều sâu khí quyển (scene.fogNode density); 0 = trong veo, 1 = mù dày
 }
 
 // 🌅 Preset ánh sáng môi trường (khay 🌅 utilTray) — 1 nút set cả bộ {elevation, intensity, color, fill},
@@ -45,7 +46,15 @@ export const ENV_PRESETS: EnvPreset[] = [
   {
     icon: '☀️',
     label: 'Trưa — nắng đỉnh, trời trong, fill sáng',
-    opts: { enabled: true, elevation: 65, intensity: 2.4, color: 0xfff5e0, fill: 1.5, overcast: 0 },
+    opts: {
+      enabled: true,
+      elevation: 65,
+      intensity: 2.4,
+      color: 0xfff5e0,
+      fill: 1.5,
+      overcast: 0,
+      fog: 0,
+    },
   },
   {
     icon: '🌇',
@@ -57,6 +66,7 @@ export const ENV_PRESETS: EnvPreset[] = [
       color: 0xffb878,
       fill: 1.0,
       overcast: 0.1,
+      fog: 0.15,
     },
   },
   {
@@ -69,12 +79,13 @@ export const ENV_PRESETS: EnvPreset[] = [
       color: 0xdde6ee,
       fill: 2.2,
       overcast: 0.85,
+      fog: 0.35,
     },
   },
   {
     icon: '🌙',
     label: 'Đêm — tắt sun (trời tối theo), fill mờ',
-    opts: { enabled: false, fill: 0.5, overcast: 0.15 },
+    opts: { enabled: false, fill: 0.5, overcast: 0.15, fog: 0.2 },
   },
 ]
 

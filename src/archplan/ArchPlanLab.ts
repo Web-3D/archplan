@@ -137,6 +137,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js'
+import { densityFogFactor, fog, uniform } from 'three/tsl' // 🌫️ sương mù khí quyển (scene.fogNode)
 import { PMREMGenerator } from 'three/webgpu'
 import type { GrassBlades, GrassExcludeRect } from 'threejs-modules/components/GrassBlades'
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
@@ -429,7 +430,9 @@ const STORM_SKY: Partial<SunOpts> = {
   color: 0x9aa4ae,
   fill: 1.7,
   overcast: 1,
+  fog: 0.5,
 }
+const FOG_OVERCAST_COL = new THREE.Color(0x9aa2aa) // 🌫️ màu fog khi trời âm u (lerp tới từ xanh-ngày)
 const BORDER_TEX_SPEC: Record<BorderTexKey, SurfaceTextureSpec> = {
   'icelandic-jagged': {
     baseColor: { url: icelandicBaseColorUrl, colorSpace: 'srgb' },
@@ -516,7 +519,12 @@ export class ArchPlanLab extends BaseWorld {
     enabled: true,
     fill: 1.5, // >1: nền tổng (mặt ngang xa sun) từng tối vì fill cũ bị bóp (NgQuan 2026-06-12)
     overcast: 0,
+    fog: 0,
   }
+  // 🌫️ Sương mù khí quyển — scene.fogNode density (uniform live). Màu fog lerp xanh↔xám theo overcast.
+  private readonly uFogDensity = uniform(0)
+  private readonly uFogColor = uniform(new THREE.Color(0xbcd0e0))
+  private _envFogSlider: HTMLInputElement | null = null // ref slider Sương mù khay 🌅 (đặt cạnh uFog — né hunk cá)
   private sunGizmo: SunGizmo | null = null // ☀ sun = vật thể kéo trong scene (thay panel GUI)
 
   // opFolders — key: "${instId}:${segIdx}" → opening sub-folders per segment
@@ -1961,6 +1969,8 @@ export class ArchPlanLab extends BaseWorld {
     this.editorGrid = new EditorGrid() // lưới y=0 khoét lỗ hồ (scene/grid.ts)
     this.sky = new SkyGradient() // 🌅 sky qua scene.backgroundNode (KHÔNG mesh — luôn phủ, tự theo camera)
     this.scene.backgroundNode = this.sky.getBackgroundNode()
+    // 🌫️ Sương mù: density-fog (vật thể xa tan vào màn khí) — uFogDensity 0 = tắt. KHÔNG đụng backgroundNode (sky giữ).
+    this.scene.fogNode = fog(this.uFogColor, densityFogFactor(this.uFogDensity))
     this.scene.add(hemi, sun, ground, this.editorGrid.getObject())
     this._applySun()
   }
@@ -2093,6 +2103,12 @@ export class ArchPlanLab extends BaseWorld {
     const fill = this.sunOpts.fill
     if (this.hemiLight) this.hemiLight.intensity = (0.06 + 0.29 * day) * fill
     this.scene.environmentIntensity = (0.05 + 0.25 * day) * fill
+    // 🌫️ Sương mù: density theo slider; màu lerp xanh-ngày↔xám-âm-u, tối dần về đêm (hợp horizon → tan mượt).
+    this.uFogDensity.value = this.sunOpts.fog * 0.04 // slider [0..1] → density [0..0.04] (exp-fog đậm dần)
+    this.uFogColor.value
+      .set(0xc2d4e4)
+      .lerp(FOG_OVERCAST_COL, this.sunOpts.overcast)
+      .multiplyScalar(0.35 + 0.65 * day) // đêm → fog sẫm
   }
 
   // Hướng + độ dài vệt tiếp đất của bãi cỏ theo sun (live). Gọi khi sun đổi + sau mỗi lần dựng lại _siteGrass.
@@ -2123,12 +2139,17 @@ export class ArchPlanLab extends BaseWorld {
         this.sunOpts.intensity = Math.max(0, Math.min(5, o.intensity))
       if (typeof o.color === 'number') this.sunOpts.color = Math.floor(o.color) & 0xffffff
       if (typeof o.enabled === 'boolean') this.sunOpts.enabled = o.enabled
-      if (typeof o.fill === 'number') this.sunOpts.fill = Math.max(0, Math.min(3, o.fill))
-      if (typeof o.overcast === 'number')
-        this.sunOpts.overcast = Math.max(0, Math.min(1, o.overcast))
+      this._loadSkyScalars(o)
     } catch {
       /* JSON hỏng → giữ default */
     }
+  }
+
+  // fill/overcast/fog (3 hệ số môi trường mới) — tách khỏi _loadSunOpts (complexity).
+  private _loadSkyScalars(o: Partial<SunOpts>): void {
+    if (typeof o.fill === 'number') this.sunOpts.fill = Math.max(0, Math.min(3, o.fill))
+    if (typeof o.overcast === 'number') this.sunOpts.overcast = Math.max(0, Math.min(1, o.overcast))
+    if (typeof o.fog === 'number') this.sunOpts.fog = Math.max(0, Math.min(1, o.fog))
   }
 
   private _saveSunOpts(): void {
@@ -2629,8 +2650,10 @@ export class ArchPlanLab extends BaseWorld {
       this._setMixTrayShown(!this._mixTrayShown)
     )
     mix.classList.toggle('on', this._mixTrayShown)
-    const env = mk('🌅', 'Hiện / ẩn khay Môi trường (sky ☀️🌇☁️🌙 + fill + thời tiết 🌧️❄️⛈️)', () =>
-      this._setEnvTrayShown(!this._envTrayShown)
+    const env = mk(
+      '🌅',
+      'Hiện / ẩn khay Môi trường (Bầu trời: preset + sáng/mây/sương · Thời tiết: 🌧️❄️⛈️)',
+      () => this._setEnvTrayShown(!this._envTrayShown)
     )
     this._trayBtns = { hover: hov, pal, mix, env }
     this.canvas.parentElement?.appendChild(bar)
@@ -2640,59 +2663,109 @@ export class ArchPlanLab extends BaseWorld {
     this._applyWeather() // dựng precip nếu mode != none + sync nút
   }
 
-  // 🌅 Khay preset ánh sáng môi trường: [☀️ Trưa][🌇 Hoàng hôn][☁️ Âm u][🌙 Đêm] + slider fill.
-  // Float BỀN (tạo 1 lần cùng utilTray — DOM chỉ bind sunOpts, không phụ thuộc ctx/_rebuildGUI).
-  // Preset = Object.assign cả bộ vào sunOpts → _applySun cascade (sky/grass/water/gizmo) + persist.
+  // 🌅 Khay MÔI TRƯỜNG (float bền): 2 mục — Bầu trời (4 preset + Sáng nền/Mây mù/Sương mù) và Thời tiết
+  // (4 mode + Nặng/Cỡ hạt). Slider CÓ NHÃN, xếp dọc. Tạo 1 lần cùng utilTray, bind sunOpts/_weather.
   private _setupEnvTray(): void {
     this._ensureEnvTrayCss()
     const wrap = document.createElement('div')
     wrap.className = 'ap-envpre-float'
     wrap.style.display = 'none'
-    // 2 slider live (chỉ sky/hemi/IBL uniform — không đụng vị trí sun, 0 rebuild)
-    const fill = this._envSlider(
-      3,
-      '🔆 Fill môi trường (hemi + IBL) — nền tổng tối/sáng. 1 = mức cũ.',
-      (v) => {
+    this._envSkySection(wrap)
+    this._envWeatherSection(wrap)
+    this.canvas.parentElement?.appendChild(wrap)
+    this.envTrayWrap = wrap
+  }
+
+  // Mục Bầu trời: 4 preset ngày (☀️🌇☁️🌙) + 3 slider có nhãn (Sáng nền/Mây mù/Sương mù) — đều cascade sky.
+  private _envSkySection(wrap: HTMLElement): void {
+    wrap.append(this._envTitle('🌅 Bầu trời'), this._envSkyButtons())
+    const fill = this._envLabeledSlider({
+      label: 'Sáng nền',
+      min: 0,
+      max: 3,
+      value: this.sunOpts.fill,
+      onInput: (v) => {
         this.sunOpts.fill = v
         this._applySunToSky()
-      }
-    )
-    fill.value = String(this.sunOpts.fill)
-    const over = this._envSlider(1, '☁️ U ám — trời xám dần + nuốt đĩa nắng.', (v) => {
-      this.sunOpts.overcast = v
-      this._applySunToSky()
+      },
+      save: () => this._saveSunOpts(),
     })
-    over.value = String(this.sunOpts.overcast)
-    this._envFillSlider = fill
-    this._envOverSlider = over
+    const over = this._envLabeledSlider({
+      label: 'Mây mù',
+      min: 0,
+      max: 1,
+      value: this.sunOpts.overcast,
+      onInput: (v) => {
+        this.sunOpts.overcast = v
+        this._applySunToSky()
+      },
+      save: () => this._saveSunOpts(),
+    })
+    const fogS = this._envLabeledSlider({
+      label: 'Sương mù',
+      min: 0,
+      max: 1,
+      value: this.sunOpts.fog,
+      onInput: (v) => {
+        this.sunOpts.fog = v
+        this._applySunToSky()
+      },
+      save: () => this._saveSunOpts(),
+    })
+    this._envFillSlider = fill.slider
+    this._envOverSlider = over.slider
+    this._envFogSlider = fogS.slider
+    wrap.append(fill.row, over.row, fogS.row)
+  }
+
+  // Mục Thời tiết: 4 mode (🚫 tắt/🌧️/❄️/⛈️) + 2 slider có nhãn (Nặng hạt/Cỡ hạt).
+  private _envWeatherSection(wrap: HTMLElement): void {
+    wrap.append(this._envTitle('🌧️ Thời tiết'), this._envWeatherButtons())
+    const heavy = this._envLabeledSlider({
+      label: 'Nặng hạt',
+      min: 0.05,
+      max: 1,
+      value: this._weather.heavy,
+      onInput: (v) => {
+        this._weather.heavy = v
+        this._precip?.setOpacity(v)
+      },
+      save: () => this._saveWeather(),
+    })
+    const size = this._envLabeledSlider({
+      label: 'Cỡ hạt',
+      min: 0.3,
+      max: 3,
+      value: this._weather.sizeScale,
+      onInput: (v) => {
+        this._weather.sizeScale = v
+        if (this._weather.mode !== 'none')
+          this._precip?.setSize(PRECIP_BASE_SIZE[this._weather.mode] * v)
+      },
+      save: () => this._saveWeather(),
+    })
+    wrap.append(heavy.row, size.row)
+  }
+
+  private _envSkyButtons(): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'ap-env-btns'
     for (const p of ENV_PRESETS) {
       const b = document.createElement('button')
       b.type = 'button'
       b.textContent = p.icon
       b.title = p.label
       b.addEventListener('click', () => this._applyEnvPreset(p.opts))
-      wrap.appendChild(b)
+      row.appendChild(b)
     }
-    wrap.append(fill, over, this._envWeatherRow())
-    this.canvas.parentElement?.appendChild(wrap)
-    this.envTrayWrap = wrap
+    return row
   }
 
-  // Áp preset sky (4 nút ☀️🌇☁️🌙 + storm): Object.assign sunOpts → sync 2 slider → cascade _applySun + save.
-  private _applyEnvPreset(opts: Partial<SunOpts>): void {
-    Object.assign(this.sunOpts, opts)
-    if (this._envFillSlider) this._envFillSlider.value = String(this.sunOpts.fill)
-    if (this._envOverSlider) this._envOverSlider.value = String(this.sunOpts.overcast)
-    this._applySun()
-    this._saveSunOpts()
-  }
-
-  // 🌧️ Hàng thời tiết trong khay 🌅: [☀️ Tắt][🌧️ Mưa][❄️ Tuyết][⛈️ Bão] + slider Nặng hạt (opacity live).
-  private _envWeatherRow(): HTMLElement {
+  private _envWeatherButtons(): HTMLElement {
     const row = document.createElement('div')
-    row.className = 'ap-envwx-row'
+    row.className = 'ap-env-btns'
     const modes: [WeatherMode, string, string][] = [
-      ['none', '☀️', 'Tắt thời tiết'],
+      ['none', '🚫', 'Tắt thời tiết (quang)'],
       ['rain', '🌧️', 'Mưa'],
       ['snow', '❄️', 'Tuyết'],
       ['storm', '⛈️', 'Bão — mưa dày + gió mạnh + trời âm u đậm'],
@@ -2706,45 +2779,50 @@ export class ArchPlanLab extends BaseWorld {
       this._weatherBtns[mode] = b
       row.appendChild(b)
     }
-    const heavy = this._envSlider(
-      1,
-      '💧 Nặng hạt — độ mờ/đậm của mưa-tuyết (0 = tắt visual).',
-      (v) => {
-        this._weather.heavy = v
-        this._precip?.setOpacity(v)
-        this._saveWeather()
-      }
-    )
-    heavy.value = String(this._weather.heavy)
-    heavy.min = '0.05'
-    // 🔍 Cỡ hạt = HỆ SỐ × cỡ gốc mode (gần camera = max, xa = min — theo distance trong shader).
-    const size = this._envSlider(
-      3,
-      '🔍 Cỡ hạt (× cỡ gốc; gần to dần tới max, xa nhỏ về min).',
-      (v) => {
-        this._weather.sizeScale = v
-        const m = this._weather.mode
-        if (m !== 'none') this._precip?.setSize(PRECIP_BASE_SIZE[m] * v)
-        this._saveWeather()
-      }
-    )
-    size.value = String(this._weather.sizeScale)
-    size.min = '0.3'
-    row.append(heavy, size)
     return row
   }
 
-  // Slider khay 🌅: range [0..max] step 0.05, live onInput + persist onChange. Caller set .value sau.
-  private _envSlider(max: number, title: string, onInput: (v: number) => void): HTMLInputElement {
+  private _envTitle(text: string): HTMLElement {
+    const t = document.createElement('div')
+    t.className = 'ap-env-title'
+    t.textContent = text
+    return t
+  }
+
+  // Áp preset sky (4 nút ☀️🌇☁️🌙 + storm): Object.assign sunOpts → sync 3 slider → cascade _applySun + save.
+  private _applyEnvPreset(opts: Partial<SunOpts>): void {
+    Object.assign(this.sunOpts, opts)
+    if (this._envFillSlider) this._envFillSlider.value = String(this.sunOpts.fill)
+    if (this._envOverSlider) this._envOverSlider.value = String(this.sunOpts.overcast)
+    if (this._envFogSlider) this._envFogSlider.value = String(this.sunOpts.fog)
+    this._applySun()
+    this._saveSunOpts()
+  }
+
+  // Slider khay 🌅 CÓ NHÃN [tên | thanh]. step 0.05; input=live onInput, change=save commit.
+  private _envLabeledSlider(spec: {
+    label: string
+    min: number
+    max: number
+    value: number
+    onInput: (v: number) => void
+    save: () => void
+  }): { row: HTMLElement; slider: HTMLInputElement } {
+    const row = document.createElement('div')
+    row.className = 'ap-env-row'
+    const lab = document.createElement('span')
+    lab.className = 'ap-env-lab'
+    lab.textContent = spec.label
     const s = document.createElement('input')
     s.type = 'range'
-    s.min = '0'
-    s.max = String(max)
+    s.min = String(spec.min)
+    s.max = String(spec.max)
     s.step = '0.05'
-    s.title = title
-    s.addEventListener('input', () => onInput(parseFloat(s.value)))
-    s.addEventListener('change', () => this._saveSunOpts())
-    return s
+    s.value = String(spec.value)
+    s.addEventListener('input', () => spec.onInput(parseFloat(s.value)))
+    s.addEventListener('change', spec.save)
+    row.append(lab, s)
+    return { row, slider: s }
   }
 
   // 🌧️ Đổi mode thời tiết: dựng lại Precipitation (hoặc gỡ nếu 'none'); 'storm' kèm áp sky âm-u-đậm.
@@ -2869,25 +2947,30 @@ export class ArchPlanLab extends BaseWorld {
     }
   }
 
-  // CSS khay 🌅 — cùng vị trí top:40 với khay mix (chỉ mở 1 trong 2 thường lệ), nút đều 28×28 như utilbar.
+  // CSS khay 🌅 — XẾP DỌC, 2 mục (Bầu trời/Thời tiết) tiêu đề + hàng nút icon + slider có nhãn. top:40.
   private _ensureEnvTrayCss(): void {
     if (document.getElementById('ap-envpre-css')) return
     const s = document.createElement('style')
     s.id = 'ap-envpre-css'
     s.textContent =
-      `.ap-envpre-float{position:absolute;top:40px;left:6px;z-index:156;display:flex;align-items:center;` +
-      `flex-wrap:wrap;max-width:230px;gap:4px;padding:4px;background:rgba(7,22,18,.88);` +
-      `border:1px solid rgba(201,162,78,.4);` +
+      `.ap-envpre-float{position:absolute;top:40px;left:6px;z-index:156;display:flex;flex-direction:column;` +
+      `gap:4px;padding:7px;width:214px;background:rgba(7,22,18,.9);border:1px solid rgba(201,162,78,.4);` +
       `border-radius:9px;backdrop-filter:blur(4px);box-shadow:0 2px 8px rgba(0,0,0,.45)}` +
+      `.ap-envpre-float .ap-env-btns{display:flex;gap:4px}` +
       `.ap-envpre-float button{width:28px;height:28px;padding:0;display:grid;place-items:center;` +
       `font-size:15px;line-height:1;border-radius:6px;border:1px solid rgba(180,200,188,.35);` +
       `background:rgba(14,46,38,.92);cursor:pointer}` +
       `.ap-envpre-float button:hover{background:rgba(14,46,38,.98);border-color:#e0b860}` +
       `.ap-envpre-float button.on{border-color:#e0b860;box-shadow:0 0 0 1px #e0b860 inset}` +
-      `.ap-envpre-float input[type=range]{width:84px;accent-color:#e0b860;cursor:pointer}` +
-      // 🌧️ hàng thời tiết = full-width xuống dòng, ngăn cách nhẹ với hàng sky trên
-      `.ap-envwx-row{flex-basis:100%;display:flex;align-items:center;gap:4px;margin-top:3px;` +
-      `padding-top:5px;border-top:1px solid rgba(180,200,188,.18)}`
+      // tiêu đề mục (BẦU TRỜI / THỜI TIẾT) — chữ nhỏ vàng nhạt, mục thứ 2 cách trên 1 vạch
+      `.ap-env-title{font:600 10px/1.4 'Segoe UI',system-ui,sans-serif;color:#cdbb88;` +
+      `letter-spacing:.4px;text-transform:uppercase;margin-top:2px}` +
+      `.ap-env-title:not(:first-child){margin-top:6px;padding-top:6px;` +
+      `border-top:1px solid rgba(180,200,188,.18)}` +
+      // hàng slider có nhãn [tên 52px | thanh]
+      `.ap-env-row{display:flex;align-items:center;gap:6px}` +
+      `.ap-env-lab{flex:0 0 52px;font:500 11px/1.2 'Segoe UI',system-ui,sans-serif;color:#cfe0d8}` +
+      `.ap-env-row input[type=range]{flex:1;min-width:0;accent-color:#e0b860;cursor:pointer}`
     document.head.appendChild(s)
   }
 
