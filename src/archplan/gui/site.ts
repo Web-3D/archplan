@@ -31,6 +31,7 @@ import type {
 } from 'threejs-modules/site/state'
 import {
   defaultTerrain,
+  fishTierPreset,
   GROUND_THICK_MAX,
   GROUND_THICK_MIN,
   isGroundTexKey,
@@ -2144,13 +2145,13 @@ function buildPoolInstance(
     { label: 'Surface', panel: surface, title: 'Water surface look' },
     { label: 'Bottom', panel: bottom, title: 'Floor + walls' },
   ]
-  // 🐟 CHỈ pond (hồ thiên nhiên) có tab Cá; pool/puddle không (pool sạch — NgQuan 2026-06-13).
-  let fishTabs: Tabs | null = null
+  // 🐟 CHỈ pond (hồ thiên nhiên) có tab Cá; pool/puddle không (pool sạch — NgQuan 2026-06-13). Đa-đàn (list F1/F2…).
+  let fishTabs: { dispose: () => void } | null = null
   if (w.kind === 'pond') {
     const fishPane = document.createElement('div')
     fishTabs = buildPondFishTab(fishPane, ctx, w)
     host.appendChild(fishPane)
-    items.push({ label: '🐟 Cá', panel: fishPane, title: 'Bầy cá koi — vùng bơi = lòng hồ' })
+    items.push({ label: '🐟 Cá', panel: fishPane, title: 'Đàn cá theo bậc — vùng bơi = lòng hồ' })
   }
   const tabs = new Tabs(host, items, {
     classes: {
@@ -2830,14 +2831,24 @@ function appendFishSpecs(
     )
 }
 
-// 🐟 Tab "Hình thái": Số cá (rebuild) + Cỡ cá + Độ mập + 3 màu + Tỉ lệ mảng + Xáo màu (buildFishShapeColor).
+// 🐟 Tab "Hình thái": Số cá (range theo BẬC — rebuild) + Cỡ cá + Độ mập + 3 màu + Tỉ lệ mảng + Xáo màu.
 function buildFishMorphTab(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): void {
+  const p = fishTierPreset(fs.tier) // 🐟 range Số cá theo bậc (bậc cao ít, bậc thấp đông)
   appendFishSpecs(pane, ctx, fs, [
-    ['Số cá', 1, 30, 1, 1, () => fs.count, (v) => (fs.count = Math.round(v)), null], // live=null → rebuild
     [
-      'Cỡ cá',
-      0.08,
-      0.5,
+      'Số cá',
+      p.countMin,
+      p.countMax,
+      1,
+      1,
+      () => fs.count,
+      (v) => (fs.count = Math.round(v)),
+      null,
+    ], // rebuild
+    [
+      'Cỡ cá', // 0.02m (tép bậc 6) → 0.6m (koi to bậc 4)
+      0.02,
+      0.6,
       0.01,
       1000,
       () => fs.size / 1000,
@@ -2977,16 +2988,34 @@ function buildFishShapeColor(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): 
   )
 }
 
-// 🐟 Tab "Cá" trong pane POND: Show toggle (w.fish.enabled) + 2 tab LỒNG [Hình thái · Hành vi] (tông Water
-// --wt-* xanh). Vùng bơi = LÒNG HỒ (không slider vùng/X/Z — đi theo hồ). Trả Tabs lồng — caller dispose.
-function buildPondFishTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): Tabs {
-  const fs = (w.fish ??= makeFishSchool()) // pond luôn có cá; save lạ thiếu → tạo bầy mặc định
-  host.appendChild(
-    toggleRow('🐟 Hiện cá', fs.enabled, (on) => {
-      fs.enabled = on
-      ctx.applySite(true)
-    })
-  )
+// 🐟 Dropdown BẬC (tier) — đổi bậc → áp size/count preset (vẫn chỉnh tay sau) → rebuild GUI (range Số cá đổi theo
+// bậc) + applySite. Bậc 4-6 = pond; 1-3 = sea (deferred — nhãn ⏳, chọn được nhưng size placeholder).
+const FISH_TIER_OPTS: [string, string][] = [
+  ['Bậc 4 — Koi / Chép', '4'],
+  ['Bậc 5 — Cá nhỏ đàn', '5'],
+  ['Bậc 6 — Tép / Phù du', '6'],
+  ['Bậc 3 — Cá thu (sea ⏳)', '3'],
+  ['Bậc 2 — Mập / Orca (sea ⏳)', '2'],
+  ['Bậc 1 — Cá voi (sea ⏳)', '1'],
+]
+function fishTierRow(
+  ctx: APGuiCtx,
+  fs: FishSchool,
+  rebuild: (focus?: number) => void,
+  i: number
+): HTMLElement {
+  return selectRow('Bậc', FISH_TIER_OPTS, String(fs.tier), (v) => {
+    const p = fishTierPreset(Number(v))
+    fs.tier = Number(v)
+    fs.size = p.sizeMm // áp cỡ + số con mặc định của bậc (chỉnh tay lại ở slider dưới)
+    fs.count = p.count
+    rebuild(i) // range slider Số cá đổi theo bậc → dựng lại pane đàn này
+    ctx.applySite(true)
+  })
+}
+
+// 🐟 2 tab LỒNG [Hình thái · Hành vi] của 1 đàn (tông l5). Trả Tabs cho caller dispose.
+function buildFishInnerTabs(host: HTMLElement, ctx: APGuiCtx, fs: FishSchool): Tabs {
   const morph = document.createElement('div')
   buildFishMorphTab(morph, ctx, fs)
   const behavior = document.createElement('div')
@@ -2996,7 +3025,7 @@ function buildPondFishTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): Tab
     host,
     [
       { label: 'Hình thái', panel: morph, title: 'Số cá + hình dáng + màu' },
-      { label: 'Hành vi', panel: behavior, title: 'Bơi lội (tốc/lượn/lăng xăng/nhấp nhô/bứt tốc)' },
+      { label: 'Hành vi', panel: behavior, title: 'Bơi/lượn/lăng xăng/nhấp nhô/bứt tốc + Đói' },
     ],
     {
       classes: {
@@ -3008,6 +3037,100 @@ function buildPondFishTab(host: HTMLElement, ctx: APGuiCtx, w: WaterConfig): Tab
       injectCss: false,
     }
   )
+}
+
+// 🐟 1 item ĐÀN trong hàng tab F1/F2…: Show + dropdown Bậc + 2 tab lồng + ✕ xoá. remove → splice w.fishSchools +
+// rebuild + applySite. Trả {item, dispose} — dispose gỡ Tabs lồng đàn đó.
+function buildFishInstanceItem(
+  host: HTMLElement,
+  ctx: APGuiCtx,
+  w: WaterConfig,
+  fs: FishSchool,
+  i: number,
+  rebuild: (focus?: number) => void
+): { item: TabItem; dispose: () => void } {
+  const label = `F${i + 1}`
+  const pane = document.createElement('div')
+  pane.appendChild(
+    toggleRow('🐟 Hiện đàn', fs.enabled, (on) => {
+      fs.enabled = on
+      ctx.applySite(true)
+    })
+  )
+  pane.appendChild(fishTierRow(ctx, fs, rebuild, i))
+  const inner = buildFishInnerTabs(pane, ctx, fs)
+  pane.appendChild(
+    removeRow('✕ Xoá đàn', () => {
+      w.fishSchools?.splice(w.fishSchools.indexOf(fs), 1)
+      rebuild(Math.max(0, i - 1))
+      ctx.applySite(true)
+    })
+  )
+  host.appendChild(pane)
+  return { item: { label, panel: pane, title: label }, dispose: inner.dispose }
+}
+
+// 🐟 Hàng Tabs ĐÀN (F1/F2… + ＋). onChange = previewFish (flash tia-Y tâm hồ — xác nhận đàn nào). schools() LIVE.
+function makeFishTabBar(
+  host: HTMLElement,
+  items: TabItem[],
+  addBtn: HTMLElement,
+  focus: number,
+  schools: () => FishSchool[],
+  ctx: APGuiCtx
+): Tabs {
+  return new Tabs(host, items, {
+    classes: {
+      bar: 'ap-tab-bar ap-water-itabs',
+      tab: 'ap-tab-btn',
+      panel: 'ap-water-isub',
+      active: 'ap-tab-active',
+    },
+    injectCss: false,
+    addEl: addBtn,
+    initial: focus,
+    onChange: (idx) => {
+      const fs = schools()[idx]
+      if (fs) ctx.previewFish(fs)
+    },
+  })
+}
+
+// 🐟 Tab "Cá" trong pane POND — quản LIST nhiều ĐÀN (chuỗi bậc lớn-ăn-bé). Hàng tab F1/F2… + ＋ thêm đàn (bậc 5);
+// mỗi đàn = Show + Bậc + [Hình thái·Hành vi] (đói RIÊNG) + ✕ xoá. Tabs động → rebuild mỗi thêm/xoá + applySite.
+// cfg = FishSchool ref → _tuneFish/_previewFish khớp đúng đàn (đa-đàn OK). Trả { dispose } gỡ mọi Tabs lồng.
+function buildPondFishTab(
+  host: HTMLElement,
+  ctx: APGuiCtx,
+  w: WaterConfig
+): { dispose: () => void } {
+  const schools = (): FishSchool[] => (w.fishSchools ??= [])
+  let tabs: Tabs | null = null
+  let paneDisposers: (() => void)[] = []
+  const teardown = (): void => {
+    tabs?.dispose()
+    for (const d of paneDisposers) d()
+    paneDisposers = []
+  }
+  const rebuild = (focus = 0): void => {
+    teardown()
+    host.replaceChildren()
+    const list = schools()
+    const items: TabItem[] = []
+    list.forEach((fs, i) => {
+      const b = buildFishInstanceItem(host, ctx, w, fs, i, rebuild)
+      items.push(b.item)
+      paneDisposers.push(b.dispose)
+    })
+    const addBtn = addInstanceButton('đàn', () => {
+      list.push(makeFishSchool(5)) // đàn thêm = bậc 5 (cá nhỏ) — sẵn mồi cho bậc 4 (predation Phase 3)
+      rebuild(list.length - 1)
+      ctx.applySite(true)
+    })
+    tabs = makeFishTabBar(host, items, addBtn, focus, schools, ctx)
+  }
+  rebuild()
+  return { dispose: teardown }
 }
 
 // BẬC 2 type-Tabs Pool|Pond|Puddle (cá GỠ khỏi đây — giờ là tab CON trong pane Pond). Tách khỏi buildWaterDomain.
