@@ -2898,6 +2898,14 @@ function buildFishBehaviorTab(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool):
       return (f) => f.setBurstRate(fs.burstRate)
     })
   )
+  // 🐟 BƠI THEO ĐÀN (boids cohesion+alignment): tụm cụm + đồng hướng. Pond ít con → mặc định TẮT; bật khi muốn
+  // đàn "có tổ chức" (live qua tuneFish, 0 rebuild). Separation (tách thân) vẫn luôn chạy dù tắt.
+  pane.appendChild(
+    toggleRow('🐟 Bơi theo đàn (boids)', fs.schooling, (on) => {
+      fs.schooling = on
+      ctx.tuneFish(fs, (f) => f.setSchooling(on), true)
+    })
+  )
   pane.appendChild(fishHungerRow(ctx, fs)) // 🐟 ĐÓI (master độ no) + mốc đỏ ngưỡng chết
 }
 
@@ -2971,6 +2979,19 @@ function buildFishShapeColor(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): 
     fishTuneSlider(ctx, fs, 'Độ mập %', [20, 250, 5], fs.bodyWidth * 100, (v) => {
       fs.bodyWidth = v / 100
       return (f) => f.setBodyWidth(fs.bodyWidth)
+    })
+  )
+  // 🎢 NGHIÊNG THÂN: bank = nghiêng vào cua (đẹp khi lượn/zic-zac), pitch = chúi mũi khi lặn/ngoi. 0 = tắt, 100 = gốc.
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Nghiêng cua %', [0, 200, 5], fs.bankAmp * 100, (v) => {
+      fs.bankAmp = v / 100
+      return (f) => f.setBankAmp(fs.bankAmp)
+    })
+  )
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Chúi mũi %', [0, 200, 5], fs.pitchAmp * 100, (v) => {
+      fs.pitchAmp = v / 100
+      return (f) => f.setPitchAmp(fs.pitchAmp)
     })
   )
   fishColorRows(pane, ctx, fs)
