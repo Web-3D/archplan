@@ -904,12 +904,13 @@ export class ArchPlanLab extends BaseWorld {
     return false
   }
 
-  // Move mode nhấn xuống: ưu tiên tool site (hồ/ground-free/gò) → cổng → element building. Giữ complexity ≤10.
+  // Move mode nhấn xuống: 🌉 CẦU TRƯỚC tool site (cầu nằm TRÊN hồ trong hướng nhìn → click cầu phải trúng cầu,
+  // không trúng hồ phía sau — NgQuan 2026-06-13) → tool site (hồ/ground-free/gò) → cổng → building. ≤10.
   private _pointerDownMove(e: PointerEvent): void {
     if (this._shiftToggleSelect(e)) return // 🧲 Shift+click = chọn/bỏ khối vào nhóm, không kéo gì khác
+    if (this._tryStartBridgeDrag(e)) return // 🌉 trúng cầu (gần hơn building/hồ) → kéo dời cầu — ƯU TIÊN
     if (this._tryStartSiteTool(e)) return // 💧🟫⛰️ trúng tool site → tool lo
     if (this._tryStartGateDrag(e)) return // 🚪 trúng cổng → trượt dọc cạnh rào
-    if (this._tryStartBridgeDrag(e)) return // 🌉 trúng cầu (gần hơn building) → kéo dời cầu
     this.manipulate?.dragStart(e) // Move tool: nhấn-giữ element building → kéo (focus GUI ngay khi nhấn)
     if (this.manipulate?.isDragging()) return // trúng building → manipulate lo
     this._tryStartLayerDrag(e) // 🟫 không trúng building → thử kéo TẦNG ground (G1+)
@@ -1159,14 +1160,14 @@ export class ArchPlanLab extends BaseWorld {
     this._clickFocusChain(e)
   }
 
-  // Chuỗi focus click thường: deselect cut → ưu tiên hồ → rào → tầng ground → building element.
+  // Chuỗi focus click thường: deselect cut → cá → 🌉 CẦU (trước hồ — cầu nằm TRÊN hồ) → hồ → rào → tầng → building.
   // Tách khỏi _maybeClickFocus (complexity ≤10 sau khi thêm nhánh 🪣).
   private _clickFocusChain(e: PointerEvent): void {
     this._setActiveCut(-1) // 🟫 click = deselect cut (ẩn xám); _tryClickLayer→navTo bật lại nếu trúng cut
     if (this._tryClickFish(e)) return // 🐟 cá TRƯỚC hồ — cá bơi DƯỚI mặt nước trong suốt (ray riêng mesh cá)
+    if (this._tryClickBridge(e)) return // 🌉 cầu TRƯỚC hồ — cầu bắc TRÊN hồ, click cầu phải trúng cầu (không hồ)
     if (this.waterTool?.tryClick(e)) return // 💧 click trúng hồ → trỏ GUI hồ
     if (this._tryClickFence(e)) return // 🧱 click trúng rào → trỏ GUI Fence
-    if (this._tryClickBridge(e)) return // 🌉 click trúng cầu → trỏ GUI Cầu▸Cn
     if (this._tryClickLayer(e)) return // 🟫 click trúng tầng ground → trỏ GUI Ground▸Gn
     this.manipulate?.clickFocus(e) // building element → trỏ folder tương ứng
   }
