@@ -821,6 +821,12 @@ export class ArchPlanLab extends BaseWorld {
     rippleLife: number
     rippleSpeed: number
     rippleWave: number
+    // ☔ rain-cell (ambient phủ khắp): density(→cell) · amp · rate(nhịp) · maxR(cỡ vòng) · waves(bước sóng)
+    rainDensity: number
+    rainAmp: number
+    rainRate: number
+    rainMaxR: number
+    rainWaves: number
   } = {
     base: 'none',
     rainStorm: false,
@@ -832,6 +838,11 @@ export class ArchPlanLab extends BaseWorld {
     rippleLife: 2.6, // = RIPPLE_LIFE
     rippleSpeed: 0.65, // = RIPPLE_SPEED (đã halve)
     rippleWave: 0.42, // λ(m) ≈ 2π/RIPPLE_WAVES
+    rainDensity: 0.68, // → cell ≈ 0.34 (= RAIN_CELL); cao = ô nhỏ = dày hơn
+    rainAmp: 1.4, // = RAIN_AMP
+    rainRate: 1.3, // = RAIN_RATE
+    rainMaxR: 0.42, // = RAIN_MAXR
+    rainWaves: 22, // = RAIN_WAVES
   }
   // 🌊 Mưa gợn: đếm-lùi tới giọt kế (rải ngẫu nhiên trong lòng hồ khi đang mưa). _tmpRipplePos = tâm hồ world.
   private _rainRippleTimer = 0
@@ -2688,6 +2699,7 @@ export class ArchPlanLab extends BaseWorld {
     this._setupEnvTray() // 🌅 float bền (như khay) — dựng 1 lần, ẩn mặc định
     this._applyWeather() // dựng precip nếu effective mode != none (sky đã nằm trong sunOpts đã lưu)
     this._applyRippleParams() // 🌊 đẩy tham số sóng đã lưu vào hồ (nếu đã build)
+    this._applyRainParams() // ☔ đẩy tham số lớp mưa nền (rain-cell) đã lưu vào hồ
   }
 
   // 🌅 Khay MÔI TRƯỜNG (float bền): 2 mục — Bầu trời (4 preset + Sáng nền/Mây mù/Sương mù) và Thời tiết
@@ -2765,7 +2777,7 @@ export class ArchPlanLab extends BaseWorld {
     )
   }
 
-  // Tab Mưa: [Bật | ⛈️ Bão] + Nặng/Cỡ hạt + nhóm 🌊 Sóng hồ (5 slider gợn).
+  // Tab Mưa: [Bật | ⛈️ Bão] + Nặng/Cỡ hạt + 2 nhóm sóng hồ: 🌊 Va chạm (pool rời) · ☔ Mưa nền (ambient phủ khắp).
   private _buildRainPanel(panel: HTMLElement): void {
     const on = this._wxToggle('Bật', this._weather.base === 'rain', (v) => this._setRainOn(v))
     const storm = this._wxToggle('⛈️ Bão', this._weather.rainStorm, (v) => this._setRainStorm(v))
@@ -2777,9 +2789,11 @@ export class ArchPlanLab extends BaseWorld {
       head,
       this._wxHeavyRow().row,
       this._wxSizeRow().row,
-      this._envSubTitle('🌊 Sóng hồ')
+      this._envSubTitle('🌊 Va chạm (rời)')
     )
     this._buildRippleSliders(panel)
+    panel.append(this._envSubTitle('☔ Mưa nền (phủ khắp)'))
+    this._buildRainSliders(panel)
   }
 
   // Tab Tuyết: [Bật | 🌨️ Bão tuyết] + Nặng/Cỡ hạt (KHÔNG có gợn hồ — tuyết không gợn nước).
@@ -2826,6 +2840,43 @@ export class ArchPlanLab extends BaseWorld {
       }),
       mk('Bước sóng', 0.1, 1.5, w.rippleWave, (v) => {
         w.rippleWave = v
+        apply()
+      })
+    )
+  }
+
+  // 5 slider ☔ Mưa nền (ambient rain-cell): Mật độ(→cell) · Size · Nhịp giọt · Cỡ vòng · Bước sóng (uniform, live mọi hồ).
+  private _buildRainSliders(panel: HTMLElement): void {
+    const w = this._weather
+    const mk = (
+      label: string,
+      min: number,
+      max: number,
+      value: number,
+      onInput: (v: number) => void
+    ): HTMLElement =>
+      this._envLabeledSlider({ label, min, max, value, onInput, save: () => this._saveWeather() })
+        .row
+    const apply = (): void => this._applyRainParams()
+    panel.append(
+      mk('Mật độ', 0, 1, w.rainDensity, (v) => {
+        w.rainDensity = v
+        apply()
+      }),
+      mk('Size sóng', 0, 4, w.rainAmp, (v) => {
+        w.rainAmp = v
+        apply()
+      }),
+      mk('Nhịp giọt', 0.2, 5, w.rainRate, (v) => {
+        w.rainRate = v
+        apply()
+      }),
+      mk('Cỡ vòng', 0.1, 0.5, w.rainMaxR, (v) => {
+        w.rainMaxR = v
+        apply()
+      }),
+      mk('Bước sóng', 6, 40, w.rainWaves, (v) => {
+        w.rainWaves = v
         apply()
       })
     )
@@ -2937,6 +2988,19 @@ export class ArchPlanLab extends BaseWorld {
     const m = this._effectiveMode()
     const wet = m === 'rain' || m === 'storm' ? this._weather.heavy : 0
     for (const x of this._siteWaters) x.surf.setRainWet(wet)
+  }
+
+  // ☔ Đẩy 5 tham số HÌNH-DẠNG lớp ambient (rain-cell) vào MỌI hồ. density→cell (cao=ô nhỏ=dày). ≠ uRainWet (cường độ).
+  private _applyRainParams(): void {
+    const w = this._weather
+    const cell = 0.8 - w.rainDensity * 0.68 // density 0..1 → cell 0.8..0.12 m
+    for (const x of this._siteWaters) {
+      x.surf.setRainCell(cell)
+      x.surf.setRainAmp(w.rainAmp)
+      x.surf.setRainRate(w.rainRate)
+      x.surf.setRainMaxR(w.rainMaxR)
+      x.surf.setRainWaves(w.rainWaves)
+    }
   }
 
   private _envSkyButtons(): HTMLElement {
@@ -3134,6 +3198,7 @@ export class ArchPlanLab extends BaseWorld {
       const o = JSON.parse(raw) as Record<string, unknown>
       this._loadWeatherBase(o)
       this._loadWeatherScalars(o)
+      this._loadWeatherRain(o)
     } catch {
       /* JSON hỏng → giữ default none */
     }
@@ -3168,6 +3233,16 @@ export class ArchPlanLab extends BaseWorld {
     if (typeof o.rippleLife === 'number') w.rippleLife = Math.max(0.3, Math.min(8, o.rippleLife))
     if (typeof o.rippleSpeed === 'number') w.rippleSpeed = Math.max(0, Math.min(3, o.rippleSpeed))
     if (typeof o.rippleWave === 'number') w.rippleWave = Math.max(0.1, Math.min(1.5, o.rippleWave))
+  }
+
+  // ☔ 5 tham số lớp ambient rain-cell (clamp đúng dải slider).
+  private _loadWeatherRain(o: Record<string, unknown>): void {
+    const w = this._weather
+    if (typeof o.rainDensity === 'number') w.rainDensity = Math.max(0, Math.min(1, o.rainDensity))
+    if (typeof o.rainAmp === 'number') w.rainAmp = Math.max(0, Math.min(4, o.rainAmp))
+    if (typeof o.rainRate === 'number') w.rainRate = Math.max(0.2, Math.min(5, o.rainRate))
+    if (typeof o.rainMaxR === 'number') w.rainMaxR = Math.max(0.1, Math.min(0.5, o.rainMaxR))
+    if (typeof o.rainWaves === 'number') w.rainWaves = Math.max(6, Math.min(40, o.rainWaves))
   }
 
   private _saveWeather(): void {
@@ -3883,6 +3958,7 @@ export class ArchPlanLab extends BaseWorld {
       x.surf.excludeReflectionLayer(WATER_REFLECT_LAYER)
     }
     this._applyRippleParams() // 🌊 đẩy tham số sóng (size/thời gian/tốc độ/bước sóng) vào hồ vừa dựng
+    this._applyRainParams() // ☔ đẩy tham số HÌNH-DẠNG lớp mưa nền (cell/amp/rate/maxR/waves) vào hồ vừa dựng
     this._applyRainWet() // ☔ đẩy cường độ ambient rain-ripple vào hồ vừa dựng
     // active = pool tab đang chọn nếu còn render; không thì pool đầu (kể cả tắt, để GUI bind) → null nếu 0 pool.
     if (!this._activeWater || !this.site.waters.includes(this._activeWater)) {
