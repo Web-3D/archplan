@@ -142,6 +142,7 @@ import { PMREMGenerator } from 'three/webgpu'
 import type { GrassBlades, GrassExcludeRect } from 'threejs-modules/components/GrassBlades'
 import type { InstancedBrickWall } from 'threejs-modules/components/InstancedBrickWall'
 import type { PondFish } from 'threejs-modules/components/PondFish' // 🐟 đàn cá hồ — instance dựng ở site-kit
+import { PondPredation } from 'threejs-modules/components/PondFish/PondPredation' // 🦈 săn mồi: tier cao đớp tier thấp
 import { SkyGradient } from 'threejs-modules/components/SkyGradient' // 🌅 bầu trời gradient ngày↔đêm
 import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
@@ -185,6 +186,7 @@ import {
   renderWaters,
   type SiteState,
   type WaterConfig,
+  type WaterPoint,
 } from 'threejs-modules/site/state'
 import { Tabs } from 'threejs-modules/ui/Tabs' // 🗂️ tab ngang drawer (🏠 Building | 🌳 Ground | 🎛️ Lab)
 import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
@@ -467,6 +469,20 @@ const WX_TAB_CLASSES = {
   tab: 'ap-wx-tab',
   panel: 'ap-wx-panel',
   active: 'ap-wx-on',
+}
+
+// Point-in-polygon (ray casting) — pts cùng đơn vị với x,z. Dùng rải mưa gợn KHẮP hồ free-form (WaterSurface
+// dựng polygon bằng lineTo các anchor nên test trên anchor khớp ĐÚNG mặt nước, không lọt vùng khung chữ nhật).
+function pointInPoly(x: number, z: number, pts: { x: number; z: number }[]): boolean {
+  let inside = false
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x
+    const zi = pts[i].z
+    const xj = pts[j].x
+    const zj = pts[j].z
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside
+  }
+  return inside
 }
 const FOG_OVERCAST_COL = new THREE.Color(0x9aa2aa) // 🌫️ màu fog khi trời âm u (lerp tới từ xanh-ngày)
 const BORDER_TEX_SPEC: Record<BorderTexKey, SurfaceTextureSpec> = {
@@ -787,6 +803,7 @@ export class ArchPlanLab extends BaseWorld {
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
   private _siteFish: { cfg: FishSchool; water: WaterConfig; fish: PondFish }[] = [] // 🐟 bầy cá CON của pond — update(dt) trong onUpdate
+  private _predation: PondPredation | null = null // 🦈 coordinator săn mồi (tier cao đớp tier thấp khi Đói vùng vàng)
   // 🌧️ Thời tiết = thuộc tính MÔI TRƯỜNG (như sun) — persist riêng localStorage 'archplan:weather',
   // KHÔNG vào design state. mode đổi = tạo/dispose instance; heavy = opacity live. ⛈️ Bão = combo mưa+sky.
   private _precip: Precipitation | null = null
@@ -1704,7 +1721,8 @@ export class ArchPlanLab extends BaseWorld {
     this._applyRotate()
     this.controls?.update()
     for (const s of this.siteShaders) s.setTime?.(time) // 🌿 gió lùa cỏ (GrassGround) chạy theo elapsed
-    for (const f of this._siteFish) f.fish.update(deltaTime) // 🐟 vẫy (uniform) + dời đàn (≤40 matrix, rẻ)
+    for (const f of this._siteFish) f.fish.update(deltaTime) // 🐟 vẫy (uniform) + dời đàn (≤64 matrix, rẻ)
+    this._predation?.update(deltaTime) // 🦈 săn mồi: tier cao lao đớp tier thấp ở gần (CHỈ khi Đói vùng vàng)
     this._precip?.update(deltaTime) // 🌧️ mưa/tuyết rơi (vertex shader; chỉ ghi 1 uniform time)
     this._updateLightning(deltaTime) // ⚡ sét lóe (chỉ ⛈️ Bão)
     this._updateSnowAccum(deltaTime) // ❄️ tuyết đọng nền tích dần (chỉ mode snow)
@@ -2791,7 +2809,7 @@ export class ArchPlanLab extends BaseWorld {
         .row
     const apply = (): void => this._applyRippleParams()
     panel.append(
-      mk('Tần suất', 0, 24, w.rippleRate, (v) => {
+      mk('Tần suất', 0, 100, w.rippleRate, (v) => {
         w.rippleRate = v
       }),
       mk('Size sóng', 0, 6, w.rippleAmp, (v) => {
@@ -3025,8 +3043,8 @@ export class ArchPlanLab extends BaseWorld {
     const rate = this._weather.rippleRate * this._weather.heavy * this._siteWaters.length // giọt/s
     if (rate <= 0) return
     this._rainRippleTimer -= dt
-    let guard = 0 // chặn spike khi dt lớn (tab ẩn) — tối đa 8 giọt/frame
-    while (this._rainRippleTimer <= 0 && guard++ < 8) {
+    let guard = 0 // chặn spike khi dt lớn (tab ẩn) — tối đa 16 giọt/frame (tần suất max 100 × nhiều hồ)
+    while (this._rainRippleTimer <= 0 && guard++ < 16) {
       this._rainRippleTimer += 1 / rate
       this._emitRainDrop()
     }
@@ -3037,12 +3055,43 @@ export class ArchPlanLab extends BaseWorld {
   private _emitRainDrop(): void {
     const w = this._siteWaters[(Math.random() * this._siteWaters.length) | 0]
     const c = w.surf.getMesh().getWorldPosition(this._tmpRipplePos)
-    const halfW = w.cfg.width / 2000 // mm→m, nửa bề ngang (X)
-    const halfD = w.cfg.depth / 2000 // nửa chiều sâu (Z)
+    const p = this._samplePondLocal(w.cfg) // điểm (local m) NẰM TRONG mặt nước theo shape
     const s = RAIN_DROP_STRENGTH * (0.7 + Math.random() * 0.6)
-    const x = (Math.random() * 2 - 1) * halfW // rải đều theo X (cả 2 đầu cạnh dài)
-    const z = (Math.random() * 2 - 1) * halfD // rải đều theo Z
-    w.surf.emitRipple(c.x + x, c.z + z, s)
+    w.surf.emitRipple(c.x + p.x, c.z + p.z, s)
+  }
+
+  // 1 điểm ngẫu nhiên NẰM TRONG mặt nước (local m so tâm hồ): free=polygon · circle/ellipse=ellipse · rect=chữ nhật.
+  private _samplePondLocal(cfg: WaterConfig): { x: number; z: number } {
+    if (cfg.shape === 'free' && cfg.points.length >= 3) return this._samplePolyLocal(cfg.points)
+    const halfW = cfg.width / 2000
+    const halfD = cfg.depth / 2000
+    const round = cfg.shape === 'circle' || cfg.shape === 'ellipse'
+    for (let i = 0; i < 12; i++) {
+      const x = (Math.random() * 2 - 1) * halfW
+      const z = (Math.random() * 2 - 1) * halfD
+      if (!round || (x / halfW) ** 2 + (z / halfD) ** 2 <= 1) return { x, z }
+    }
+    return { x: 0, z: 0 } // rejection fail (hiếm) → tâm hồ
+  }
+
+  // Rải trong polygon free-form (pts mm) — bbox từ chính pts (chắc chắn phủ) + rejection point-in-poly → trả m.
+  private _samplePolyLocal(pts: WaterPoint[]): { x: number; z: number } {
+    let minX = Infinity
+    let maxX = -Infinity
+    let minZ = Infinity
+    let maxZ = -Infinity
+    for (const p of pts) {
+      minX = Math.min(minX, p.x)
+      maxX = Math.max(maxX, p.x)
+      minZ = Math.min(minZ, p.z)
+      maxZ = Math.max(maxZ, p.z)
+    }
+    for (let i = 0; i < 16; i++) {
+      const mx = minX + Math.random() * (maxX - minX)
+      const mz = minZ + Math.random() * (maxZ - minZ)
+      if (pointInPoly(mx, mz, pts)) return { x: mx / 1000, z: mz / 1000 }
+    }
+    return { x: (minX + maxX) / 2000, z: (minZ + maxZ) / 2000 } // fallback tâm bbox (m)
   }
 
   // ⚡ Sét (chỉ ⛈️ Bão): AmbientLight lazy lóe sáng, timer ngẫu nhiên giữa các cú, flash decay nhanh.
@@ -3105,7 +3154,7 @@ export class ArchPlanLab extends BaseWorld {
     const w = this._weather
     if (typeof o.heavy === 'number') w.heavy = Math.max(0.05, Math.min(1, o.heavy))
     if (typeof o.sizeScale === 'number') w.sizeScale = Math.max(0.3, Math.min(3, o.sizeScale))
-    if (typeof o.rippleRate === 'number') w.rippleRate = Math.max(0, Math.min(24, o.rippleRate))
+    if (typeof o.rippleRate === 'number') w.rippleRate = Math.max(0, Math.min(100, o.rippleRate))
     if (typeof o.rippleAmp === 'number') w.rippleAmp = Math.max(0, Math.min(6, o.rippleAmp))
     if (typeof o.rippleLife === 'number') w.rippleLife = Math.max(0.3, Math.min(8, o.rippleLife))
     if (typeof o.rippleSpeed === 'number') w.rippleSpeed = Math.max(0, Math.min(3, o.rippleSpeed))
@@ -3813,6 +3862,10 @@ export class ArchPlanLab extends BaseWorld {
     const wcfgs = [...renderWaters(this.site), ...renderPuddles(this.site)]
     this._siteWaters = h.waters.map((surf, i) => ({ cfg: wcfgs[i], surf }))
     this._siteFish = h.fish // 🐟 dispose theo siteShaders (clearSite); update(dt) mỗi frame onUpdate
+    // 🦈 coordinator săn mồi: nhóm đàn theo HỒ (pond=water ref) → tier cao đớp tier thấp ở gần (khi Đói vàng).
+    this._predation = new PondPredation(
+      h.fish.map((e) => ({ pond: e.water, fish: e.fish, tier: e.cfg.tier }))
+    )
     for (const x of this._siteWaters) x.surf.setCamera(this.camera) // dispose() tự free RTT reflector (né leak)
     // 💧 Mặt nước sang layer riêng + reflector LOẠI layer đó khỏi RTT (virtualCamera=camera.clone() copy layers
     // → phải disable mỗi frame trong setTime) → 2+ hồ KHÔNG render-lẫn-nhau → hết đơ gương (_inReflector). KI-012.
@@ -4472,6 +4525,7 @@ export class ArchPlanLab extends BaseWorld {
     // theo chữ ký → giữ nguyên scatter qua các rebuild không-liên-quan-cỏ (đây là cốt lõi né lag).
     this._siteWaters = [] // dispose thật do siteShaders lo (mỗi WaterSurface trong đó); _activeWater giữ (cfg ref)
     this._siteFish = [] // 🐟 PondFish cũng trong siteShaders (dispose vòng trên)
+    this._predation = null // 🦈 coordinator dựng lại mỗi rebuild (không giữ tài nguyên GPU)
     // 🪨 path-zone StoneScatter cũng trong siteShaders (đã dispose vòng trên) — KHÔNG track riêng (sống trong groundLayers)
     this.siteGroup.clear()
   }
