@@ -186,7 +186,6 @@ import {
   renderWaters,
   type SiteState,
   type WaterConfig,
-  type WaterPoint,
 } from 'threejs-modules/site/state'
 import { Tabs } from 'threejs-modules/ui/Tabs' // 🗂️ tab ngang drawer (🏠 Building | 🌳 Ground | 🎛️ Lab)
 import { BaseWorld } from 'threejs-modules/utils/core/BaseWorld'
@@ -437,11 +436,6 @@ const PRECIP_BASE_SIZE: Record<Exclude<WeatherMode, 'none'>, number> = {
   blizzard: 9,
 }
 
-// 🌊 Mưa gợn mặt nước: DEFAULT số vòng/giây/HỒ ở mưa NẶNG (×heavy×số hồ). Điểm rơi NGẪU NHIÊN trong lòng hồ
-// (Precipitation là field — không biết giọt rơi đâu; rải ngẫu nhiên = chuẩn procedural rain ripple). Slider khay → _weather.rippleRate.
-const RAIN_DROP_RATE = 4.5 // vòng/s/hồ tại heavy=1 (default _weather.rippleRate)
-const RAIN_DROP_STRENGTH = 0.3 // biên độ gợn 1 giọt (±random) — hằng (size sóng đã ở uRippleAmp)
-
 // Bão MƯA áp lên sky (giữ azimuth/elevation user): trời u ám TỐI + sun yếu lạnh + fill cao + sét (lightning).
 const STORM_SKY: Partial<SunOpts> = {
   enabled: true,
@@ -471,19 +465,6 @@ const WX_TAB_CLASSES = {
   active: 'ap-wx-on',
 }
 
-// Point-in-polygon (ray casting) — pts cùng đơn vị với x,z. Dùng rải mưa gợn KHẮP hồ free-form (WaterSurface
-// dựng polygon bằng lineTo các anchor nên test trên anchor khớp ĐÚNG mặt nước, không lọt vùng khung chữ nhật).
-function pointInPoly(x: number, z: number, pts: { x: number; z: number }[]): boolean {
-  let inside = false
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-    const xi = pts[i].x
-    const zi = pts[i].z
-    const xj = pts[j].x
-    const zj = pts[j].z
-    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside
-  }
-  return inside
-}
 const FOG_OVERCAST_COL = new THREE.Color(0x9aa2aa) // 🌫️ màu fog khi trời âm u (lerp tới từ xanh-ngày)
 const BORDER_TEX_SPEC: Record<BorderTexKey, SurfaceTextureSpec> = {
   'icelandic-jagged': {
@@ -816,7 +797,6 @@ export class ArchPlanLab extends BaseWorld {
     snowStorm: boolean
     heavy: number
     sizeScale: number
-    rippleRate: number
     rippleAmp: number
     rippleLife: number
     rippleSpeed: number
@@ -833,7 +813,6 @@ export class ArchPlanLab extends BaseWorld {
     snowStorm: false,
     heavy: 0.5,
     sizeScale: 1,
-    rippleRate: RAIN_DROP_RATE,
     rippleAmp: 2.2, // = WaterSurface RIPPLE_AMP
     rippleLife: 2.6, // = RIPPLE_LIFE
     rippleSpeed: 0.65, // = RIPPLE_SPEED (đã halve)
@@ -844,9 +823,6 @@ export class ArchPlanLab extends BaseWorld {
     rainMaxR: 0.42, // = RAIN_MAXR
     rainWaves: 22, // = RAIN_WAVES
   }
-  // 🌊 Mưa gợn: đếm-lùi tới giọt kế (rải ngẫu nhiên trong lòng hồ khi đang mưa). _tmpRipplePos = tâm hồ world.
-  private _rainRippleTimer = 0
-  private readonly _tmpRipplePos = new THREE.Vector3()
   // 🌦️ Toggle khay thời tiết (code3): ref checkbox "Bật" mưa/tuyết để sync (bật loại này → tắt loại kia, mode đơn).
   private _wxRainOn: HTMLInputElement | null = null
   private _wxSnowOn: HTMLInputElement | null = null
@@ -1737,7 +1713,6 @@ export class ArchPlanLab extends BaseWorld {
     this._precip?.update(deltaTime) // 🌧️ mưa/tuyết rơi (vertex shader; chỉ ghi 1 uniform time)
     this._updateLightning(deltaTime) // ⚡ sét lóe (chỉ ⛈️ Bão)
     this._updateSnowAccum(deltaTime) // ❄️ tuyết đọng nền tích dần (chỉ mode snow)
-    this._updateRainRipples(deltaTime) // 🌊 mưa rải vòng gợn trong lòng hồ (chỉ rain/storm)
     this.css2dRenderer?.render(this.scene, this.camera)
     this.guard?.check()
     this.devHud?.update(this.renderer.info, deltaTime)
@@ -2809,7 +2784,8 @@ export class ArchPlanLab extends BaseWorld {
     panel.append(head, this._wxHeavyRow().row, this._wxSizeRow().row)
   }
 
-  // 5 slider 🌊 Sóng hồ: Tần suất (rate xuất hiện vòng, CPU) · Size/Thời gian/Tốc độ lan/Bước sóng (uniform, live mọi hồ).
+  // 4 slider 🌊 Va chạm (pool nổ khi CHẠM — cá/vật): Size/Thời gian/Tốc độ lan/Bước sóng (uniform, live mọi hồ).
+  // Bỏ "Tần suất" (rain spam) — mưa nền giờ do lớp ambient rain-cell lo; pool chỉ cho va-chạm rời.
   private _buildRippleSliders(panel: HTMLElement): void {
     const w = this._weather
     const mk = (
@@ -2823,9 +2799,6 @@ export class ArchPlanLab extends BaseWorld {
         .row
     const apply = (): void => this._applyRippleParams()
     panel.append(
-      mk('Tần suất', 0, 100, w.rippleRate, (v) => {
-        w.rippleRate = v
-      }),
       mk('Size sóng', 0, 6, w.rippleAmp, (v) => {
         w.rippleAmp = v
         apply()
@@ -2972,7 +2945,7 @@ export class ArchPlanLab extends BaseWorld {
     if (m !== 'none') this._precip?.setSize(PRECIP_BASE_SIZE[m] * v)
   }
 
-  // 🌊 Đẩy 4 tham số sóng (size/thời gian/tốc độ/bước sóng) vào MỌI hồ. Tần số (rate) ở CPU (_updateRainRipples).
+  // 🌊 Đẩy 4 tham số dáng va-chạm (size/thời gian/tốc độ/bước sóng) vào MỌI hồ (pool nổ khi emitRipple).
   private _applyRippleParams(): void {
     const w = this._weather
     for (const x of this._siteWaters) {
@@ -3108,65 +3081,6 @@ export class ArchPlanLab extends BaseWorld {
     this._snowCover.setAccum(this._snowAccum)
   }
 
-  // 🌊 Mưa rải vòng gợn lên MỌI hồ đang render (rain/storm). Tần suất ∝ heavy×số hồ; điểm rơi ngẫu nhiên KHẮP
-  // hình chữ nhật lòng hồ (phủ cả góc + 2 đầu cạnh dài, không chỉ giữa). Đếm-lùi: bắn nhiều giọt nếu rate cao.
-  private _updateRainRipples(dt: number): void {
-    const m = this._effectiveMode()
-    if ((m !== 'rain' && m !== 'storm') || this._siteWaters.length === 0) return
-    const rate = this._weather.rippleRate * this._weather.heavy * this._siteWaters.length // giọt/s
-    if (rate <= 0) return
-    this._rainRippleTimer -= dt
-    let guard = 0 // chặn spike khi dt lớn (tab ẩn) — tối đa 16 giọt/frame (tần suất max 100 × nhiều hồ)
-    while (this._rainRippleTimer <= 0 && guard++ < 16) {
-      this._rainRippleTimer += 1 / rate
-      this._emitRainDrop()
-    }
-    if (this._rainRippleTimer < 0) this._rainRippleTimer = 1 / rate // dt quá lớn → reset, không dồn nợ
-  }
-
-  // 1 giọt: chọn hồ ngẫu nhiên → điểm KHẮP hình chữ nhật lòng hồ (world) → emitRipple biên độ nhỏ (giọt mưa).
-  private _emitRainDrop(): void {
-    const w = this._siteWaters[(Math.random() * this._siteWaters.length) | 0]
-    const c = w.surf.getMesh().getWorldPosition(this._tmpRipplePos)
-    const p = this._samplePondLocal(w.cfg) // điểm (local m) NẰM TRONG mặt nước theo shape
-    const s = RAIN_DROP_STRENGTH * (0.7 + Math.random() * 0.6)
-    w.surf.emitRipple(c.x + p.x, c.z + p.z, s)
-  }
-
-  // 1 điểm ngẫu nhiên NẰM TRONG mặt nước (local m so tâm hồ): free=polygon · circle/ellipse=ellipse · rect=chữ nhật.
-  private _samplePondLocal(cfg: WaterConfig): { x: number; z: number } {
-    if (cfg.shape === 'free' && cfg.points.length >= 3) return this._samplePolyLocal(cfg.points)
-    const halfW = cfg.width / 2000
-    const halfD = cfg.depth / 2000
-    const round = cfg.shape === 'circle' || cfg.shape === 'ellipse'
-    for (let i = 0; i < 12; i++) {
-      const x = (Math.random() * 2 - 1) * halfW
-      const z = (Math.random() * 2 - 1) * halfD
-      if (!round || (x / halfW) ** 2 + (z / halfD) ** 2 <= 1) return { x, z }
-    }
-    return { x: 0, z: 0 } // rejection fail (hiếm) → tâm hồ
-  }
-
-  // Rải trong polygon free-form (pts mm) — bbox từ chính pts (chắc chắn phủ) + rejection point-in-poly → trả m.
-  private _samplePolyLocal(pts: WaterPoint[]): { x: number; z: number } {
-    let minX = Infinity
-    let maxX = -Infinity
-    let minZ = Infinity
-    let maxZ = -Infinity
-    for (const p of pts) {
-      minX = Math.min(minX, p.x)
-      maxX = Math.max(maxX, p.x)
-      minZ = Math.min(minZ, p.z)
-      maxZ = Math.max(maxZ, p.z)
-    }
-    for (let i = 0; i < 16; i++) {
-      const mx = minX + Math.random() * (maxX - minX)
-      const mz = minZ + Math.random() * (maxZ - minZ)
-      if (pointInPoly(mx, mz, pts)) return { x: mx / 1000, z: mz / 1000 }
-    }
-    return { x: (minX + maxX) / 2000, z: (minZ + maxZ) / 2000 } // fallback tâm bbox (m)
-  }
-
   // ⚡ Sét (chỉ ⛈️ Bão): AmbientLight lazy lóe sáng, timer ngẫu nhiên giữa các cú, flash decay nhanh.
   // KHÔNG đụng hemi/sun (light riêng, intensity 0 khi không sét) → không phá _applySun.
   private _updateLightning(dt: number): void {
@@ -3228,7 +3142,6 @@ export class ArchPlanLab extends BaseWorld {
     const w = this._weather
     if (typeof o.heavy === 'number') w.heavy = Math.max(0.05, Math.min(1, o.heavy))
     if (typeof o.sizeScale === 'number') w.sizeScale = Math.max(0.3, Math.min(3, o.sizeScale))
-    if (typeof o.rippleRate === 'number') w.rippleRate = Math.max(0, Math.min(100, o.rippleRate))
     if (typeof o.rippleAmp === 'number') w.rippleAmp = Math.max(0, Math.min(6, o.rippleAmp))
     if (typeof o.rippleLife === 'number') w.rippleLife = Math.max(0.3, Math.min(8, o.rippleLife))
     if (typeof o.rippleSpeed === 'number') w.rippleSpeed = Math.max(0, Math.min(3, o.rippleSpeed))
