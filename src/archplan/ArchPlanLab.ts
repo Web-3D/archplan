@@ -149,6 +149,7 @@ import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
 import { Precipitation, type PrecipitationOptions } from 'threejs-modules/effects/Precipitation' // 🌧️ mưa/tuyết field — instance scene chính
 import { SnowCover } from 'threejs-modules/effects/SnowCover' // ❄️ tuyết đọng nền — overlay accum (Phase C2)
+import { SplashBurst } from 'threejs-modules/effects/SplashBurst' // 💦 vương miện + giọt tung tóe tại va-chạm rời
 import { AsphaltGround } from 'threejs-modules/shaders/ground/AsphaltGround'
 import { PhotoGround, type PhotoGroundMaps } from 'threejs-modules/shaders/ground/PhotoGround' // 🌱 ground texture (+ 🪵 slab walnut: sàn ngang)
 import {
@@ -788,6 +789,10 @@ export class ArchPlanLab extends BaseWorld {
   // 🌧️ Thời tiết = thuộc tính MÔI TRƯỜNG (như sun) — persist riêng localStorage 'archplan:weather',
   // KHÔNG vào design state. mode đổi = tạo/dispose instance; heavy = opacity live. ⛈️ Bão = combo mưa+sky.
   private _precip: Precipitation | null = null
+  // 💦 Giọt tung tóe (GPU sprite) — 1 instance dùng chung, sống ở scene root, lazy tạo lần va-chạm đầu. burst() lúc
+  // cá trồi/xác cá/demo chạm nước (đi kèm WaterSurface.emitImpact). 0 CPU/frame trừ lúc bắn.
+  private _splash: SplashBurst | null = null
+  private readonly _splashTmp = new THREE.Vector3() // tâm hồ world cho burst
   // heavy = opacity; sizeScale = hệ số × cỡ gốc mode (1 = mặc định đã gấp đôi).
   // base = loại precip (none/rain/snow); rainStorm/snowStorm = cờ bão riêng (⛈️ vs 🌨️). Effective mode = _effectiveMode().
   // ripple* = tham số gợn hồ (default = WaterSurface defaults) — slider khay Mưa, áp cho mọi _siteWaters, persist.
@@ -803,12 +808,15 @@ export class ArchPlanLab extends BaseWorld {
     rippleWave: number
     // ☔ rain-cell (ambient phủ khắp) — đơn vị NGƯỜI DÙNG; _applyRainParams quy về uniform ô:
     // scope(mm phạm vi lan) · lambda(mm bước sóng) · amp(size/biên độ) · count(số bước sóng) · spd(wave spd) · density(→cell)
-    rainScopeMm: number
+    rainScopeMinMm: number
+    rainScopeMaxMm: number
     rainLambdaMm: number
     rainAmp: number
     rainCount: number
     rainSpd: number
     rainDensity: number
+    rainGlint: number
+    rainGlintScale: number
   } = {
     base: 'none',
     rainStorm: false,
@@ -819,12 +827,15 @@ export class ArchPlanLab extends BaseWorld {
     rippleLife: 2.6, // = RIPPLE_LIFE
     rippleSpeed: 0.65, // = RIPPLE_SPEED (đã halve)
     rippleWave: 0.42, // λ(m) ≈ 2π/RIPPLE_WAVES
-    rainScopeMm: 150, // phạm vi vòng lan (mm) — chặn theo cỡ ô (mật độ cao → tự giới hạn)
+    rainScopeMinMm: 100, // 🎲 cận DƯỚI cỡ vòng (mm) — mỗi giọt random trong [min,max]
+    rainScopeMaxMm: 300, // 🎲 cận TRÊN cỡ vòng (mm) — clamp theo cỡ ô (scope to cần density thấp)
     rainLambdaMm: 8, // độ dài bước sóng λ (mm) — gợn mịn (range 1–20mm)
     rainAmp: 1.4, // size/biên độ sóng
     rainCount: 1.5, // số bước sóng (gợn) trong 1 vòng
     rainSpd: 1.3, // wave spd (chu kỳ giọt/giây)
     rainDensity: 0.62, // → cell ≈ 0.34; cao = ô nhỏ = dày hơn (max = 2× dày so trước)
+    rainGlint: 3, // 👑 trần sáng đốm "vương miện" tâm giọt (= WaterSurface RAIN_GLINT)
+    rainGlintScale: 0.2, // 👑 cỡ đốm glint (× bề rộng dải = WaterSurface RAIN_GLINT_SCALE)
   }
   // 🌦️ Toggle khay thời tiết (code3): ref checkbox "Bật" mưa/tuyết để sync (bật loại này → tắt loại kia, mode đơn).
   private _wxRainOn: HTMLInputElement | null = null
@@ -1720,7 +1731,7 @@ export class ArchPlanLab extends BaseWorld {
     this._precip?.update(deltaTime) // 🌧️ mưa/tuyết rơi (vertex shader; chỉ ghi 1 uniform time)
     this._updateLightning(deltaTime) // ⚡ sét lóe (chỉ ⛈️ Bão)
     this._updateSnowAccum(deltaTime) // ❄️ tuyết đọng nền tích dần (chỉ mode snow)
-    this._updateDemoImpact(deltaTime) // 🧪 demo va chạm (nếu bật) — bắn thử để xem phản xạ tường
+    this._updateImpactFx(time, deltaTime) // 💦🧪 giọt tung tóe (update) + demo va chạm (gộp — onUpdate complexity ≤10)
     this.css2dRenderer?.render(this.scene, this.camera)
     this.guard?.check()
     this.devHud?.update(this.renderer.info, deltaTime)
@@ -1861,6 +1872,8 @@ export class ArchPlanLab extends BaseWorld {
     this._wxRainOn = this._wxSnowOn = null
     this._precip?.dispose() // 🌧️ mưa/tuyết — gỡ Points/Lines + geometry + material
     this._precip = null
+    this._splash?.dispose() // 💦 giọt tung tóe — gỡ Points + geometry + material
+    this._splash = null
     if (this._lightning) {
       this.scene.remove(this._lightning) // ⚡ AmbientLight sét (không có GPU resource cần dispose)
       this._lightning = null
@@ -2250,6 +2263,7 @@ export class ArchPlanLab extends BaseWorld {
     APGuiCtx,
     | 'tuneGrass'
     | 'tuneWater'
+    | 'buildWaterFx'
     | 'tuneFish'
     | 'previewFish'
     | 'setActiveWater'
@@ -2267,6 +2281,7 @@ export class ArchPlanLab extends BaseWorld {
     return {
       tuneGrass: (apply, persist) => this._tuneGrass(apply, persist),
       tuneWater: (cfg, apply, persist) => this._tuneWater(cfg, apply, persist),
+      buildWaterFx: (host) => this._buildWaterFxControls(host), // 🌊 va chạm rời → sub-tab Water (drawer phải)
       tuneFish: (cfg, apply, persist) => this._tuneFish(cfg, apply, persist),
       previewFish: (fs) => this._previewFish(fs),
       setActiveWater: (cfg) => this.waterTool?.setActiveCfg(cfg),
@@ -2701,6 +2716,7 @@ export class ArchPlanLab extends BaseWorld {
   // Mục Bầu trời: 4 preset ngày (☀️🌇☁️🌙) + 3 slider có nhãn (Sáng nền/Mây mù/Sương mù) — đều cascade sky.
   private _envSkySection(wrap: HTMLElement): void {
     wrap.append(this._envTitle('🌅 Bầu trời'), this._envSkyButtons())
+    this._envSunControls(wrap) // ☀️ bật/tắt + cường độ + màu nắng (gộp từ panel SunGizmo trái-dưới đã xóa)
     const fill = this._envLabeledSlider({
       label: 'Sáng nền',
       min: 0,
@@ -2740,6 +2756,46 @@ export class ArchPlanLab extends BaseWorld {
     wrap.append(fill.row, over.row, fogS.row)
   }
 
+  // ☀️ Sun trong khay 🌅 (gộp từ panel SunGizmo trái-dưới đã XÓA): bật/tắt + (Cường độ & ô màu CÙNG HÀNG). Đổi →
+  // set sunOpts + _applySun (sync gizmo 3D + sky/grass/water) + save. HƯỚNG nắng vẫn KÉO quả sun 3D trong scene.
+  private _envSunControls(wrap: HTMLElement): void {
+    const on = this._wxToggle('☀️ Bật nắng', this.sunOpts.enabled, (v) => {
+      this.sunOpts.enabled = v
+      this._applySun()
+      this._saveSunOpts()
+    })
+    const int = this._envLabeledSlider({
+      label: 'Cường độ',
+      min: 0,
+      max: 5,
+      value: this.sunOpts.intensity,
+      onInput: (v) => {
+        this.sunOpts.intensity = v
+        this._applySun()
+      },
+      save: () => this._saveSunOpts(),
+    })
+    // 🎨 Ô màu nắng NẰM NGANG cạnh slider Cường độ (bỏ nhãn "Màu nắng" riêng)
+    int.row.append(
+      this._envColorInput(this.sunOpts.color, (c) => {
+        this.sunOpts.color = c
+        this._applySun()
+        this._saveSunOpts()
+      })
+    )
+    wrap.append(on.row, int.row)
+  }
+
+  // Ô màu thuần (input type=color) cho khay 🌅 — gắn INLINE vào hàng slider. onInput nhận 0xRRGGBB.
+  private _envColorInput(value: number, onInput: (c: number) => void): HTMLInputElement {
+    const col = document.createElement('input')
+    col.type = 'color'
+    col.className = 'ap-env-color'
+    col.value = '#' + (value & 0xffffff).toString(16).padStart(6, '0')
+    col.addEventListener('input', () => onInput(parseInt(col.value.slice(1), 16)))
+    return col
+  }
+
   // Mục Thời tiết = code3 nested tab: 🌧️ Mưa (xanh) | ❄️ Tuyết (trắng-xám). Bão GỘP trong từng tab (⛈️ vs 🌨️).
   private _envWeatherSection(wrap: HTMLElement): void {
     wrap.append(this._envTitle('🌦️ Thời tiết'))
@@ -2760,7 +2816,7 @@ export class ArchPlanLab extends BaseWorld {
     )
   }
 
-  // Tab Mưa: [Bật | ⛈️ Bão] + Nặng/Cỡ hạt + 2 nhóm sóng hồ: 🌊 Va chạm (pool rời) · ☔ Mưa nền (ambient phủ khắp).
+  // Tab Mưa: [Bật | ⛈️ Bão] + Nặng/Cỡ hạt + ☔ Mưa nền (ambient phủ khắp). 🌊 Va chạm rời → mục 💧 Mặt nước.
   private _buildRainPanel(panel: HTMLElement): void {
     const on = this._wxToggle('Bật', this._weather.base === 'rain', (v) => this._setRainOn(v))
     const storm = this._wxToggle('⛈️ Bão', this._weather.rainStorm, (v) => this._setRainStorm(v))
@@ -2768,20 +2824,25 @@ export class ArchPlanLab extends BaseWorld {
     const head = document.createElement('div')
     head.className = 'ap-wx-head'
     head.append(on.row, storm.row)
-    const demo = this._wxToggle('🧪 Demo va chạm', this._demoImpact, (v) => {
-      this._demoImpact = v
-      this._demoTimer = 0 // bật → nổ ngay phát đầu
-    })
     panel.append(
       head,
       this._wxHeavyRow().row,
       this._wxSizeRow().row,
-      this._envSubTitle('🌊 Va chạm (rời)'),
-      demo.row
+      this._envSubTitle('☔ Mưa nền (phủ khắp)')
     )
-    this._buildRippleSliders(panel)
-    panel.append(this._envSubTitle('☔ Mưa nền (phủ khắp)'))
     this._buildRainSliders(panel)
+  }
+
+  // 🌊 Bộ điều khiển VA CHẠM mặt nước (toàn cục — áp MỌI hồ) render vào sub-tab Water (drawer phải) qua
+  // ctx.buildWaterFx (site.ts gọi ở đáy buildWaterDomain). Demo (KHÔNG persist) + 4 slider. State sống ở ArchPlanLab.
+  private _buildWaterFxControls(host: HTMLElement): void {
+    host.append(this._envSubTitle('🌊 Va chạm (gợn khi cá/vật chạm)'))
+    const demo = this._wxToggle('🧪 Demo va chạm', this._demoImpact, (v) => {
+      this._demoImpact = v
+      this._demoTimer = 0 // bật → nổ ngay phát đầu
+    })
+    host.append(demo.row)
+    this._buildRippleSliders(host)
   }
 
   // Tab Tuyết: [Bật | 🌨️ Bão tuyết] + Nặng/Cỡ hạt (KHÔNG có gợn hồ — tuyết không gợn nước).
@@ -2831,45 +2892,46 @@ export class ArchPlanLab extends BaseWorld {
     )
   }
 
-  // 6 slider ☔ Mưa nền (ambient rain-cell): scope(mm) · lamda(mm) · size sóng · số bước sóng · wave spd · mật độ.
+  // 9 slider ☔ Mưa nền (rain-cell): scope min/max (mm — random per-giọt) · lamda · size sóng · số bước sóng ·
+  // wave spd · mật độ · trần sáng · cỡ đốm. Data-driven (defs[] + loop) — gọn, dễ thêm núm.
   private _buildRainSliders(panel: HTMLElement): void {
+    type RainKey =
+      | 'rainScopeMinMm'
+      | 'rainScopeMaxMm'
+      | 'rainLambdaMm'
+      | 'rainAmp'
+      | 'rainCount'
+      | 'rainSpd'
+      | 'rainDensity'
+      | 'rainGlint'
+      | 'rainGlintScale'
     const w = this._weather
-    const mk = (
-      label: string,
-      min: number,
-      max: number,
-      value: number,
-      onInput: (v: number) => void
-    ): HTMLElement =>
-      this._envLabeledSlider({ label, min, max, value, onInput, save: () => this._saveWeather() })
-        .row
     const apply = (): void => this._applyRainParams()
-    panel.append(
-      mk('scope', 10, 200, w.rainScopeMm, (v) => {
-        w.rainScopeMm = v
-        apply()
-      }),
-      mk('lamda', 1, 20, w.rainLambdaMm, (v) => {
-        w.rainLambdaMm = v
-        apply()
-      }),
-      mk('size sóng', 0, 4, w.rainAmp, (v) => {
-        w.rainAmp = v
-        apply()
-      }),
-      mk('số bước sóng', 0.5, 8, w.rainCount, (v) => {
-        w.rainCount = v
-        apply()
-      }),
-      mk('wave spd', 0.2, 5, w.rainSpd, (v) => {
-        w.rainSpd = v
-        apply()
-      }),
-      mk('mật độ', 0, 1, w.rainDensity, (v) => {
-        w.rainDensity = v
-        apply()
+    const defs: [string, number, number, RainKey][] = [
+      ['scope min', 100, 300, 'rainScopeMinMm'],
+      ['scope max', 100, 300, 'rainScopeMaxMm'],
+      ['lamda', 1, 20, 'rainLambdaMm'],
+      ['size sóng', 0, 4, 'rainAmp'],
+      ['số bước sóng', 0.5, 8, 'rainCount'],
+      ['wave spd', 0.2, 5, 'rainSpd'],
+      ['mật độ', 0, 1, 'rainDensity'],
+      ['trần sáng', 0, 8, 'rainGlint'],
+      ['cỡ đốm', 0.02, 1, 'rainGlintScale'],
+    ]
+    for (const [label, min, max, key] of defs) {
+      const { row } = this._envLabeledSlider({
+        label,
+        min,
+        max,
+        value: w[key],
+        onInput: (v) => {
+          w[key] = v
+          apply()
+        },
+        save: () => this._saveWeather(),
       })
-    )
+      panel.append(row)
+    }
   }
 
   private _wxHeavyRow(): { row: HTMLElement; slider: HTMLInputElement } {
@@ -2989,18 +3051,26 @@ export class ArchPlanLab extends BaseWorld {
       x.surf.setRainCell(cell)
       x.surf.setRainAmp(w.rainAmp)
       x.surf.setRainRate(w.rainSpd)
-      x.surf.setRainMaxR(w.rainScopeMm / 1000 / cell) // scope mm→ô (setter clamp ≤0.6 = chặn theo cỡ ô)
+      x.surf.setRainScopeRange(w.rainScopeMinMm / 1000 / cell, w.rainScopeMaxMm / 1000 / cell) // 🎲 dải scope mm→ô; random per-giọt
       x.surf.setRainWaves((Math.PI * 2) / lamCell) // k = 2π/λ
       x.surf.setRainWidth(w.rainCount * lamCell * 0.5) // dải = số-bước-sóng × λ (nửa-rộng cho smoothstep)
+      x.surf.setRainGlint(w.rainGlint) // 👑 trần sáng đốm vương miện tâm giọt
+      x.surf.setRainGlintSize(w.rainGlintScale) // 👑 cỡ đốm glint (× dải)
     }
   }
 
-  // 🧪 Demo va chạm: nếu bật, ~mỗi 1.2–2.7s bắn 1 va chạm thử để XEM phản xạ tường (ping-pong). Tự-chứa, KHÔNG persist.
+  // 💦🧪 Gộp update giọt tung tóe + demo va chạm (giữ onUpdate complexity ≤10).
+  private _updateImpactFx(time: number, dt: number): void {
+    this._splash?.update(time)
+    this._updateDemoImpact(dt)
+  }
+
+  // 🧪 Demo va chạm: nếu bật, ~mỗi 0.6–1.4s bắn 1 va chạm thử để XEM gợn sóng + giọt bắn (ping-pong). Tự-chứa, KHÔNG persist.
   private _updateDemoImpact(dt: number): void {
     if (!this._demoImpact || this._siteWaters.length === 0) return
     this._demoTimer -= dt
     if (this._demoTimer > 0) return
-    this._demoTimer = 1.2 + Math.random() * 1.5
+    this._demoTimer = 0.6 + Math.random() * 0.8
     this._emitDemoImpact()
   }
 
@@ -3009,7 +3079,18 @@ export class ArchPlanLab extends BaseWorld {
     const x = this._siteWaters[(Math.random() * this._siteWaters.length) | 0]
     const lx = (Math.random() * 2 - 1) * (x.cfg.width / 2000) * 0.8
     const lz = (Math.random() * 2 - 1) * (x.cfg.depth / 2000) * 0.8
-    x.surf.emitImpact(lx, lz, 0.7, x.cfg.shape === 'rect')
+    x.surf.emitImpact(lx, lz, 1, x.cfg.shape === 'rect') // strength 1 (mạnh) cho demo dễ thấy
+    const c = x.surf.getMesh().getWorldPosition(this._splashTmp) // 💦 giọt bắn tại điểm va-chạm (world)
+    this._ensureSplash().burst(c.x + lx, c.y, c.z + lz, 1)
+  }
+
+  // 💦 Lazy tạo SplashBurst (1 lần) + add vào scene root. Dùng chung mọi va-chạm (demo + cá P3 sau).
+  private _ensureSplash(): SplashBurst {
+    if (!this._splash) {
+      this._splash = new SplashBurst()
+      this.scene.add(this._splash.getPoints())
+    }
+    return this._splash
   }
 
   private _envSkyButtons(): HTMLElement {
@@ -3187,14 +3268,19 @@ export class ArchPlanLab extends BaseWorld {
   // ☔ 5 tham số lớp ambient rain-cell (clamp đúng dải slider).
   private _loadWeatherRain(o: Record<string, unknown>): void {
     const w = this._weather
-    if (typeof o.rainScopeMm === 'number')
-      w.rainScopeMm = Math.max(10, Math.min(200, o.rainScopeMm))
+    if (typeof o.rainScopeMinMm === 'number')
+      w.rainScopeMinMm = Math.max(100, Math.min(300, o.rainScopeMinMm))
+    if (typeof o.rainScopeMaxMm === 'number')
+      w.rainScopeMaxMm = Math.max(100, Math.min(300, o.rainScopeMaxMm))
     if (typeof o.rainLambdaMm === 'number')
       w.rainLambdaMm = Math.max(1, Math.min(20, o.rainLambdaMm))
     if (typeof o.rainAmp === 'number') w.rainAmp = Math.max(0, Math.min(4, o.rainAmp))
     if (typeof o.rainCount === 'number') w.rainCount = Math.max(0.5, Math.min(8, o.rainCount))
     if (typeof o.rainSpd === 'number') w.rainSpd = Math.max(0.2, Math.min(5, o.rainSpd))
     if (typeof o.rainDensity === 'number') w.rainDensity = Math.max(0, Math.min(1, o.rainDensity))
+    if (typeof o.rainGlint === 'number') w.rainGlint = Math.max(0, Math.min(8, o.rainGlint))
+    if (typeof o.rainGlintScale === 'number')
+      w.rainGlintScale = Math.max(0.02, Math.min(1, o.rainGlintScale))
   }
 
   private _saveWeather(): void {
@@ -3229,6 +3315,9 @@ export class ArchPlanLab extends BaseWorld {
       `.ap-env-row{display:flex;align-items:center;gap:6px}` +
       `.ap-env-lab{flex:0 0 52px;font:500 11px/1.2 'Segoe UI',system-ui,sans-serif;color:#cfe0d8}` +
       `.ap-env-row input[type=range]{flex:1;min-width:0;accent-color:#e0b860;cursor:pointer}` +
+      // 🎨 ô màu nắng nhỏ gọn — nằm cuối hàng Cường độ
+      `.ap-env-color{flex:0 0 auto;width:26px;height:16px;padding:0;border:1px solid rgba(180,200,188,.4);` +
+      `border-radius:4px;background:none;cursor:pointer}` +
       // 🌦️ code3 tab Mưa/Tuyết — tab folder-style (Mưa xanh dương, Tuyết trắng-xám); panel tô nhạt theo loại
       `.ap-wx-tabs{display:flex;gap:3px;margin-top:3px}` +
       `.ap-envpre-float .ap-wx-tab{flex:1;width:auto;height:auto;padding:4px 6px;` +

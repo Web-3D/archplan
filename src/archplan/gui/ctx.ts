@@ -117,6 +117,9 @@ export interface APGuiCtx {
   // 💧 Tinh chỉnh hồ nước LIVE (màu/gương/sóng) trên WaterSurface của ĐÚNG instance cfg. No-op nếu hồ đó
   // chưa render (pool tắt / pond/puddle placeholder). cfg = config của tab instance đang chỉnh.
   tuneWater(cfg: WaterConfig, apply: (w: WaterSurface) => void, persist: boolean): void
+  // 🌊 Render bộ điều khiển VA CHẠM mặt nước (toàn cục — Demo + slider gợn) vào sub-tab Water. ArchPlanLab cấp;
+  // site.ts gọi 1 lần ở đáy buildWaterDomain. Optional — builder/mock không cần thì bỏ qua.
+  buildWaterFx?(host: HTMLElement): void
   // 🐟 Chỉnh bầy cá LIVE (vị trí/vùng/sâu/cỡ/tốc/màu — transform mesh + setter PondFish, 0 rebuild) của
   // ĐÚNG bầy cfg (tab F1 F2…). No-op nếu bầy chưa render (enabled=false).
   tuneFish(cfg: FishSchool, apply: (f: PondFish) => void, persist: boolean): void

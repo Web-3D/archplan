@@ -12,7 +12,6 @@ import { setupGroundLab } from './ground-lab'
 import { setupParticleLab } from './particle-lab'
 import { setupRoofLab } from './roof-lab'
 import { setupWaterfallLab } from './waterfall-lab'
-import { setupWeatherLab } from './weather-lab'
 
 // 4 host 1 experiment cần để dựng nội dung (khung bench tái dùng cho mọi experiment).
 export interface LabHosts {
@@ -48,11 +47,6 @@ const EXPERIMENTS: LabExperiment[] = [
     id: 'waterfall',
     label: '🌊 Thác',
     mount: (h) => setupWaterfallLab(h.previewHost, h.paramHost, h.docHost, h.settingsHost),
-  },
-  {
-    id: 'weather',
-    label: '🌧️ Thời tiết',
-    mount: (h) => setupWeatherLab(h.previewHost, h.paramHost, h.docHost, h.settingsHost),
   },
 ]
 

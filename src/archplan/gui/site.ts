@@ -3188,6 +3188,7 @@ function buildWaterDomain(ctx: APGuiCtx): {
     instanceTabs(pondSub, ctx, 'pond', 'Pd'),
     instanceTabs(puddleSub, ctx, 'puddle', 'Pe'),
   ]
+  ctx.buildWaterFx?.(waterSub) // 🌊 va chạm mặt nước (toàn cục, ArchPlanLab render) — đáy Water domain
   return {
     panel: waterSub,
     dispose: (): void => {

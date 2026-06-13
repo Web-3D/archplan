@@ -2,13 +2,13 @@
  * VỊ TRÍ   — archplan/src/archplan/interaction/sunGizmo.ts
  * VAI TRÒ  — Sun = VẬT THỂ kéo được trong scene: quả cầu phát sáng trên vòm bán kính 24m. Nhấn-giữ
  *            kéo → đổi hướng nắng (azimuth/elevation, clamp ban ngày 5–89°). Khi kéo hiện CHỈ trục Y
- *            (dây dọi sun→lưới) + bóng tròn đen mờ tại giao XZ. Panel control = DOM CỐ ĐỊNH dock
- *            góc trái-dưới (nút bật/tắt + thanh sáng dọc + ô màu) — KHÔNG bám sun. Thay panel GUI Sun cũ.
+ *            (dây dọi sun→lưới) + bóng tròn đen mờ tại giao XZ. Bật/tắt + cường độ + màu nắng giờ ở
+ *            khay 🌅 (ArchPlanLab._envSunControls) — gizmo CHỈ lo HƯỚNG; sync() cập nhật quả sun theo sunOpts.
  * LIÊN HỆ  — ArchPlanLab giữ ref + hook pointer (tryStartDrag/drag/endDrag) + _applySun gọi sync().
  *            Dùng SunOpts (scene.ts) làm nguồn sự thật; host bơm light/camera/canvas/orbit/persist.
  *
  * CÁCH DÙNG: const g = new SunGizmo(host); // trong onPointerDown: if (g.tryStartDrag(e)) return
- * DISPOSE: dispose() — gỡ gizmo mesh + panel DOM + trục Y/bóng + dispose geo/mat.
+ * DISPOSE: dispose() — gỡ gizmo mesh + trục Y/bóng + dispose geo/mat.
  */
 
 import * as THREE from 'three'
@@ -34,10 +34,6 @@ export class SunGizmo {
   private mesh: THREE.Mesh | null = null
   private geo: THREE.SphereGeometry | null = null
   private mat: THREE.MeshBasicMaterial | null = null
-  private panelEl: HTMLElement | null = null // panel control — DOM cố định (dock góc), KHÔNG theo sun
-  private btn: HTMLButtonElement | null = null
-  private intEl: HTMLInputElement | null = null // giữ ref để sync() bám opts khi nguồn NGOÀI đổi (preset 🌅)
-  private colEl: HTMLInputElement | null = null
   private axes: THREE.Group | null = null // CHỈ trục Y (dây dọi sun→lưới) — hiện khi kéo
   private axesGeo: THREE.BufferGeometry | null = null
   private axesMat: THREE.LineBasicMaterial | null = null
@@ -57,10 +53,6 @@ export class SunGizmo {
     })
     this.mesh = new THREE.Mesh(this.geo, this.mat)
     host.scene.add(this.mesh)
-    // Panel control = DOM CỐ ĐỊNH dock mép trái (absolute trong canvas wrapper) — KHÔNG bám sun
-    // → hết che quả sun, hết nhảy khi orbit/kéo. Quả sun + trục vẫn là vật thể 3D kéo được.
-    this.panelEl = this._buildControls()
-    host.canvas.parentElement?.appendChild(this.panelEl)
     this._buildAxes() // trục Y mờ xanh (tâm = sun) + bóng chân — ẩn, chỉ hiện khi kéo
     this.sync()
   }
@@ -98,18 +90,14 @@ export class SunGizmo {
     if (this.axes) this.axes.visible = false
   }
 
-  /** Đồng bộ gizmo theo light (gọi cuối _applySun): vị trí + màu + mờ đi khi tắt + DOM dock bám opts
-   *  (nguồn đổi sun có thể là NGOÀI panel — preset khay 🌅 — slider/màu/toggle phải nhảy theo). */
+  /** Đồng bộ gizmo theo light (gọi cuối _applySun): vị trí + màu + mờ đi khi tắt. Nguồn đổi sun =
+   *  khay 🌅 (_envSunControls) hoặc kéo quả sun → quả sun cập nhật theo. */
   sync(): void {
     if (this.isDisposed || !this.mesh || !this.mat) return
     this.mesh.position.copy(this.host.light.position)
     const on = this.host.opts.enabled
     this.mat.color.set(on ? this.host.opts.color : 0x556070)
     this.mat.opacity = on ? 1 : 0.35
-    if (this.btn) this.btn.textContent = on ? '☀' : '🌙'
-    if (this.intEl) this.intEl.value = String(this.host.opts.intensity)
-    if (this.colEl)
-      this.colEl.value = '#' + (this.host.opts.color & 0xffffff).toString(16).padStart(6, '0')
     this._updateAxisY() // đáy trục Y luôn chạm lưới (world y=0) dù sun cao/thấp
   }
 
@@ -126,7 +114,6 @@ export class SunGizmo {
   dispose(): void {
     if (this.isDisposed) return
     this.isDisposed = true
-    this.panelEl?.remove()
     this._disposeAxes()
     this.mesh?.parent?.remove(this.mesh)
     this.geo?.dispose()
@@ -134,10 +121,6 @@ export class SunGizmo {
     this.mesh = null
     this.geo = null
     this.mat = null
-    this.panelEl = null
-    this.btn = null
-    this.intEl = null
-    this.colEl = null
   }
 
   private _disposeAxes(): void {
@@ -191,50 +174,6 @@ export class SunGizmo {
   }
 
   // ── Private ────────────────────────────────────────────────────────────────
-
-  // Panel DOM cố định: [toggle ☀/🌙] [slider sáng dọc] [ô màu]. pointer-events:auto → không lẫn canvas.
-  private _buildControls(): HTMLElement {
-    const wrap = document.createElement('div')
-    wrap.className = 'ap-sun-ctrl'
-    const btn = document.createElement('button')
-    btn.className = 'ap-sun-toggle'
-    btn.title = 'Bật / tắt sun'
-    btn.textContent = this.host.opts.enabled ? '☀' : '🌙'
-    btn.addEventListener('click', () => this._toggle())
-    this.btn = btn
-    const int = document.createElement('input')
-    int.type = 'range'
-    int.className = 'ap-sun-int'
-    int.min = '0'
-    int.max = '5'
-    int.step = '0.1'
-    int.value = String(this.host.opts.intensity)
-    int.addEventListener('input', () => {
-      this.host.opts.intensity = parseFloat(int.value)
-      this.host.apply()
-    })
-    int.addEventListener('change', () => this.host.persist())
-    this.intEl = int
-    const col = document.createElement('input')
-    col.type = 'color'
-    col.className = 'ap-sun-color'
-    col.value = '#' + (this.host.opts.color & 0xffffff).toString(16).padStart(6, '0')
-    col.addEventListener('input', () => {
-      this.host.opts.color = parseInt(col.value.slice(1), 16)
-      this.host.apply()
-    })
-    col.addEventListener('change', () => this.host.persist())
-    this.colEl = col
-    wrap.append(btn, int, col)
-    return wrap
-  }
-
-  private _toggle(): void {
-    this.host.opts.enabled = !this.host.opts.enabled
-    if (this.btn) this.btn.textContent = this.host.opts.enabled ? '☀' : '🌙'
-    this.host.apply()
-    this.host.persist()
-  }
 
   private _ndc(e: PointerEvent): THREE.Vector2 {
     const r = this.host.canvas.getBoundingClientRect()

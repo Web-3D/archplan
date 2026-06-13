@@ -2525,58 +2525,8 @@
   color: #e2f2f4; /* text */
 }
 
-/* ☀ Sun gizmo — panel CSS2D bám theo quả sun trong scene: [toggle][slider sáng][ô màu]. */
-.ap-sun-ctrl {
-  position: absolute; /* DOCK CỐ ĐỊNH mép trái-dưới — không bám sun → hết che/jitter khi orbit */
-  left: 8px;
-  bottom: 8px;
-  z-index: 160;
-  display: flex;
-  flex-direction: column; /* dọc */
-  align-items: center;
-  gap: 5px;
-  padding: 6px 4px;
-  border-radius: 9px;
-  background: rgba(7, 22, 18, 0.82);
-  border: 1px solid var(--ap-border, rgba(201, 162, 78, 0.4));
-  backdrop-filter: blur(4px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
-  user-select: none;
-}
-.ap-sun-toggle {
-  flex: 0 0 auto;
-  width: 20px;
-  height: 18px;
-  padding: 0;
-  border-radius: 5px;
-  border: 1px solid var(--ap-border, rgba(201, 162, 78, 0.4));
-  background: rgba(201, 162, 78, 0.18);
-  color: #ffe9a8;
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-}
-.ap-sun-toggle:hover {
-  background: rgba(201, 162, 78, 0.32);
-}
-.ap-sun-int {
-  writing-mode: vertical-lr;
-  direction: rtl; /* min ở DƯỚI, max ở TRÊN */
-  width: 14px;
-  height: 64px;
-  cursor: pointer;
-  accent-color: var(--ap-accent, #c9a24e);
-}
-.ap-sun-color {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 1px solid var(--ap-border, rgba(201, 162, 78, 0.4));
-  border-radius: 4px;
-  background: none;
-  cursor: pointer;
-}
+/* (Panel Sun cũ góc trái-dưới đã GỠ — bật/tắt + cường độ + màu nắng dời vào khay 🌅 _envSunControls.
+   Giữ quả sun 3D kéo hướng + nhãn trục dưới đây.) */
 
 /* Nhãn trục XYZ (mờ xanh dương nhạt) — hiện khi kéo sun. */
 .ap-axis-label {
