@@ -2846,9 +2846,9 @@ function buildFishMorphTab(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): vo
       null,
     ], // rebuild
     [
-      'Cỡ cá', // 0.02m (tép bậc 6) → 0.6m (koi to bậc 4)
-      0.02,
-      0.6,
+      'Cỡ cá', // range theo BẬC (vd bậc 5: 40–120mm) — fishTierPreset
+      p.sizeMin / 1000,
+      p.sizeMax / 1000,
       0.01,
       1000,
       () => fs.size / 1000,
@@ -3007,9 +3007,12 @@ function fishTierRow(
   return selectRow('Bậc', FISH_TIER_OPTS, String(fs.tier), (v) => {
     const p = fishTierPreset(Number(v))
     fs.tier = Number(v)
-    fs.size = p.sizeMm // áp cỡ + số con mặc định của bậc (chỉnh tay lại ở slider dưới)
+    fs.size = p.sizeMm // áp cỡ + số con + HÀNH VI mặc định của bậc (chỉnh tay lại ở slider dưới)
     fs.count = p.count
-    rebuild(i) // range slider Số cá đổi theo bậc → dựng lại pane đàn này
+    fs.speed = p.speed // 🐟 bậc thấp chậm hơn chút (mồi)
+    fs.burstRate = p.burstRate // 🐟 bậc thấp bứt tốc thường hơn
+    fs.wanderAmp = p.wanderAmp // 🐟 bậc thấp lăng xăng hơn
+    rebuild(i) // range slider Số cá/Cỡ đổi theo bậc → dựng lại pane đàn này
     ctx.applySite(true)
   })
 }
@@ -3039,98 +3042,97 @@ function buildFishInnerTabs(host: HTMLElement, ctx: APGuiCtx, fs: FishSchool): T
   )
 }
 
-// 🐟 1 item ĐÀN trong hàng tab F1/F2…: Show + dropdown Bậc + 2 tab lồng + ✕ xoá. remove → splice w.fishSchools +
-// rebuild + applySite. Trả {item, dispose} — dispose gỡ Tabs lồng đàn đó.
-function buildFishInstanceItem(
-  host: HTMLElement,
+// 🐟 1 nút tab đàn (F1/F2…) — active highlight do showPane toggle. Tách giữ rule-50.
+function fishTabBtn(label: string, onClick: () => void): HTMLButtonElement {
+  const b = document.createElement('button')
+  b.type = 'button'
+  b.className = 'ap-tab-btn'
+  b.textContent = label
+  b.addEventListener('click', onClick)
+  return b
+}
+
+// 🐟 Pane 1 ĐÀN (đổ vào `content`): Show + dropdown Bậc + 2 tab lồng [Hình thái·Hành vi] + ✕ xoá. ✕ → splice
+// w.fishSchools + rebuild + applySite. Trả dispose (gỡ Tabs lồng đàn đó).
+function buildFishPane(
+  content: HTMLElement,
   ctx: APGuiCtx,
   w: WaterConfig,
   fs: FishSchool,
   i: number,
   rebuild: (focus?: number) => void
-): { item: TabItem; dispose: () => void } {
-  const label = `F${i + 1}`
-  const pane = document.createElement('div')
-  pane.appendChild(
+): () => void {
+  content.appendChild(
     toggleRow('🐟 Hiện đàn', fs.enabled, (on) => {
       fs.enabled = on
       ctx.applySite(true)
     })
   )
-  pane.appendChild(fishTierRow(ctx, fs, rebuild, i))
-  const inner = buildFishInnerTabs(pane, ctx, fs)
-  pane.appendChild(
+  content.appendChild(fishTierRow(ctx, fs, rebuild, i))
+  const inner = buildFishInnerTabs(content, ctx, fs)
+  content.appendChild(
+    // 🦈 hồi cá bị predator đớp (consumed→false) — live qua tuneFish (0 rebuild), khớp đúng đàn cfg
+    removeRow('↺ Reset đàn (hồi cá bị ăn)', () => ctx.tuneFish(fs, (f) => f.resetSchool(), true))
+  )
+  content.appendChild(
     removeRow('✕ Xoá đàn', () => {
-      w.fishSchools?.splice(w.fishSchools.indexOf(fs), 1)
+      const arr = w.fishSchools
+      if (arr) arr.splice(arr.indexOf(fs), 1) // xoá ĐÚNG đàn này (ref fs) khỏi w.fishSchools
       rebuild(Math.max(0, i - 1))
       ctx.applySite(true)
     })
   )
-  host.appendChild(pane)
-  return { item: { label, panel: pane, title: label }, dispose: inner.dispose }
+  return (): void => inner.dispose() // ⚠️ BỌC arrow giữ `this` — trả `inner.dispose` trần = unbound → throw khi gọi d()
 }
 
-// 🐟 Hàng Tabs ĐÀN (F1/F2… + ＋). onChange = previewFish (flash tia-Y tâm hồ — xác nhận đàn nào). schools() LIVE.
-function makeFishTabBar(
-  host: HTMLElement,
-  items: TabItem[],
-  addBtn: HTMLElement,
-  focus: number,
-  schools: () => FishSchool[],
-  ctx: APGuiCtx
-): Tabs {
-  return new Tabs(host, items, {
-    classes: {
-      bar: 'ap-tab-bar ap-water-itabs',
-      tab: 'ap-tab-btn',
-      panel: 'ap-water-isub',
-      active: 'ap-tab-active',
-    },
-    injectCss: false,
-    addEl: addBtn,
-    initial: focus,
-    onChange: (idx) => {
-      const fs = schools()[idx]
-      if (fs) ctx.previewFish(fs)
-    },
-  })
-}
-
-// 🐟 Tab "Cá" trong pane POND — quản LIST nhiều ĐÀN (chuỗi bậc lớn-ăn-bé). Hàng tab F1/F2… + ＋ thêm đàn (bậc 5);
-// mỗi đàn = Show + Bậc + [Hình thái·Hành vi] (đói RIÊNG) + ✕ xoá. Tabs động → rebuild mỗi thêm/xoá + applySite.
-// cfg = FishSchool ref → _tuneFish/_previewFish khớp đúng đàn (đa-đàn OK). Trả { dispose } gỡ mọi Tabs lồng.
+// 🐟 Tab "Cá" trong pane POND — quản LIST nhiều ĐÀN (chuỗi bậc lớn-ăn-bé). Hàng F1/F2…＋ tự dựng TAY (bar = con
+// đầu BỀN của host: chỉ replaceChildren nội dung, KHÔNG gỡ phần tử bar → thêm/xoá đàn KHÔNG mất hàng tab) + vùng
+// `content` hiện đàn đang chọn. ＋ thêm đàn (bậc 5), ✕ xoá, dropdown Bậc/đói RIÊNG mỗi đàn. cfg = FishSchool ref →
+// _tuneFish/_previewFish khớp đúng đàn. Trả { dispose } gỡ Tabs lồng của pane đang mở.
 function buildPondFishTab(
   host: HTMLElement,
   ctx: APGuiCtx,
   w: WaterConfig
 ): { dispose: () => void } {
   const schools = (): FishSchool[] => (w.fishSchools ??= [])
-  let tabs: Tabs | null = null
-  let paneDisposers: (() => void)[] = []
-  const teardown = (): void => {
-    tabs?.dispose()
-    for (const d of paneDisposers) d()
-    paneDisposers = []
+  const bar = document.createElement('div')
+  bar.className = 'ap-tab-bar ap-water-itabs' // hàng F1/F2…＋ — STABLE (chỉ thay nội dung, không gỡ chính bar)
+  const content = document.createElement('div')
+  content.className = 'ap-water-isub'
+  host.append(bar, content)
+  let disposers: (() => void)[] = []
+  let panes: HTMLElement[] = []
+  let btns: HTMLButtonElement[] = []
+  // Đổi đàn = TOGGLE display panes[i] (mọi pane dựng SẴN trong content) — index THẲNG vào panes[], KHÔNG đọc lại
+  // schools() → click Fn luôn ra đúng đàn n (không kẹt về F1).
+  const select = (i: number, preview = false): void => {
+    panes.forEach((p, idx) => (p.style.display = idx === i ? '' : 'none'))
+    btns.forEach((b, idx) => b.classList.toggle('ap-tab-active', idx === i))
+    const fs = schools()[i]
+    if (fs && preview) ctx.previewFish(fs) // flash tia-Y khi USER bấm tab (không flash lúc dựng GUI)
   }
   const rebuild = (focus = 0): void => {
-    teardown()
-    host.replaceChildren()
-    const list = schools()
-    const items: TabItem[] = []
-    list.forEach((fs, i) => {
-      const b = buildFishInstanceItem(host, ctx, w, fs, i, rebuild)
-      items.push(b.item)
-      paneDisposers.push(b.dispose)
+    for (const d of disposers) d()
+    disposers = []
+    panes = []
+    btns = []
+    schools().forEach((fs, i) => {
+      const pane = document.createElement('div')
+      disposers.push(buildFishPane(pane, ctx, w, fs, i, rebuild))
+      panes.push(pane)
+      btns.push(fishTabBtn(`F${i + 1}`, () => select(i, true)))
     })
     const addBtn = addInstanceButton('đàn', () => {
-      list.push(makeFishSchool(5)) // đàn thêm = bậc 5 (cá nhỏ) — sẵn mồi cho bậc 4 (predation Phase 3)
-      rebuild(list.length - 1)
+      schools().push(makeFishSchool(5)) // đàn thêm = bậc 5 (cá nhỏ) — sẵn mồi cho bậc 4 (predation)
+      rebuild(schools().length - 1)
       ctx.applySite(true)
     })
-    tabs = makeFishTabBar(host, items, addBtn, focus, schools, ctx)
+    content.replaceChildren(...panes)
+    bar.replaceChildren(...btns, addBtn)
+    select(Math.max(0, Math.min(focus, panes.length - 1)))
   }
   rebuild()
-  return { dispose: teardown }
+  return { dispose: (): void => disposers.forEach((d) => d()) }
 }
 
 // BẬC 2 type-Tabs Pool|Pond|Puddle (cá GỠ khỏi đây — giờ là tab CON trong pane Pond). Tách khỏi buildWaterDomain.
