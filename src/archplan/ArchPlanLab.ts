@@ -3017,8 +3017,8 @@ export class ArchPlanLab extends BaseWorld {
     this._snowCover.setAccum(this._snowAccum)
   }
 
-  // 🌊 Mưa rải vòng gợn lên MỌI hồ đang render (rain/storm). Tần suất ∝ heavy×số hồ; điểm rơi ngẫu nhiên trong
-  // lòng hồ (đĩa bán kính = nửa cạnh ngắn → nằm gọn cả với hồ polygon). Đếm-lùi: bắn nhiều giọt nếu rate cao.
+  // 🌊 Mưa rải vòng gợn lên MỌI hồ đang render (rain/storm). Tần suất ∝ heavy×số hồ; điểm rơi ngẫu nhiên KHẮP
+  // hình chữ nhật lòng hồ (phủ cả góc + 2 đầu cạnh dài, không chỉ giữa). Đếm-lùi: bắn nhiều giọt nếu rate cao.
   private _updateRainRipples(dt: number): void {
     const m = this._effectiveMode()
     if ((m !== 'rain' && m !== 'storm') || this._siteWaters.length === 0) return
@@ -3033,15 +3033,16 @@ export class ArchPlanLab extends BaseWorld {
     if (this._rainRippleTimer < 0) this._rainRippleTimer = 1 / rate // dt quá lớn → reset, không dồn nợ
   }
 
-  // 1 giọt: chọn hồ ngẫu nhiên → điểm trong đĩa lòng hồ (world) → emitRipple biên độ nhỏ (giọt mưa).
+  // 1 giọt: chọn hồ ngẫu nhiên → điểm KHẮP hình chữ nhật lòng hồ (world) → emitRipple biên độ nhỏ (giọt mưa).
   private _emitRainDrop(): void {
     const w = this._siteWaters[(Math.random() * this._siteWaters.length) | 0]
     const c = w.surf.getMesh().getWorldPosition(this._tmpRipplePos)
-    const rad = Math.min(w.cfg.width, w.cfg.depth) / 2000 // mm→m, bán kính đĩa = nửa cạnh ngắn
-    const r = rad * Math.sqrt(Math.random())
-    const a = Math.random() * Math.PI * 2
+    const halfW = w.cfg.width / 2000 // mm→m, nửa bề ngang (X)
+    const halfD = w.cfg.depth / 2000 // nửa chiều sâu (Z)
     const s = RAIN_DROP_STRENGTH * (0.7 + Math.random() * 0.6)
-    w.surf.emitRipple(c.x + Math.cos(a) * r, c.z + Math.sin(a) * r, s)
+    const x = (Math.random() * 2 - 1) * halfW // rải đều theo X (cả 2 đầu cạnh dài)
+    const z = (Math.random() * 2 - 1) * halfD // rải đều theo Z
+    w.surf.emitRipple(c.x + x, c.z + z, s)
   }
 
   // ⚡ Sét (chỉ ⛈️ Bão): AmbientLight lazy lóe sáng, timer ngẫu nhiên giữa các cú, flash decay nhanh.
