@@ -801,12 +801,14 @@ export class ArchPlanLab extends BaseWorld {
     rippleLife: number
     rippleSpeed: number
     rippleWave: number
-    // ☔ rain-cell (ambient phủ khắp): density(→cell) · amp · rate(nhịp) · maxR(cỡ vòng) · waves(bước sóng)
-    rainDensity: number
+    // ☔ rain-cell (ambient phủ khắp) — đơn vị NGƯỜI DÙNG; _applyRainParams quy về uniform ô:
+    // scope(mm phạm vi lan) · lambda(mm bước sóng) · amp(size/biên độ) · count(số bước sóng) · spd(wave spd) · density(→cell)
+    rainScopeMm: number
+    rainLambdaMm: number
     rainAmp: number
-    rainRate: number
-    rainMaxR: number
-    rainWaves: number
+    rainCount: number
+    rainSpd: number
+    rainDensity: number
   } = {
     base: 'none',
     rainStorm: false,
@@ -817,11 +819,12 @@ export class ArchPlanLab extends BaseWorld {
     rippleLife: 2.6, // = RIPPLE_LIFE
     rippleSpeed: 0.65, // = RIPPLE_SPEED (đã halve)
     rippleWave: 0.42, // λ(m) ≈ 2π/RIPPLE_WAVES
-    rainDensity: 0.68, // → cell ≈ 0.34 (= RAIN_CELL); cao = ô nhỏ = dày hơn
-    rainAmp: 1.4, // = RAIN_AMP
-    rainRate: 1.3, // = RAIN_RATE
-    rainMaxR: 0.42, // = RAIN_MAXR
-    rainWaves: 22, // = RAIN_WAVES
+    rainScopeMm: 150, // phạm vi vòng lan (mm) — chặn theo cỡ ô (mật độ cao → tự giới hạn)
+    rainLambdaMm: 95, // độ dài bước sóng λ (mm)
+    rainAmp: 1.4, // size/biên độ sóng
+    rainCount: 1.5, // số bước sóng (gợn) trong 1 vòng
+    rainSpd: 1.3, // wave spd (chu kỳ giọt/giây)
+    rainDensity: 0.62, // → cell ≈ 0.34; cao = ô nhỏ = dày hơn (max = 2× dày so trước)
   }
   // 🌦️ Toggle khay thời tiết (code3): ref checkbox "Bật" mưa/tuyết để sync (bật loại này → tắt loại kia, mode đơn).
   private _wxRainOn: HTMLInputElement | null = null
@@ -2828,7 +2831,7 @@ export class ArchPlanLab extends BaseWorld {
     )
   }
 
-  // 5 slider ☔ Mưa nền (ambient rain-cell): Mật độ(→cell) · Size · Nhịp giọt · Cỡ vòng · Bước sóng (uniform, live mọi hồ).
+  // 6 slider ☔ Mưa nền (ambient rain-cell): scope(mm) · lamda(mm) · size sóng · số bước sóng · wave spd · mật độ.
   private _buildRainSliders(panel: HTMLElement): void {
     const w = this._weather
     const mk = (
@@ -2842,24 +2845,28 @@ export class ArchPlanLab extends BaseWorld {
         .row
     const apply = (): void => this._applyRainParams()
     panel.append(
-      mk('Mật độ', 0, 1, w.rainDensity, (v) => {
-        w.rainDensity = v
+      mk('scope', 10, 200, w.rainScopeMm, (v) => {
+        w.rainScopeMm = v
         apply()
       }),
-      mk('Size sóng', 0, 4, w.rainAmp, (v) => {
+      mk('lamda', 10, 200, w.rainLambdaMm, (v) => {
+        w.rainLambdaMm = v
+        apply()
+      }),
+      mk('size sóng', 0, 4, w.rainAmp, (v) => {
         w.rainAmp = v
         apply()
       }),
-      mk('Nhịp giọt', 0.2, 5, w.rainRate, (v) => {
-        w.rainRate = v
+      mk('số bước sóng', 0.5, 8, w.rainCount, (v) => {
+        w.rainCount = v
         apply()
       }),
-      mk('Cỡ vòng', 0.1, 0.5, w.rainMaxR, (v) => {
-        w.rainMaxR = v
+      mk('wave spd', 0.2, 5, w.rainSpd, (v) => {
+        w.rainSpd = v
         apply()
       }),
-      mk('Bước sóng', 6, 40, w.rainWaves, (v) => {
-        w.rainWaves = v
+      mk('mật độ', 0, 1, w.rainDensity, (v) => {
+        w.rainDensity = v
         apply()
       })
     )
@@ -2976,13 +2983,15 @@ export class ArchPlanLab extends BaseWorld {
   // ☔ Đẩy 5 tham số HÌNH-DẠNG lớp ambient (rain-cell) vào MỌI hồ. density→cell (cao=ô nhỏ=dày). ≠ uRainWet (cường độ).
   private _applyRainParams(): void {
     const w = this._weather
-    const cell = 0.8 - w.rainDensity * 0.68 // density 0..1 → cell 0.8..0.12 m
+    const cell = 0.8 - w.rainDensity * 0.74 // density 0..1 → cell 0.8..0.06 m (max 2× dày)
+    const lamCell = w.rainLambdaMm / 1000 / cell // λ theo đơn vị ô
     for (const x of this._siteWaters) {
       x.surf.setRainCell(cell)
       x.surf.setRainAmp(w.rainAmp)
-      x.surf.setRainRate(w.rainRate)
-      x.surf.setRainMaxR(w.rainMaxR)
-      x.surf.setRainWaves(w.rainWaves)
+      x.surf.setRainRate(w.rainSpd)
+      x.surf.setRainMaxR(w.rainScopeMm / 1000 / cell) // scope mm→ô (setter clamp ≤0.6 = chặn theo cỡ ô)
+      x.surf.setRainWaves((Math.PI * 2) / lamCell) // k = 2π/λ
+      x.surf.setRainWidth(w.rainCount * lamCell * 0.5) // dải = số-bước-sóng × λ (nửa-rộng cho smoothstep)
     }
   }
 
@@ -3178,11 +3187,14 @@ export class ArchPlanLab extends BaseWorld {
   // ☔ 5 tham số lớp ambient rain-cell (clamp đúng dải slider).
   private _loadWeatherRain(o: Record<string, unknown>): void {
     const w = this._weather
-    if (typeof o.rainDensity === 'number') w.rainDensity = Math.max(0, Math.min(1, o.rainDensity))
+    if (typeof o.rainScopeMm === 'number')
+      w.rainScopeMm = Math.max(10, Math.min(200, o.rainScopeMm))
+    if (typeof o.rainLambdaMm === 'number')
+      w.rainLambdaMm = Math.max(10, Math.min(200, o.rainLambdaMm))
     if (typeof o.rainAmp === 'number') w.rainAmp = Math.max(0, Math.min(4, o.rainAmp))
-    if (typeof o.rainRate === 'number') w.rainRate = Math.max(0.2, Math.min(5, o.rainRate))
-    if (typeof o.rainMaxR === 'number') w.rainMaxR = Math.max(0.1, Math.min(0.5, o.rainMaxR))
-    if (typeof o.rainWaves === 'number') w.rainWaves = Math.max(6, Math.min(40, o.rainWaves))
+    if (typeof o.rainCount === 'number') w.rainCount = Math.max(0.5, Math.min(8, o.rainCount))
+    if (typeof o.rainSpd === 'number') w.rainSpd = Math.max(0.2, Math.min(5, o.rainSpd))
+    if (typeof o.rainDensity === 'number') w.rainDensity = Math.max(0, Math.min(1, o.rainDensity))
   }
 
   private _saveWeather(): void {
