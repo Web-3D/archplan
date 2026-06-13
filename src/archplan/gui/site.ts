@@ -2763,10 +2763,44 @@ function fishAreaSpecs(fs: FishSchool): FishSlider[] {
   ]
 }
 
-// Đàn (Số cá = null → commit rebuild; Cỡ/Tốc live setter). (Hình dáng/màu tách section riêng.)
-function fishLookSpecs(fs: FishSchool): FishSlider[] {
-  return [
+// Render 1 list FishSlider với handler chuẩn: previewFish (khung trụ + tia-Y) khi kéo + tuneFish live /
+// applySite commit (live=null → rebuild khi buông, vd Số cá). Tách giữ rule-50 (dùng chung 3 tab code3).
+function appendFishSpecs(
+  pane: HTMLElement,
+  ctx: APGuiCtx,
+  fs: FishSchool,
+  specs: FishSlider[]
+): void {
+  for (const [label, min, max, step, mf, get, set, live] of specs)
+    pane.appendChild(
+      sliderRow(
+        label,
+        min,
+        max,
+        step,
+        get(),
+        (v, c) => {
+          set(v)
+          ctx.previewFish(fs) // 🐟 kéo vùng → khung mờ trụ (radius×swimDepth) + tia-Y biên độ
+          if (live) ctx.tuneFish(fs, live, c)
+          else if (c) ctx.applySite(true)
+        },
+        mf
+      )
+    )
+}
+
+// 🌊 Tab 1 "Vùng hoạt động": khối trụ (Vùng ngang/Vùng sâu/Độ chìm) + Số cá. (X/Z = nắm-kéo 3D ở Move.)
+function buildFishAreaTab(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): void {
+  appendFishSpecs(pane, ctx, fs, fishAreaSpecs(fs))
+  appendFishSpecs(pane, ctx, fs, [
     ['Số cá', 1, 30, 1, 1, () => fs.count, (v) => (fs.count = Math.round(v)), null],
+  ])
+}
+
+// 🐟 Tab 2 "Hình thái": Cỡ cá + Độ mập + 3 màu + Tỉ lệ mảng + Xáo màu (buildFishShapeColor).
+function buildFishMorphTab(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): void {
+  appendFishSpecs(pane, ctx, fs, [
     [
       'Cỡ cá',
       0.08,
@@ -2777,6 +2811,13 @@ function fishLookSpecs(fs: FishSchool): FishSlider[] {
       (v) => (fs.size = Math.round(v * 1000)),
       (f) => f.setFishLength(fs.size / 1000),
     ],
+  ])
+  buildFishShapeColor(pane, ctx, fs)
+}
+
+// 🐟 Tab 3 "Hành vi": Tốc bơi + Lượn (sway) + Lăng xăng (wander) + Nhấp nhô (bob) — CPU setter live.
+function buildFishBehaviorTab(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): void {
+  appendFishSpecs(pane, ctx, fs, [
     [
       'Tốc bơi %',
       5,
@@ -2787,7 +2828,25 @@ function fishLookSpecs(fs: FishSchool): FishSlider[] {
       (v) => (fs.speed = v / 100),
       (f) => f.setSpeed(fs.speed),
     ],
-  ]
+  ])
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Lượn %', [0, 200, 5], fs.swayAmp * 100, (v) => {
+      fs.swayAmp = v / 100
+      return (f) => f.setSwayAmp(fs.swayAmp)
+    })
+  )
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Lăng xăng %', [0, 200, 5], fs.wanderAmp * 100, (v) => {
+      fs.wanderAmp = v / 100
+      return (f) => f.setWanderAmp(fs.wanderAmp)
+    })
+  )
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Nhấp nhô %', [0, 300, 5], fs.bobAmp * 100, (v) => {
+      fs.bobAmp = v / 100
+      return (f) => f.setBobAmp(fs.bobAmp)
+    })
+  )
 }
 
 // 🎨 3 màu koi (nền/mảng/đốm) → colorRow, set chung qua setColors. Tách giữ rule-50.
@@ -2851,8 +2910,13 @@ function buildFishShapeColor(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): 
   )
 }
 
-// Pane 1 bầy: Show + vùng bơi + đàn + section Dáng&Màu + ✕ Remove. (X/Z gỡ → nắm-kéo 3D ở Move.)
-function buildFishPane(ctx: APGuiCtx, fs: FishSchool, remove: () => void): HTMLElement {
+// Pane 1 bầy (code3 — 3 tab LỒNG bg dính liền, tông Water --wt-* xanh): Show + Tabs[Vùng·Hình thái·Hành vi]
+// + ✕ Remove. Trả {pane, dispose} (Tabs lồng cần dispose — caller fishSchoolTabs gom). X/Z gỡ → nắm-kéo 3D.
+function buildFishPane(
+  ctx: APGuiCtx,
+  fs: FishSchool,
+  remove: () => void
+): { pane: HTMLElement; dispose: () => void } {
   const pane = document.createElement('div')
   pane.appendChild(
     toggleRow('🐟 Show (render)', fs.enabled, (on) => {
@@ -2860,30 +2924,34 @@ function buildFishPane(ctx: APGuiCtx, fs: FishSchool, remove: () => void): HTMLE
       ctx.applySite(true)
     })
   )
-  for (const [label, min, max, step, mf, get, set, live] of [
-    ...fishAreaSpecs(fs),
-    ...fishLookSpecs(fs),
-  ]) {
-    pane.appendChild(
-      sliderRow(
-        label,
-        min,
-        max,
-        step,
-        get(),
-        (v, c) => {
-          set(v)
-          ctx.previewFish(fs) // 🐟 kéo vùng → khung mờ trụ (radius×swimDepth) + tia-Y biên độ
-          if (live) ctx.tuneFish(fs, live, c)
-          else if (c) ctx.applySite(true)
-        },
-        mf
-      )
-    )
-  }
-  buildFishShapeColor(pane, ctx, fs) // 🎨 Dáng & Màu (section riêng)
+  const area = document.createElement('div')
+  buildFishAreaTab(area, ctx, fs)
+  const morph = document.createElement('div')
+  buildFishMorphTab(morph, ctx, fs)
+  const behavior = document.createElement('div')
+  buildFishBehaviorTab(behavior, ctx, fs)
+  const host = document.createElement('div')
+  host.append(area, morph, behavior)
+  const tabs = new Tabs(
+    host,
+    [
+      { label: 'Vùng', panel: area, title: 'Vùng hoạt động (khối bơi)' },
+      { label: 'Hình thái', panel: morph, title: 'Hình dáng + màu cá' },
+      { label: 'Hành vi', panel: behavior, title: 'Bơi lội (tốc/lượn/lăng xăng/nhấp nhô)' },
+    ],
+    {
+      classes: {
+        bar: 'ap-tab-bar ap-water-l5tabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-water-l5sub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+    }
+  )
+  pane.appendChild(host)
   pane.appendChild(removeRow('✕ Remove', remove))
-  return pane
+  return { pane, dispose: (): void => tabs.dispose() }
 }
 
 // Nút ＋ thêm bầy cá (tách khỏi fishSchoolTabs — Rule-50): stagger vị trí + flash tia-Y bầy mới.
@@ -2925,12 +2993,40 @@ function makeWaterTypeTabs(
 
 // BẬC 3 — hàng tab bầy cá (F1 F2… + ＋) trong host (= panel type 🐟 Cá). Mirror instanceTabs (hồ) nhưng
 // cho site.fishSchools; chưa cần setActive/3D-drag (v1 — bầy chỉnh qua slider).
+// Outer Tabs hàng bầy F1/F2… (tông Water --wt-* xanh) + nút ＋ + flash tia-Y khi đổi tab. Tách giữ rule-50.
+function makeFishOuterTabs(
+  host: HTMLElement,
+  ctx: APGuiCtx,
+  items: TabItem[],
+  addBtn: HTMLButtonElement,
+  focus: number
+): Tabs {
+  return new Tabs(host, items, {
+    classes: {
+      bar: 'ap-tab-bar ap-water-itabs',
+      tab: 'ap-tab-btn',
+      panel: 'ap-water-isub',
+      active: 'ap-tab-active',
+    },
+    injectCss: false,
+    addEl: addBtn,
+    initial: focus,
+    onChange: (idx) => {
+      const fs = ctx.site.fishSchools[idx]
+      if (fs) ctx.previewFish(fs) // 🐟 đổi tab F → flash tia-Y vị trí bầy (cá ẩn dưới nền)
+    },
+  })
+}
+
 function fishSchoolTabs(
   host: HTMLElement,
   ctx: APGuiCtx
 ): { dispose: () => void; selectIdx: (idx: number) => void } {
   let tabs: Tabs | null = null
+  let paneDisposers: (() => void)[] = [] // 🐟 code3: mỗi pane có Tabs lồng (Vùng/Hình thái/Hành vi) → gom dispose
   const rebuild = (focus = 0): void => {
+    for (const d of paneDisposers) d() // gỡ Tabs lồng cũ trước khi thay DOM
+    paneDisposers = []
     tabs?.dispose()
     host.replaceChildren()
     const items: TabItem[] = []
@@ -2940,30 +3036,19 @@ function fishSchoolTabs(
         rebuild(Math.max(0, i - 1))
         ctx.applySite(true)
       }
-      const pane = buildFishPane(ctx, fs, remove)
+      const { pane, dispose } = buildFishPane(ctx, fs, remove)
+      paneDisposers.push(dispose)
       host.appendChild(pane)
       items.push({ label: `F${i + 1}`, panel: pane, title: `Bầy cá ${i + 1}` })
     })
-    const addBtn = fishAddButton(ctx, rebuild)
-    tabs = new Tabs(host, items, {
-      classes: {
-        bar: 'ap-tab-bar ap-water-itabs',
-        tab: 'ap-tab-btn',
-        panel: 'ap-water-isub',
-        active: 'ap-tab-active',
-      },
-      injectCss: false,
-      addEl: addBtn,
-      initial: focus,
-      onChange: (idx) => {
-        const fs = ctx.site.fishSchools[idx]
-        if (fs) ctx.previewFish(fs) // 🐟 đổi tab F → flash tia-Y vị trí bầy (cá ẩn dưới nền)
-      },
-    })
+    tabs = makeFishOuterTabs(host, ctx, items, fishAddButton(ctx, rebuild), focus)
   }
   rebuild()
   return {
-    dispose: (): void => tabs?.dispose(),
+    dispose: (): void => {
+      for (const d of paneDisposers) d() // 🐟 gỡ Tabs lồng (code3) từng pane
+      tabs?.dispose()
+    },
     // Chọn tab F theo idx (click đàn cá 3D → GUI nhảy tới — Focus/code1).
     selectIdx: (idx: number): void => {
       tabs?.select(Math.max(0, Math.min(idx, ctx.site.fishSchools.length - 1)), { trusted: false })
