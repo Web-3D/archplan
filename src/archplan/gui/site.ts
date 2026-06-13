@@ -2005,6 +2005,19 @@ function mkBottomFloorPane(ctx: APGuiCtx, w: WaterConfig): HTMLElement {
   )
   // 🎨 Mix đáy hồ (floorMix): board inline ĐÃ THÁO — áp/gỡ/chỉnh+cọ vẽ qua khay 🧪 (🪣/🧽/🎯).
   if (w.floorMix) floor.appendChild(mixStatusRow())
+  // 🏔️ GÒ ĐÁY HỒ (NgQuan 2026-06-13) — reuse TerrainConfig + buildTerrainControls (y hệt gò nền sân vườn):
+  // đáy basin grid hóa + nhô gò (FBM noise). Enable toggle + 10 slider noise. Live = applySiteLive (rebuild
+  // cả site — basin nằm trong _rebuildSite, hơi nặng vì RTT nhưng chỉnh thưa). showDetail=false (micro-normal
+  // chỉ G0). ensure tồn tại trước (parse giữ undefined cho save cũ tới khi mở tab này).
+  w.floorTerrain ??= defaultTerrain()
+  buildTerrainControls(
+    floor,
+    ctx,
+    w.floorTerrain,
+    () => ctx.applySiteLive(),
+    () => undefined,
+    false
+  )
   return floor
 }
 
