@@ -147,6 +147,7 @@ import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
 import { Precipitation, type PrecipitationOptions } from 'threejs-modules/effects/Precipitation' // 🌧️ mưa/tuyết field — instance scene chính
 import { SnowCover } from 'threejs-modules/effects/SnowCover' // ❄️ tuyết đọng nền — overlay accum (Phase C2)
+import { WetGround } from 'threejs-modules/effects/WetGround' // 💧 nền ướt mưa — overlay phản chiếu (Phase C2)
 import { AsphaltGround } from 'threejs-modules/shaders/ground/AsphaltGround'
 import { PhotoGround, type PhotoGroundMaps } from 'threejs-modules/shaders/ground/PhotoGround' // 🌱 ground texture (+ 🪵 slab walnut: sàn ngang)
 import {
@@ -760,6 +761,9 @@ export class ArchPlanLab extends BaseWorld {
   // ❄️ Tuyết đọng nền (mode snow): overlay accum ramp dần trong onUpdate (tuyết phủ ~20s).
   private _snowCover: SnowCover | null = null
   private _snowAccum = 0
+  // 💧 Nền ướt (mode rain/storm): overlay phản chiếu, wetness ramp lên khi mưa / ngót khi tạnh.
+  private _wetGround: WetGround | null = null
+  private _wetness = 0
   private _envFillSlider: HTMLInputElement | null = null // ref để preset sky/storm sync ngược slider
   private _envOverSlider: HTMLInputElement | null = null
   private _fishMarker: THREE.Line | null = null // 🐟 tia trục-Y flash vị trí bầy (cá chìm dưới nền — cần mốc)
@@ -1677,6 +1681,7 @@ export class ArchPlanLab extends BaseWorld {
     this._precip?.update(deltaTime) // 🌧️ mưa/tuyết rơi (vertex shader; chỉ ghi 1 uniform time)
     this._updateLightning(deltaTime) // ⚡ sét lóe (chỉ ⛈️ Bão)
     this._updateSnowAccum(deltaTime) // ❄️ tuyết đọng nền tích dần (chỉ mode snow)
+    this._updateWetness(deltaTime) // 💧 nền ướt ramp lên/ngót (mưa/bão ↔ tạnh)
     this.css2dRenderer?.render(this.scene, this.camera)
     this.guard?.check()
     this.devHud?.update(this.renderer.info, deltaTime)
@@ -1821,6 +1826,8 @@ export class ArchPlanLab extends BaseWorld {
     }
     this._snowCover?.dispose() // ❄️ tuyết đọng nền — gỡ mesh + geometry + material
     this._snowCover = null
+    this._wetGround?.dispose() // 💧 nền ướt — gỡ mesh + geometry + material
+    this._wetGround = null
   }
 
   // Dispose tài nguyên scene tĩnh (không rebuild mỗi frame) + wall material cache.
@@ -2754,6 +2761,7 @@ export class ArchPlanLab extends BaseWorld {
     this._precip = null
     this._syncWeatherBtns()
     this._applySnowCover() // ❄️ tuyết đọng nền theo mode (tạo/gỡ overlay)
+    this._applyWetGround() // 💧 nền ướt theo mode (tạo khi mưa/bão; ngót-rồi-gỡ khi tạnh)
     const m = this._weather.mode
     if (m === 'none') return
     this._precip = new Precipitation(PRECIP_OPTS[m])
@@ -2783,6 +2791,31 @@ export class ArchPlanLab extends BaseWorld {
     if (!this._snowCover || this._snowAccum >= 1) return
     this._snowAccum = Math.min(1, this._snowAccum + dt * 0.05)
     this._snowCover.setAccum(this._snowAccum)
+  }
+
+  // 💧 Nền ướt: tạo overlay khi mưa/bão. Để ngót (dry) tự xảy ra ở _updateWetness, KHÔNG gỡ ngay (animation).
+  private _applyWetGround(): void {
+    const wet = this._weather.mode === 'rain' || this._weather.mode === 'storm'
+    if (wet && !this._wetGround) {
+      this._wetGround = new WetGround({ size: 80, groundY: 0 }) // phủ lô; phản chiếu scene.environment sẵn có
+      this._wetGround.setWetness(this._wetness)
+      this.scene.add(this._wetGround.getMesh())
+    }
+  }
+
+  // Ramp ướt: lên nhanh khi mưa (~6s), NGÓT chậm khi tạnh (~12s). Khô hẳn → dispose overlay (drying mượt).
+  private _updateWetness(dt: number): void {
+    if (!this._wetGround) return
+    const target = this._weather.mode === 'rain' || this._weather.mode === 'storm' ? 1 : 0
+    this._wetness =
+      target > this._wetness
+        ? Math.min(1, this._wetness + dt * 0.16)
+        : Math.max(0, this._wetness - dt * 0.08)
+    this._wetGround.setWetness(this._wetness)
+    if (target === 0 && this._wetness <= 0) {
+      this._wetGround.dispose() // khô hẳn → gỡ overlay
+      this._wetGround = null
+    }
   }
 
   private _syncWeatherBtns(): void {
