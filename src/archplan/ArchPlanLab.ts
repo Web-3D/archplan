@@ -154,6 +154,7 @@ import {
 } from 'threejs-modules/shaders/surface/TexturedSurface' // 🧱 fence wall texture (tường dọc, triplanar) + material cache
 import { type BridgeMixMats, buildSiteBridge } from 'threejs-modules/site/render/bridge' // 🌉 dựng cầu (box vòm + lan can + trụ)
 import {
+  buildBasinFloorGeometry,
   buildGroundLayers,
   buildSiteFence,
   buildSiteGrass,
@@ -398,8 +399,8 @@ type WeatherMode = 'none' | 'rain' | 'snow' | 'storm'
 // Opts Precipitation cho scene chính (lô 80×80): trụ phủ ~30m quanh cam, cột cao 28m, đáy y=0.
 // 'storm' = mưa dày + nhanh + gió mạnh + ám lạnh. (heavy=opacity áp riêng sau khi dựng.)
 const PRECIP_OPTS: Record<Exclude<WeatherMode, 'none'>, PrecipitationOptions> = {
-  rain: { mode: 'rain', radius: 30, height: 28 },
-  snow: { mode: 'snow', radius: 30, height: 28 },
+  rain: { mode: 'rain', radius: 30, height: 28, size: 3.2 },
+  snow: { mode: 'snow', radius: 30, height: 28, size: 8 },
   storm: {
     mode: 'rain',
     count: 9000,
@@ -408,7 +409,15 @@ const PRECIP_OPTS: Record<Exclude<WeatherMode, 'none'>, PrecipitationOptions> = 
     height: 30,
     wind: [6.5, 0],
     color: 0x9fb0c0,
+    size: 3.6,
   },
+}
+
+// Cỡ gốc mỗi mode (= PRECIP_OPTS.size) — slider 🌅 nhân HỆ SỐ lên đây (giữ tương quan mưa nhỏ/tuyết to).
+const PRECIP_BASE_SIZE: Record<Exclude<WeatherMode, 'none'>, number> = {
+  rain: 3.2,
+  snow: 8,
+  storm: 3.6,
 }
 
 // Bão áp lên sky (giữ azimuth/elevation user): trời u ám đậm + sun yếu lạnh + fill cao (mây tán sáng đều).
@@ -2240,6 +2249,7 @@ export class ArchPlanLab extends BaseWorld {
     | 'applySiteLive'
     | 'applyFenceLive'
     | 'applyBridgeLive'
+    | 'applyPoolFloorLive'
     | 'applyTerrainLive'
     | 'applyTerrainDetail'
   > {
@@ -2247,6 +2257,7 @@ export class ArchPlanLab extends BaseWorld {
       applySiteLive: () => this._applySiteLive(),
       applyFenceLive: () => this._applyFenceLive(),
       applyBridgeLive: () => this._applyBridgeLive(), // 🌉 kéo slider cầu → rebuild CHỈ cầu (rẻ)
+      applyPoolFloorLive: (w) => this._applyPoolFloorLive(w), // 🏔️ kéo slider gò đáy → swap geo đáy (né water-RTT)
       applyTerrainLive: () => this._applyTerrainLive(),
       applyTerrainDetail: () => this._applyTerrainDetail(),
     }
@@ -4097,6 +4108,40 @@ export class ArchPlanLab extends BaseWorld {
       this._rebuildGroundLayersLive() // 🏔️ zones (G1+) bám gò/gò-riêng theo — rebuild zone-only (né water-RTT)
       if (this.sun) this.sun.shadow.needsUpdate = true // bóng nhà đổ trên gò đổi theo
     })
+  }
+
+  // 🏔️ LIVE drag slider GÒ ĐÁY HỒ: SWAP geometry mesh đáy basin của hồ w — KHÔNG _renderSite/_rebuildSite
+  // (né tái-tạo WaterSurface reflector RTT + recompile = chỗ tụt fps khi kéo slider gò đáy). Mirror
+  // _applyTerrainLive: build đáy mới + thay mesh.geometry (dispose cũ, cập nhật siteGeos). Buông → applySite commit.
+  private _applyPoolFloorLive(w: WaterConfig): void {
+    if (this._siteRaf) return
+    this._siteRaf = requestAnimationFrame(() => {
+      this._siteRaf = 0
+      const mesh = this._findBasinFloorMesh(w)
+      if (!mesh) {
+        this._applySiteLive() // chưa có mesh đáy (hồ tắt / chưa render) → fallback đường cũ
+        return
+      }
+      const geo = buildBasinFloorGeometry(w, this.site)
+      const old = mesh.geometry
+      mesh.geometry = geo
+      const i = this.siteGeos.indexOf(old)
+      if (i >= 0) this.siteGeos[i] = geo // tracking để _clearSite dispose geo MỚI
+      old.dispose()
+      if (this.sun) this.sun.shadow.needsUpdate = true // bóng đáy đổi (vách vẫn cast, đáy nhận)
+    })
+  }
+
+  // 🏔️ Mesh ĐÁY basin của hồ w trong siteGroup (tag waterMixRef===w + waterMixFace==='floor'). null nếu chưa dựng.
+  private _findBasinFloorMesh(w: WaterConfig): THREE.Mesh | null {
+    for (const o of this.siteGroup.children)
+      if (
+        o instanceof THREE.Mesh &&
+        o.userData.waterMixRef === w &&
+        o.userData.waterMixFace === 'floor'
+      )
+        return o
+    return null
   }
 
   // 🏔️ LIVE rebuild ZONE meshes (G1+) khi kéo slider terrain G0/zone: gỡ+dispose mesh zone cũ (userData.groundLayerIdx)

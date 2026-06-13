@@ -106,6 +106,7 @@ export interface APGuiCtx {
   applySiteLive(): void // re-render lô THROTTLE ≤1/frame (rAF), không persist — cho kéo slider Tinh chỉnh
   applyFenceLive(): void // CHỈ dựng lại RÀO (throttle, LOD box) — kéo slider rào/cổng: rebuild tối thiểu, KHÔNG grass/preview/readout/nước
   applyBridgeLive(): void // 🌉 CHỈ dựng lại CẦU (throttle ≤1/frame) — kéo slider cầu LIVE: box thuần rẻ, KHÔNG đụng nước-RTT/cỏ
+  applyPoolFloorLive(w: WaterConfig): void // 🏔️ CHỈ swap geometry ĐÁY hồ w (throttle) — kéo slider gò đáy: KHÔNG rebuild site/water-RTT (né tụt fps)
   applyTerrainLive(): void // 🏔️ CHỈ swap geometry nền base (throttle) — kéo slider Terrain: KHÔNG đụng water-RTT/NodeMaterial (né tụt fps)
   applyTerrainDetail(): void // 🏔️ Phase 4: đẩy terrain.detail → uniform PhotoGround cache (micro-relief LIVE, KHÔNG rebuild/recompile)
   siteStats(): CoverageStats // đối chiếu nhà/lô (lotArea/coveragePct/gardenArea) cho bảng số liệu
