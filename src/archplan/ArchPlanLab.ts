@@ -745,7 +745,12 @@ export class ArchPlanLab extends BaseWorld {
   // 🌧️ Thời tiết = thuộc tính MÔI TRƯỜNG (như sun) — persist riêng localStorage 'archplan:weather',
   // KHÔNG vào design state. mode đổi = tạo/dispose instance; heavy = opacity live. ⛈️ Bão = combo mưa+sky.
   private _precip: Precipitation | null = null
-  private _weather: { mode: WeatherMode; heavy: number } = { mode: 'none', heavy: 0.5 }
+  // heavy = opacity; sizeScale = hệ số × cỡ gốc mode (1 = mặc định đã gấp đôi).
+  private _weather: { mode: WeatherMode; heavy: number; sizeScale: number } = {
+    mode: 'none',
+    heavy: 0.5,
+    sizeScale: 1,
+  }
   private _weatherBtns: Partial<Record<WeatherMode, HTMLButtonElement>> = {}
   private _envFillSlider: HTMLInputElement | null = null // ref để preset sky/storm sync ngược slider
   private _envOverSlider: HTMLInputElement | null = null
@@ -2641,7 +2646,20 @@ export class ArchPlanLab extends BaseWorld {
     )
     heavy.value = String(this._weather.heavy)
     heavy.min = '0.05'
-    row.appendChild(heavy)
+    // 🔍 Cỡ hạt = HỆ SỐ × cỡ gốc mode (gần camera = max, xa = min — theo distance trong shader).
+    const size = this._envSlider(
+      3,
+      '🔍 Cỡ hạt (× cỡ gốc; gần to dần tới max, xa nhỏ về min).',
+      (v) => {
+        this._weather.sizeScale = v
+        const m = this._weather.mode
+        if (m !== 'none') this._precip?.setSize(PRECIP_BASE_SIZE[m] * v)
+        this._saveWeather()
+      }
+    )
+    size.value = String(this._weather.sizeScale)
+    size.min = '0.3'
+    row.append(heavy, size)
     return row
   }
 
@@ -2675,6 +2693,7 @@ export class ArchPlanLab extends BaseWorld {
     if (m === 'none') return
     this._precip = new Precipitation(PRECIP_OPTS[m])
     this._precip.setOpacity(this._weather.heavy)
+    this._precip.setSize(PRECIP_BASE_SIZE[m] * this._weather.sizeScale) // cỡ gốc mode × hệ số slider
     this.scene.add(this._precip.getObject())
   }
 
@@ -2689,9 +2708,11 @@ export class ArchPlanLab extends BaseWorld {
     try {
       const raw = localStorage.getItem('archplan:weather')
       if (!raw) return
-      const o = JSON.parse(raw) as Partial<{ mode: WeatherMode; heavy: number }>
+      const o = JSON.parse(raw) as Partial<{ mode: WeatherMode; heavy: number; sizeScale: number }>
       if (o.mode === 'rain' || o.mode === 'snow' || o.mode === 'storm') this._weather.mode = o.mode
       if (typeof o.heavy === 'number') this._weather.heavy = Math.max(0.05, Math.min(1, o.heavy))
+      if (typeof o.sizeScale === 'number')
+        this._weather.sizeScale = Math.max(0.3, Math.min(3, o.sizeScale))
     } catch {
       /* JSON hỏng → giữ default none */
     }
