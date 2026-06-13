@@ -8,7 +8,10 @@ import type GUI from 'lil-gui'
 import type { Controller } from 'lil-gui'
 
 import {
+  type DecorPanel,
+  defaultBay,
   defaultOpening,
+  defaultPanel,
   FRAME_DEFAULTS,
   mkBalcony,
   mkSeg,
@@ -430,8 +433,88 @@ export function rebuildOpeningSubfolders(
   buildTabBar(ch, sections, openBtn, ctx, `op:${key}`)
 }
 
-// Decor panel GUI đã gỡ (2026-05-31, theo yêu cầu). State seg.panels[] giữ nguyên (render vẫn chạy
-// nếu có sẵn trong design cũ) — chỉ bỏ control thêm/sửa panel trong GUI.
+// ── 🧱 Push/Pull (khối tường) — Phase 1: geometry + slider ────────────────────────
+// Vùng KHỐI trên mặt tường: mode 'raised' = NHÔ RA (box) · 'niche' = LÕM VÀO THẬT (carve lỗ + back-plug,
+// lõi WallSingle, KHÔNG CSG). 5 slider x/y/w/h/depth (KÉO = live) + toggle Ra/Vào + Remove. Tự-chứa 1
+// folder (KHÔNG tab-bar — né nuke .ap-tab-bar của opening). Vẽ-kéo-trên-tường = Phase 2. State = seg.panels[].
+function buildOnePanel(
+  parent: GUI,
+  inst: ShapeInstance,
+  segIdx: number,
+  pn: DecorPanel,
+  pnIdx: number,
+  ctx: APGuiCtx
+): void {
+  const pF = parent.addFolder(`${pn.mode === 'niche' ? '▼' : '▲'} Khối ${pnIdx + 1}`)
+  pF.add(pn, 'mode', { 'Nhô ra ▲': 'raised', 'Lõm vào ▼': 'niche' })
+    .name('Kiểu')
+    .onChange(() => {
+      ctx.rebuild() // đổi nhãn folder + nhãn slider depth theo mode
+      ctx.build()
+    })
+  const wMax = Math.max(1000, inst.segments[segIdx].length)
+  live(pF.add(pn, 'w', 100, 6000, 10).name('Rộng'), ctx)
+  live(pF.add(pn, 'h', 100, 6000, 10).name('Cao'), ctx)
+  live(pF.add(pn, 'x', 0, wMax, 10).name('X'), ctx)
+  live(pF.add(pn, 'y', 0, 6000, 10).name('Y'), ctx)
+  live(pF.add(pn, 'depth', 10, 2000, 10).name(pn.mode === 'niche' ? 'Sâu mm' : 'Nhô mm'), ctx)
+  pF.add(
+    {
+      fn: () => {
+        inst.segments[segIdx].panels.splice(pnIdx, 1)
+        ctx.rebuild()
+        ctx.build()
+      },
+    },
+    'fn'
+  ).name('✕ Remove')
+}
+
+// 1 folder "🧱 Khối (N)" gom mọi khối push/pull của tường + nút thêm. Gọi sau opening trong wall/seg folder.
+export function buildPushPullFolder(
+  parent: GUI,
+  inst: ShapeInstance,
+  segIdx: number,
+  ctx: APGuiCtx
+): void {
+  const seg = inst.segments[segIdx]
+  const f = parent.addFolder(`🧱 Khối (${seg.panels.length})`)
+  f.close()
+  seg.panels.forEach((pn, pnIdx) => buildOnePanel(f, inst, segIdx, pn, pnIdx, ctx))
+  f.add(
+    {
+      fn: () => {
+        seg.panels.push(defaultPanel())
+        ctx.rebuild()
+        ctx.build()
+      },
+    },
+    'fn'
+  ).name('＋ Thêm khối')
+}
+
+// ── 🏗️ Bay (Cấp 2 — đẩy MASS) ────────────────────────────────────────────────────
+// Đẩy cả mảng tường RA/VÀO → footprint biến dạng, CÓ ruột thật (sàn/móng theo; mái bbox phình). Toggle
+// bật + 3 slider x/w/depth (KÉO = live). depth<0 = lõm vào (hốc/sảnh thụt). seg có bay = ĐẶC (cửa/sổ ẩn).
+function buildBayFolder(parent: GUI, inst: ShapeInstance, segIdx: number, ctx: APGuiCtx): void {
+  const seg = inst.segments[segIdx]
+  const f = parent.addFolder(seg.bay ? '🏗️ Bay (BẬT)' : '🏗️ Bay (đẩy mass)')
+  f.close()
+  const proxy = { on: seg.bay !== undefined }
+  f.add(proxy, 'on')
+    .name('Bật bay (cửa/sổ ẩn)')
+    .onChange((v: boolean) => {
+      seg.bay = v ? defaultBay() : undefined
+      ctx.rebuild()
+      ctx.build()
+    })
+  const bay = seg.bay
+  if (!bay) return
+  const wMax = Math.max(1000, seg.length)
+  live(f.add(bay, 'x', 0, wMax, 10).name('Vị trí X'), ctx)
+  live(f.add(bay, 'w', 100, wMax, 10).name('Rộng'), ctx)
+  live(f.add(bay, 'depth', -3000, 3000, 10).name('Đẩy ± (− = vào)'), ctx)
+}
 
 // ── Section builders ───────────────────────────────────────────────────────────
 
@@ -801,6 +884,8 @@ export function buildWallFolder(parent: GUI, inst: ShapeInstance, idx: number, c
   addDimRow(folder, seg, ctx, true) // wall folder: Height|Width (Color bỏ — dùng palette brush)
   addMaterialControls(folder, seg, ctx)
   rebuildOpeningSubfolders(folder, inst, idx, ctx)
+  buildPushPullFolder(folder, inst, idx, ctx) // 🧱 khối nhô/lõm bề mặt (Cấp 1)
+  buildBayFolder(folder, inst, idx, ctx) // 🏗️ bay đẩy mass footprint (Cấp 2)
   return folder
 }
 
@@ -838,6 +923,8 @@ export function buildSegmentFolder(
   addDimRow(folder, seg, ctx)
   addMaterialControls(folder, seg, ctx)
   rebuildOpeningSubfolders(folder, inst, idx, ctx)
+  buildPushPullFolder(folder, inst, idx, ctx) // 🧱 khối nhô/lõm bề mặt (Cấp 1)
+  buildBayFolder(folder, inst, idx, ctx) // 🏗️ bay đẩy mass footprint (Cấp 2)
   buildSegActions(folder, inst, idx, ctx)
 }
 
