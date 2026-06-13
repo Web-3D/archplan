@@ -2912,6 +2912,7 @@ export class ArchPlanLab extends BaseWorld {
   private _setHeavy(v: number): void {
     this._weather.heavy = v
     this._precip?.setOpacity(v)
+    this._applyRainWet() // ☔ độ nặng mưa cũng lái cường độ ambient rain-ripple
   }
 
   private _setSizeScale(v: number): void {
@@ -2929,6 +2930,13 @@ export class ArchPlanLab extends BaseWorld {
       x.surf.setRippleLife(w.rippleLife)
       x.surf.setRippleWavelength(w.rippleWave)
     }
+  }
+
+  // ☔ Đẩy cường độ ambient rain-ripple (phủ khắp mặt nước) vào MỌI hồ: = heavy khi đang mưa/bão, 0 nếu không.
+  private _applyRainWet(): void {
+    const m = this._effectiveMode()
+    const wet = m === 'rain' || m === 'storm' ? this._weather.heavy : 0
+    for (const x of this._siteWaters) x.surf.setRainWet(wet)
   }
 
   private _envSkyButtons(): HTMLElement {
@@ -3003,6 +3011,7 @@ export class ArchPlanLab extends BaseWorld {
     this._precip?.dispose()
     this._precip = null
     this._applySnowCover() // ❄️ tuyết đọng nền theo mode (tạo/gỡ overlay)
+    this._applyRainWet() // ☔ ambient rain-ripple phủ khắp mặt nước theo mode/heavy (0 nếu không mưa)
     const m = this._effectiveMode()
     if (m === 'none') return
     this._precip = new Precipitation(PRECIP_OPTS[m])
@@ -3874,6 +3883,7 @@ export class ArchPlanLab extends BaseWorld {
       x.surf.excludeReflectionLayer(WATER_REFLECT_LAYER)
     }
     this._applyRippleParams() // 🌊 đẩy tham số sóng (size/thời gian/tốc độ/bước sóng) vào hồ vừa dựng
+    this._applyRainWet() // ☔ đẩy cường độ ambient rain-ripple vào hồ vừa dựng
     // active = pool tab đang chọn nếu còn render; không thì pool đầu (kể cả tắt, để GUI bind) → null nếu 0 pool.
     if (!this._activeWater || !this.site.waters.includes(this._activeWater)) {
       this._activeWater = this.site.waters.find((w) => w.kind === 'pool') ?? null
