@@ -2726,36 +2726,12 @@ type FishSlider = [
   ((f: PondFish) => void) | null,
 ]
 
-// Vị trí + vùng bơi (X/Z/R/Sâu — m hiển thị, state mm). X/Z live = move GỐC mesh (cả đàn dời theo,
-// wander local không reset); Sâu live = setDepthY (đo XUỐNG từ mặt nền rim).
+// Vùng bơi (KHỐI trụ): Vùng ngang (radius) + Vùng sâu (bề dày đứng swimDepth) + Độ chìm (tâm dưới rim).
+// X/Z GỠ (NgQuan 2026-06-13 → nắm-kéo 3D). Kéo các slider này → previewFish vẽ khung trụ biên độ.
 function fishAreaSpecs(fs: FishSchool): FishSlider[] {
   return [
     [
-      'X m',
-      -20,
-      20,
-      0.1,
-      1000,
-      () => fs.offsetX / 1000,
-      (v) => (fs.offsetX = Math.round(v * 1000)),
-      (f) => {
-        f.getMesh().position.x = fs.offsetX / 1000
-      },
-    ],
-    [
-      'Z m',
-      -20,
-      20,
-      0.1,
-      1000,
-      () => fs.offsetZ / 1000,
-      (v) => (fs.offsetZ = Math.round(v * 1000)),
-      (f) => {
-        f.getMesh().position.z = fs.offsetZ / 1000
-      },
-    ],
-    [
-      'R vùng m',
+      'Vùng ngang',
       0.3,
       10,
       0.1,
@@ -2765,7 +2741,17 @@ function fishAreaSpecs(fs: FishSchool): FishSlider[] {
       (f) => f.setAreaRadius(fs.radius / 1000),
     ],
     [
-      'Sâu m',
+      'Vùng sâu',
+      0,
+      3,
+      0.05,
+      1000,
+      () => fs.swimDepth / 1000,
+      (v) => (fs.swimDepth = Math.round(v * 1000)),
+      (f) => f.setSwimDepth(fs.swimDepth / 1000),
+    ],
+    [
+      'Độ chìm',
       0.05,
       2,
       0.05,
@@ -2777,12 +2763,12 @@ function fishAreaSpecs(fs: FishSchool): FishSlider[] {
   ]
 }
 
-// Đàn + ngoại hình (Số cá = null → commit rebuild; còn lại live setter).
+// Đàn (Số cá = null → commit rebuild; Cỡ/Tốc live setter). (Hình dáng/màu tách section riêng.)
 function fishLookSpecs(fs: FishSchool): FishSlider[] {
   return [
     ['Số cá', 1, 30, 1, 1, () => fs.count, (v) => (fs.count = Math.round(v)), null],
     [
-      'Cỡ cá m',
+      'Cỡ cá',
       0.08,
       0.5,
       0.01,
@@ -2801,20 +2787,71 @@ function fishLookSpecs(fs: FishSchool): FishSlider[] {
       (v) => (fs.speed = v / 100),
       (f) => f.setSpeed(fs.speed),
     ],
-    [
-      'Xáo màu',
-      0,
-      99,
-      1,
-      1,
-      () => fs.seed,
-      (v) => (fs.seed = Math.round(v)),
-      (f) => f.setColorSeed(fs.seed),
-    ],
   ]
 }
 
-// Pane 1 bầy: Show + 8 slider (spec) + ✕ Remove.
+// 🎨 3 màu koi (nền/mảng/đốm) → colorRow, set chung qua setColors. Tách giữ rule-50.
+function fishColorRows(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): void {
+  const tune = (c: boolean): void =>
+    ctx.tuneFish(fs, (f) => f.setColors(fs.colorBase, fs.colorPatch, fs.colorSpot), c)
+  const rows: [string, 'colorBase' | 'colorPatch' | 'colorSpot'][] = [
+    ['Màu nền', 'colorBase'],
+    ['Màu mảng', 'colorPatch'],
+    ['Màu đốm', 'colorSpot'],
+  ]
+  for (const [label, key] of rows)
+    pane.appendChild(colorRow(label, fs[key], (hex, c) => ((fs[key] = hex), tune(c))))
+}
+
+// 🐟 1 slider live "Dáng & Màu" (uniform setter) — tách giữ rule-50.
+function fishTuneSlider(
+  ctx: APGuiCtx,
+  fs: FishSchool,
+  label: string,
+  range: [number, number, number],
+  cur: number,
+  apply: (v: number) => (f: PondFish) => void
+): HTMLElement {
+  return sliderRow(
+    label,
+    range[0],
+    range[1],
+    range[2],
+    cur,
+    (v, c) => ctx.tuneFish(fs, apply(v), c),
+    0
+  )
+}
+
+// 🎨 Section riêng "Dáng & Màu": Độ mập + 3 màu + Tỉ lệ mảng + Xáo màu — TẤT CẢ live (uniform, 0 rebuild).
+function buildFishShapeColor(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): void {
+  const hdr = document.createElement('div')
+  hdr.className = 'ap-terrain-hdr' // dùng lại divider (border-top) cho gọn
+  hdr.textContent = '🎨 Dáng & Màu'
+  hdr.style.cssText = 'margin:7px 0 3px;font-weight:600;opacity:.85'
+  pane.appendChild(hdr)
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Độ mập %', [20, 250, 5], fs.bodyWidth * 100, (v) => {
+      fs.bodyWidth = v / 100
+      return (f) => f.setBodyWidth(fs.bodyWidth)
+    })
+  )
+  fishColorRows(pane, ctx, fs)
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Tỉ lệ mảng %', [0, 100, 5], fs.patchAmount * 100, (v) => {
+      fs.patchAmount = v / 100
+      return (f) => f.setPatchAmount(fs.patchAmount)
+    })
+  )
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Xáo màu', [0, 99, 1], fs.seed, (v) => {
+      fs.seed = Math.round(v)
+      return (f) => f.setColorSeed(fs.seed)
+    })
+  )
+}
+
+// Pane 1 bầy: Show + vùng bơi + đàn + section Dáng&Màu + ✕ Remove. (X/Z gỡ → nắm-kéo 3D ở Move.)
 function buildFishPane(ctx: APGuiCtx, fs: FishSchool, remove: () => void): HTMLElement {
   const pane = document.createElement('div')
   pane.appendChild(
@@ -2836,7 +2873,7 @@ function buildFishPane(ctx: APGuiCtx, fs: FishSchool, remove: () => void): HTMLE
         get(),
         (v, c) => {
           set(v)
-          ctx.previewFish(fs) // tia-Y bám theo X/Z/Sâu đang kéo
+          ctx.previewFish(fs) // 🐟 kéo vùng → khung mờ trụ (radius×swimDepth) + tia-Y biên độ
           if (live) ctx.tuneFish(fs, live, c)
           else if (c) ctx.applySite(true)
         },
@@ -2844,6 +2881,7 @@ function buildFishPane(ctx: APGuiCtx, fs: FishSchool, remove: () => void): HTMLE
       )
     )
   }
+  buildFishShapeColor(pane, ctx, fs) // 🎨 Dáng & Màu (section riêng)
   pane.appendChild(removeRow('✕ Remove', remove))
   return pane
 }

@@ -752,11 +752,31 @@ export class ArchPlanLab extends BaseWorld {
     sizeScale: 1,
   }
   private _weatherBtns: Partial<Record<WeatherMode, HTMLButtonElement>> = {}
+  // ⚡ Sét: CHỈ khi ⛈️ Bão. AmbientLight riêng lóe sáng (KHÔNG đụng _applySun). timer tới cú kế + flash decay.
+  private _lightning: THREE.AmbientLight | null = null
+  private _lightTimer = 0
+  private _lightFlash = 0
   private _envFillSlider: HTMLInputElement | null = null // ref để preset sky/storm sync ngược slider
   private _envOverSlider: HTMLInputElement | null = null
   private _fishMarker: THREE.Line | null = null // 🐟 tia trục-Y flash vị trí bầy (cá chìm dưới nền — cần mốc)
   private _fishMarkerMat: THREE.LineBasicMaterial | null = null
   private _fishMarkerTimer = 0
+  private _fishAreaGhost: THREE.Mesh | null = null // 🐟 khung mờ TRỤ (radius×swimDepth) flash khi kéo slider vùng
+  private _fishAreaGhostMat: THREE.MeshBasicMaterial | null = null
+  // 🐟 HANDLE MOVE bền (chỉ Move mode): mỗi bầy 1 sub-group (tia-Y + icon đỉnh) tag fishIdx → nắm icon kéo dời.
+  private readonly _fishHandleGroup = new THREE.Group()
+  private _fishHandleGeos: THREE.BufferGeometry[] = []
+  private _fishHandleMats: THREE.Material[] = []
+  // Phiên kéo 1 bầy cá (nắm icon): mesh đàn + sub-handle + offset gốc + neo (mặt-phẳng rim). Right-click = trả gốc.
+  private _fishDrag: {
+    idx: number
+    mesh: THREE.Object3D
+    sub: THREE.Object3D
+    startOffX: number
+    startOffZ: number
+    startPt: THREE.Vector3
+    startPos: THREE.Vector3
+  } | null = null
   private _siteGroundMesh: THREE.Mesh | null = null // 🏔️ ref mesh nền base → LIVE-rebuild geometry-only (terrain drag)
   private _activeWater: WaterConfig | null = null
   private labExp: { dispose: () => void } | null = null // 🔀 thí nghiệm Lab đang active (Mái / Particles)
@@ -958,6 +978,7 @@ export class ArchPlanLab extends BaseWorld {
   // không trúng hồ phía sau — NgQuan 2026-06-13) → tool site (hồ/ground-free/gò) → cổng → building. ≤10.
   private _pointerDownMove(e: PointerEvent): void {
     if (this._shiftToggleSelect(e)) return // 🧲 Shift+click = chọn/bỏ khối vào nhóm, không kéo gì khác
+    if (this._tryStartFishDrag(e)) return // 🐟 trúng icon handle bầy cá → kéo dời (handle nổi, ưu tiên cao)
     if (this._tryStartBridgeDrag(e)) return // 🌉 trúng cầu (gần hơn building/hồ) → kéo dời cầu — ƯU TIÊN
     if (this._tryStartSiteTool(e)) return // 💧🟫⛰️ trúng tool site → tool lo
     if (this._tryStartGateDrag(e)) return // 🚪 trúng cổng → trượt dọc cạnh rào
@@ -993,6 +1014,10 @@ export class ArchPlanLab extends BaseWorld {
 
   // Move mode đang kéo: ưu tiên hồ (waterTool) → cổng (_gateDrag) → element building (manipulate).
   private _moveModeMove(e: PointerEvent): void {
+    if (this._fishDrag) {
+      this._fishDragMove(e) // 🐟 kéo bầy cá (nắm icon)
+      return
+    }
     if (this._dragSiteTool(e)) return // 💧🟫⛰️ tool site (hồ/ground-free/gò) đang kéo/nặn → dispatch
     if (this._gateDrag) this._gateDragMove(e)
     else if (this._bridgeDrag)
@@ -1177,6 +1202,10 @@ export class ArchPlanLab extends BaseWorld {
         t.endDrag() // 💧🟫⛰️ ẩn viền/đĩa + commit (rebuild đặt shape/gò mới + cỏ né lại + autosave)
         return true
       }
+    if (this._fishDrag) {
+      this._commitFishDrag() // 🐟 buông bầy cá → bake offset + rebuild + autosave
+      return true
+    }
     if (this._gateDrag) {
       this._commitGateDrag()
       return true
@@ -1259,6 +1288,12 @@ export class ArchPlanLab extends BaseWorld {
       this.manipulate.cancelDrag() // 🏠 building element — revert x0/z0 trong session + đưa hình về
       return true
     }
+    if (this._fishDrag) {
+      this._fishDrag.mesh.position.copy(this._fishDrag.startPos) // 🐟 trả đàn + handle về gốc
+      this._fishDrag.sub.position.set(this._fishDrag.startPos.x, 0, this._fishDrag.startPos.z)
+      this._fishDrag = null
+      return true
+    }
     if (this._bridgeDrag) {
       this._bridgeDrag.sub.position.copy(this._bridgeDrag.startPos)
       this._bridgeDrag = null
@@ -1319,6 +1354,7 @@ export class ArchPlanLab extends BaseWorld {
     for (const t of this._siteDragTools()) t.cancelDrag() // 💧🟫⛰️ huỷ kéo/nặn tool site đang dở + ẩn viền/đĩa
     this._gateDrag = null // huỷ kéo cổng đang dở
     this._bridgeDrag = null // 🌉 huỷ kéo cầu đang dở
+    this._fishDrag = null // 🐟 huỷ kéo bầy cá đang dở
     this._layerDrag = null // 🟫 huỷ kéo tầng ground đang dở
     if (on) {
       this._setPaintMode(false)
@@ -1330,6 +1366,7 @@ export class ArchPlanLab extends BaseWorld {
     if (this.controls) this.controls.enabled = !on
     this._syncMoveToggle?.(on) // đổi class nút 🤚 (ap-move-on) — text bỏ, chỉ symbol
     for (const t of this._siteDragTools()) t.rebuildHandles() // 💧🟫⛰️ hiện/ẩn handle tool site theo moveMode
+    this._rebuildFishHandles() // 🐟 hiện/ẩn tia-Y + icon kéo bầy cá theo moveMode
     this._renderScene() // bật/tắt Move → dựng lại building để áp/bỏ tường-phẳng + nhuốm xanh "nghệ" ngay
   }
 
@@ -1593,7 +1630,7 @@ export class ArchPlanLab extends BaseWorld {
     this.scene.add(this.siteGroup) // 🌳 nền + lô (dưới building)
     this.scene.add(this._grassGroup) // 🌿 cỏ — group BỀN, KHÔNG xoá mỗi rebuild (dirty-check riêng)
     this.scene.add(this._fenceGroup, this._bridgeGroup) // 🧱 rào + 🌉 cầu — group BỀN (dirty-check riêng)
-    this.scene.add(this._gatePickGroup) // 🚪 pick-box cổng vô hình (Move mode kéo trượt cổng)
+    this.scene.add(this._gatePickGroup, this._fishHandleGroup) // 🚪 cổng vô hình + 🐟 handle cá (Move mode)
     this.scene.add(this.buildingGroup)
     this.scene.add(this.pickGroup) // SPIKE: lớp pick vô hình cho brush paint
     this.waterTool = new WaterTool(this._waterHost()) // 💧 kéo hồ/đỉnh/viền (tự add handle group vào scene)
@@ -1634,6 +1671,7 @@ export class ArchPlanLab extends BaseWorld {
     for (const s of this.siteShaders) s.setTime?.(time) // 🌿 gió lùa cỏ (GrassGround) chạy theo elapsed
     for (const f of this._siteFish) f.fish.update(deltaTime) // 🐟 vẫy (uniform) + dời đàn (≤40 matrix, rẻ)
     this._precip?.update(deltaTime) // 🌧️ mưa/tuyết rơi (vertex shader; chỉ ghi 1 uniform time)
+    this._updateLightning(deltaTime) // ⚡ sét lóe (chỉ ⛈️ Bão)
     this.css2dRenderer?.render(this.scene, this.camera)
     this.guard?.check()
     this.devHud?.update(this.renderer.info, deltaTime)
@@ -1770,8 +1808,12 @@ export class ArchPlanLab extends BaseWorld {
     this.envTrayWrap = null
     this._trayBtns = {}
     this._weatherBtns = {}
-    this._precip?.dispose() // 🌧️ mưa/tuyết — gỡ Points + geometry + material
+    this._precip?.dispose() // 🌧️ mưa/tuyết — gỡ Points/Lines + geometry + material
     this._precip = null
+    if (this._lightning) {
+      this.scene.remove(this._lightning) // ⚡ AmbientLight sét (không có GPU resource cần dispose)
+      this._lightning = null
+    }
   }
 
   // Dispose tài nguyên scene tĩnh (không rebuild mỗi frame) + wall material cache.
@@ -1788,17 +1830,32 @@ export class ArchPlanLab extends BaseWorld {
     this._disposeGround()
     this.editorGrid?.dispose()
     this.editorGrid = null
-    window.clearTimeout(this._fishMarkerTimer) // 🐟 marker tia-Y bầy cá
-    this._fishMarker?.geometry.dispose()
-    this._fishMarkerMat?.dispose()
-    this._fishMarker = null
-    this._fishMarkerMat = null
+    this._disposeFishUi() // 🐟 marker tia-Y + khung mờ trụ + handle move (tách giữ complexity ≤10)
     this.heightGridSystem?.dispose()
     this.heightGridSystem = null
     this.css2dEl?.remove()
     this.css2dEl = null
     this.css2dRenderer = null
     this._disposeActors()
+  }
+
+  // 🐟 Teardown UI cá: marker tia-Y flash + khung mờ trụ + handle move (tia-Y/icon). Tách khỏi
+  // _disposeSceneResources (giữ complexity ≤10).
+  private _disposeFishUi(): void {
+    window.clearTimeout(this._fishMarkerTimer)
+    this._fishMarker?.geometry.dispose()
+    this._fishMarkerMat?.dispose()
+    this._fishMarker = null
+    this._fishMarkerMat = null
+    this._fishAreaGhost?.geometry.dispose()
+    this._fishAreaGhostMat?.dispose()
+    this._fishAreaGhost = null
+    this._fishAreaGhostMat = null
+    for (const g of this._fishHandleGeos) g.dispose()
+    for (const m of this._fishHandleMats) m.dispose()
+    this._fishHandleGeos = []
+    this._fishHandleMats = []
+    this._fishHandleGroup.clear()
   }
 
   // Dispose nhóm "actor" scene (figure/coordPicker/sun/guard/devHud/waterTool). Tách khỏi
@@ -2701,6 +2758,28 @@ export class ArchPlanLab extends BaseWorld {
     for (const [mode, btn] of Object.entries(this._weatherBtns)) {
       btn?.classList.toggle('on', mode === this._weather.mode)
     }
+  }
+
+  // ⚡ Sét (chỉ ⛈️ Bão): AmbientLight lazy lóe sáng, timer ngẫu nhiên giữa các cú, flash decay nhanh.
+  // KHÔNG đụng hemi/sun (light riêng, intensity 0 khi không sét) → không phá _applySun.
+  private _updateLightning(dt: number): void {
+    if (this._weather.mode !== 'storm') {
+      if (this._lightning) this._lightning.intensity = 0
+      return
+    }
+    if (!this._lightning) {
+      this._lightning = new THREE.AmbientLight(0xeaf2ff, 0)
+      this.scene.add(this._lightning)
+      this._lightTimer = 1.5 + Math.random() * 4
+    }
+    this._lightTimer -= dt
+    if (this._lightTimer <= 0) {
+      this._lightFlash = 1
+      // 35% nháy lại rất nhanh (sét thật hay 2–3 nháy), còn lại nghỉ 2.5–9s tới cú kế.
+      this._lightTimer = Math.random() < 0.35 ? 0.09 : 2.5 + Math.random() * 6.5
+    }
+    this._lightFlash = Math.max(0, this._lightFlash - dt * 5) // tắt ~0.2s
+    this._lightning.intensity = this._lightFlash * 2.4
   }
 
   // Persist thời tiết riêng (localStorage 'archplan:weather') — độc lập design + sun. Load TRƯỚC _applyWeather.
@@ -4032,10 +4111,149 @@ export class ArchPlanLab extends BaseWorld {
     this._fishMarker.position.set(fs.offsetX / 1000, bot, fs.offsetZ / 1000)
     this._fishMarker.scale.y = rim + 1 - bot // ngọn tia nhô 1m trên mặt nền
     this._fishMarker.visible = true
+    this._updateFishAreaGhost(fs, rim) // 🐟 khung mờ TRỤ biên độ (radius × swimDepth)
     window.clearTimeout(this._fishMarkerTimer)
     this._fishMarkerTimer = window.setTimeout(() => {
       if (this._fishMarker) this._fishMarker.visible = false
+      if (this._fishAreaGhost) this._fishAreaGhost.visible = false
     }, 1500)
+  }
+
+  // 🐟 Khung mờ TRỤ thể hiện biên độ vùng bơi (bán kính radius × bề dày swimDepth) — đỉnh trụ tại depthY (cá
+  // sát đây), kéo xuống swimDepth. Geometry dựng lại mỗi lần (rẻ, chỉ khi kéo slider). depthTest off → xuyên đất.
+  private _updateFishAreaGhost(fs: FishSchool, rim: number): void {
+    if (!this._fishAreaGhost) {
+      this._fishAreaGhostMat = new THREE.MeshBasicMaterial({
+        color: 0xffd400,
+        transparent: true,
+        opacity: 0.12,
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+      this._fishAreaGhost = new THREE.Mesh(
+        new THREE.CylinderGeometry(1, 1, 1, 28),
+        this._fishAreaGhostMat
+      )
+      this._fishAreaGhost.renderOrder = 998
+      this.scene.add(this._fishAreaGhost)
+    }
+    const r = fs.radius / 1000
+    const h = Math.max(fs.swimDepth / 1000, 0.02)
+    const top = rim - fs.depth / 1000 // đỉnh khối bơi
+    this._fishAreaGhost.geometry.dispose()
+    this._fishAreaGhost.geometry = new THREE.CylinderGeometry(r, r, h, 28)
+    this._fishAreaGhost.position.set(fs.offsetX / 1000, top - h / 2, fs.offsetZ / 1000)
+    this._fishAreaGhost.visible = true
+  }
+
+  // 🐟 Dựng/GỠ handle MOVE bầy cá: chỉ khi Move mode + site.show → mỗi bầy enabled 1 sub-group (tia-Y vàng
+  // depthTest-off + icon bát-diện đỉnh, tag fishIdx) để nắm icon kéo dời. Gọi từ _setMoveMode + sau _applySite.
+  private _rebuildFishHandles(): void {
+    for (const g of this._fishHandleGeos) g.dispose()
+    for (const m of this._fishHandleMats) m.dispose()
+    this._fishHandleGeos = []
+    this._fishHandleMats = []
+    this._fishHandleGroup.clear()
+    if (!this.moveMode || !this.site.show) return
+    const rim = this.site.groundThick / 1000
+    this.site.fishSchools.forEach((fs, idx) => {
+      if (fs.enabled) this._addFishHandle(fs, idx, rim)
+    })
+  }
+
+  // 🐟 1 handle bầy: tia-Y (đáy đàn → nhô 0.6m trên rim) + icon octahedron đỉnh (raycast kéo). Tách (≤10/≤50).
+  private _addFishHandle(fs: FishSchool, idx: number, rim: number): void {
+    const sub = new THREE.Group()
+    sub.userData.fishIdx = idx
+    sub.position.set(fs.offsetX / 1000, 0, fs.offsetZ / 1000)
+    const bot = rim - fs.depth / 1000 - 0.2
+    const topY = rim + 0.6 // đỉnh tia nhô trên mặt nền
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, bot, 0),
+      new THREE.Vector3(0, topY, 0),
+    ])
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xffd400, depthTest: false })
+    const line = new THREE.Line(lineGeo, lineMat)
+    line.renderOrder = 999
+    const iconGeo = new THREE.OctahedronGeometry(0.12)
+    const iconMat = new THREE.MeshBasicMaterial({ color: 0xffd400, depthTest: false })
+    const icon = new THREE.Mesh(iconGeo, iconMat)
+    icon.position.set(0, topY, 0)
+    icon.renderOrder = 1000
+    icon.userData.fishIdx = idx // raycast trúng icon → kéo bầy idx
+    sub.add(line, icon)
+    this._fishHandleGroup.add(sub)
+    this._fishHandleGeos.push(lineGeo, iconGeo)
+    this._fishHandleMats.push(lineMat, iconMat)
+  }
+
+  // 🐟 fishIdx của object trúng (icon/sub) — walk-up tới userData.fishIdx. -1 nếu không thuộc handle cá.
+  private _fishIdxOf(obj: THREE.Object3D | null): number {
+    let o = obj
+    while (o && o !== this._fishHandleGroup) {
+      if (typeof o.userData.fishIdx === 'number') return o.userData.fishIdx
+      o = o.parent
+    }
+    return -1
+  }
+
+  // 🐟 Move nhấn trúng ICON đỉnh handle bầy cá → bắt đầu kéo dời XZ (mirror _tryStartBridgeDrag). Trả false
+  // (không trúng icon) → nhường drag khác. Chỉ hoạt động khi Move (handle chỉ dựng lúc đó).
+  private _tryStartFishDrag(e: PointerEvent): boolean {
+    if (this._fishHandleGroup.children.length === 0) return false
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const hit = this._ray.intersectObjects(this._fishHandleGroup.children, true)[0]
+    if (!hit) return false
+    const idx = this._fishIdxOf(hit.object)
+    const entry = this._siteFish[idx]
+    const sub = this._fishHandleGroup.children[idx]
+    if (!entry || !sub) return false
+    const mesh = entry.fish.getMesh()
+    const rim = this.site.groundThick / 1000
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -rim)
+    const pt = new THREE.Vector3()
+    if (!this._ray.ray.intersectPlane(plane, pt)) return false
+    this.canvas.setPointerCapture(e.pointerId)
+    this._navigateToFish(idx) // nắm cá → mở GUI tab F + flash
+    this._fishDrag = {
+      idx,
+      mesh,
+      sub,
+      startOffX: this.site.fishSchools[idx].offsetX,
+      startOffZ: this.site.fishSchools[idx].offsetZ,
+      startPt: pt.clone(),
+      startPos: mesh.position.clone(),
+    }
+    return true
+  }
+
+  // 🐟 Kéo bầy cá LIVE: dời mesh đàn + handle theo Δ chiếu mặt-phẳng rim (0 rebuild). Buông → bake offset.
+  private _fishDragMove(e: PointerEvent): void {
+    const d = this._fishDrag
+    if (!d) return
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const rim = this.site.groundThick / 1000
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -rim)
+    const pt = new THREE.Vector3()
+    if (!this._ray.ray.intersectPlane(plane, pt)) return
+    const x = d.startPos.x + (pt.x - d.startPt.x)
+    const z = d.startPos.z + (pt.z - d.startPt.z)
+    d.mesh.position.set(x, d.mesh.position.y, z) // wander local quanh gốc → cả đàn dời theo, không reset
+    d.sub.position.set(x, 0, z)
+  }
+
+  // 🐟 Buông: gập vị trí mesh vào offsetX/Z state → _applySite(true) (rebuild + autosave + rebuild handle). Site (không undo).
+  private _commitFishDrag(): void {
+    const d = this._fishDrag
+    this._fishDrag = null
+    if (!d) return
+    const fs = this.site.fishSchools[d.idx]
+    if (fs) {
+      fs.offsetX = Math.round(d.mesh.position.x * 1000)
+      fs.offsetZ = Math.round(d.mesh.position.z * 1000)
+    }
+    this._applySite(true)
   }
 
   private _clearSite(): void {
@@ -4064,6 +4282,7 @@ export class ArchPlanLab extends BaseWorld {
     this._renderSite()
     // (Lab preview ĐỘC LẬP scene — KHÔNG _previewRebuild theo edit nữa: né lag + sandbox riêng cho Factory.)
     this._refreshSiteReadout?.()
+    this._rebuildFishHandles() // 🐟 bầy/vị trí đổi → dựng lại handle (no-op nếu không Move mode)
     if (this.sun) this.sun.shadow.needsUpdate = true
     if (persist) this.store.autosave(this.state, this.site)
   }
