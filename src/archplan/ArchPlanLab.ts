@@ -820,7 +820,7 @@ export class ArchPlanLab extends BaseWorld {
     rippleSpeed: 0.65, // = RIPPLE_SPEED (đã halve)
     rippleWave: 0.42, // λ(m) ≈ 2π/RIPPLE_WAVES
     rainScopeMm: 150, // phạm vi vòng lan (mm) — chặn theo cỡ ô (mật độ cao → tự giới hạn)
-    rainLambdaMm: 95, // độ dài bước sóng λ (mm)
+    rainLambdaMm: 8, // độ dài bước sóng λ (mm) — gợn mịn (range 1–20mm)
     rainAmp: 1.4, // size/biên độ sóng
     rainCount: 1.5, // số bước sóng (gợn) trong 1 vòng
     rainSpd: 1.3, // wave spd (chu kỳ giọt/giây)
@@ -2849,7 +2849,7 @@ export class ArchPlanLab extends BaseWorld {
         w.rainScopeMm = v
         apply()
       }),
-      mk('lamda', 10, 200, w.rainLambdaMm, (v) => {
+      mk('lamda', 1, 20, w.rainLambdaMm, (v) => {
         w.rainLambdaMm = v
         apply()
       }),
@@ -3190,7 +3190,7 @@ export class ArchPlanLab extends BaseWorld {
     if (typeof o.rainScopeMm === 'number')
       w.rainScopeMm = Math.max(10, Math.min(200, o.rainScopeMm))
     if (typeof o.rainLambdaMm === 'number')
-      w.rainLambdaMm = Math.max(10, Math.min(200, o.rainLambdaMm))
+      w.rainLambdaMm = Math.max(1, Math.min(20, o.rainLambdaMm))
     if (typeof o.rainAmp === 'number') w.rainAmp = Math.max(0, Math.min(4, o.rainAmp))
     if (typeof o.rainCount === 'number') w.rainCount = Math.max(0.5, Math.min(8, o.rainCount))
     if (typeof o.rainSpd === 'number') w.rainSpd = Math.max(0.2, Math.min(5, o.rainSpd))
