@@ -396,7 +396,8 @@ type BorderTexKey = Exclude<BorderMaterialKey, 'none'>
 const BORDER_TILE = 0.5
 
 // 🌧️ Kiểu thời tiết khay 🌅. 'storm' = mưa (Precipitation mode rain) + gió mạnh + tự áp sky âm-u-đậm.
-type WeatherMode = 'none' | 'rain' | 'snow' | 'storm'
+type WeatherMode = 'none' | 'rain' | 'snow' | 'storm' | 'blizzard'
+type WeatherBase = 'none' | 'rain' | 'snow' // base precip; storm/blizzard = base + cờ bão (rainStorm/snowStorm)
 
 // Opts Precipitation cho scene chính (lô 80×80): trụ phủ ~30m quanh cam, cột cao 28m, đáy y=0.
 // 'storm' = mưa dày + nhanh + gió mạnh + ám lạnh. (heavy=opacity áp riêng sau khi dựng.)
@@ -413,6 +414,17 @@ const PRECIP_OPTS: Record<Exclude<WeatherMode, 'none'>, PrecipitationOptions> = 
     color: 0x9fb0c0,
     size: 3.6,
   },
+  // 🌨️ Bão tuyết: tuyết DÀY + gió ngang mạnh (thổi nghiêng) + bông to. Rơi chậm hơn mưa (speed thấp).
+  blizzard: {
+    mode: 'snow',
+    count: 9000,
+    speed: 7,
+    radius: 32,
+    height: 30,
+    wind: [5, 0],
+    color: 0xeaf0f5,
+    size: 9,
+  },
 }
 
 // Cỡ gốc mỗi mode (= PRECIP_OPTS.size) — slider 🌅 nhân HỆ SỐ lên đây (giữ tương quan mưa nhỏ/tuyết to).
@@ -420,9 +432,15 @@ const PRECIP_BASE_SIZE: Record<Exclude<WeatherMode, 'none'>, number> = {
   rain: 3.2,
   snow: 8,
   storm: 3.6,
+  blizzard: 9,
 }
 
-// Bão áp lên sky (giữ azimuth/elevation user): trời u ám đậm + sun yếu lạnh + fill cao (mây tán sáng đều).
+// 🌊 Mưa gợn mặt nước: DEFAULT số vòng/giây/HỒ ở mưa NẶNG (×heavy×số hồ). Điểm rơi NGẪU NHIÊN trong lòng hồ
+// (Precipitation là field — không biết giọt rơi đâu; rải ngẫu nhiên = chuẩn procedural rain ripple). Slider khay → _weather.rippleRate.
+const RAIN_DROP_RATE = 4.5 // vòng/s/hồ tại heavy=1 (default _weather.rippleRate)
+const RAIN_DROP_STRENGTH = 0.3 // biên độ gợn 1 giọt (±random) — hằng (size sóng đã ở uRippleAmp)
+
+// Bão MƯA áp lên sky (giữ azimuth/elevation user): trời u ám TỐI + sun yếu lạnh + fill cao + sét (lightning).
 const STORM_SKY: Partial<SunOpts> = {
   enabled: true,
   intensity: 0.4,
@@ -430,6 +448,25 @@ const STORM_SKY: Partial<SunOpts> = {
   fill: 1.7,
   overcast: 1,
   fog: 0.5,
+}
+
+// 🌨️ Bão TUYẾT (blizzard) KHÁC bão mưa: trắng-XÓA (white-out) — sun mạnh hơn + màu sáng trắng-xám + fill CAO
+// (tuyết tán sáng đều) + fog dày (giảm tầm nhìn) + KHÔNG sét. So storm: sáng hơn, trắng hơn, fog dày hơn.
+const BLIZZARD_SKY: Partial<SunOpts> = {
+  enabled: true,
+  intensity: 0.55,
+  color: 0xccd6de,
+  fill: 2.1,
+  overcast: 1,
+  fog: 0.62,
+}
+
+// code3 nested-tab khay Thời tiết (CSS ap-wx-* trong _ensureEnvTrayCss). Mưa tô xanh dương, Tuyết tô trắng-xám.
+const WX_TAB_CLASSES = {
+  bar: 'ap-wx-tabs',
+  tab: 'ap-wx-tab',
+  panel: 'ap-wx-panel',
+  active: 'ap-wx-on',
 }
 const FOG_OVERCAST_COL = new THREE.Color(0x9aa2aa) // 🌫️ màu fog khi trời âm u (lerp tới từ xanh-ngày)
 const BORDER_TEX_SPEC: Record<BorderTexKey, SurfaceTextureSpec> = {
@@ -754,12 +791,38 @@ export class ArchPlanLab extends BaseWorld {
   // KHÔNG vào design state. mode đổi = tạo/dispose instance; heavy = opacity live. ⛈️ Bão = combo mưa+sky.
   private _precip: Precipitation | null = null
   // heavy = opacity; sizeScale = hệ số × cỡ gốc mode (1 = mặc định đã gấp đôi).
-  private _weather: { mode: WeatherMode; heavy: number; sizeScale: number } = {
-    mode: 'none',
+  // base = loại precip (none/rain/snow); rainStorm/snowStorm = cờ bão riêng (⛈️ vs 🌨️). Effective mode = _effectiveMode().
+  // ripple* = tham số gợn hồ (default = WaterSurface defaults) — slider khay Mưa, áp cho mọi _siteWaters, persist.
+  private _weather: {
+    base: WeatherBase
+    rainStorm: boolean
+    snowStorm: boolean
+    heavy: number
+    sizeScale: number
+    rippleRate: number
+    rippleAmp: number
+    rippleLife: number
+    rippleSpeed: number
+    rippleWave: number
+  } = {
+    base: 'none',
+    rainStorm: false,
+    snowStorm: false,
     heavy: 0.5,
     sizeScale: 1,
+    rippleRate: RAIN_DROP_RATE,
+    rippleAmp: 2.2, // = WaterSurface RIPPLE_AMP
+    rippleLife: 2.6, // = RIPPLE_LIFE
+    rippleSpeed: 0.65, // = RIPPLE_SPEED (đã halve)
+    rippleWave: 0.42, // λ(m) ≈ 2π/RIPPLE_WAVES
   }
-  private _weatherBtns: Partial<Record<WeatherMode, HTMLButtonElement>> = {}
+  // 🌊 Mưa gợn: đếm-lùi tới giọt kế (rải ngẫu nhiên trong lòng hồ khi đang mưa). _tmpRipplePos = tâm hồ world.
+  private _rainRippleTimer = 0
+  private readonly _tmpRipplePos = new THREE.Vector3()
+  // 🌦️ Toggle khay thời tiết (code3): ref checkbox "Bật" mưa/tuyết để sync (bật loại này → tắt loại kia, mode đơn).
+  private _wxRainOn: HTMLInputElement | null = null
+  private _wxSnowOn: HTMLInputElement | null = null
+  private _wxTabs: Tabs | null = null
   // ⚡ Sét: CHỈ khi ⛈️ Bão. AmbientLight riêng lóe sáng (KHÔNG đụng _applySun). timer tới cú kế + flash decay.
   private _lightning: THREE.AmbientLight | null = null
   private _lightTimer = 0
@@ -1645,6 +1708,7 @@ export class ArchPlanLab extends BaseWorld {
     this._precip?.update(deltaTime) // 🌧️ mưa/tuyết rơi (vertex shader; chỉ ghi 1 uniform time)
     this._updateLightning(deltaTime) // ⚡ sét lóe (chỉ ⛈️ Bão)
     this._updateSnowAccum(deltaTime) // ❄️ tuyết đọng nền tích dần (chỉ mode snow)
+    this._updateRainRipples(deltaTime) // 🌊 mưa rải vòng gợn trong lòng hồ (chỉ rain/storm)
     this.css2dRenderer?.render(this.scene, this.camera)
     this.guard?.check()
     this.devHud?.update(this.renderer.info, deltaTime)
@@ -1780,7 +1844,9 @@ export class ArchPlanLab extends BaseWorld {
     this.envTrayWrap?.remove() // 🌅 khay preset ánh sáng (float bền cùng vòng đời utilTray)
     this.envTrayWrap = null
     this._trayBtns = {}
-    this._weatherBtns = {}
+    this._wxTabs?.dispose() // 🌦️ code3 tab Mưa/Tuyết — gỡ tablist + listener
+    this._wxTabs = null
+    this._wxRainOn = this._wxSnowOn = null
     this._precip?.dispose() // 🌧️ mưa/tuyết — gỡ Points/Lines + geometry + material
     this._precip = null
     if (this._lightning) {
@@ -2600,9 +2666,10 @@ export class ArchPlanLab extends BaseWorld {
     this._trayBtns = { hover: hov, pal, mix, env }
     this.canvas.parentElement?.appendChild(bar)
     this.utilTray = bar
+    this._loadWeather() // 🌧️ khôi phục base/bão/heavy/ripple TRƯỚC khi dựng GUI (toggle/slider đọc _weather)
     this._setupEnvTray() // 🌅 float bền (như khay) — dựng 1 lần, ẩn mặc định
-    this._loadWeather() // 🌧️ khôi phục mode/heavy đã lưu
-    this._applyWeather() // dựng precip nếu mode != none + sync nút
+    this._applyWeather() // dựng precip nếu effective mode != none (sky đã nằm trong sunOpts đã lưu)
+    this._applyRippleParams() // 🌊 đẩy tham số sóng đã lưu vào hồ (nếu đã build)
   }
 
   // 🌅 Khay MÔI TRƯỜNG (float bền): 2 mục — Bầu trời (4 preset + Sáng nền/Mây mù/Sương mù) và Thời tiết
@@ -2660,33 +2727,190 @@ export class ArchPlanLab extends BaseWorld {
     wrap.append(fill.row, over.row, fogS.row)
   }
 
-  // Mục Thời tiết: 4 mode (🚫 tắt/🌧️/❄️/⛈️) + 2 slider có nhãn (Nặng hạt/Cỡ hạt).
+  // Mục Thời tiết = code3 nested tab: 🌧️ Mưa (xanh) | ❄️ Tuyết (trắng-xám). Bão GỘP trong từng tab (⛈️ vs 🌨️).
   private _envWeatherSection(wrap: HTMLElement): void {
-    wrap.append(this._envTitle('🌧️ Thời tiết'), this._envWeatherButtons())
-    const heavy = this._envLabeledSlider({
+    wrap.append(this._envTitle('🌦️ Thời tiết'))
+    const rainPanel = document.createElement('div')
+    rainPanel.className = 'ap-wx-rain' // tô xanh dương
+    const snowPanel = document.createElement('div')
+    snowPanel.className = 'ap-wx-snow' // tô trắng-xám
+    this._buildRainPanel(rainPanel)
+    this._buildSnowPanel(snowPanel)
+    wrap.append(rainPanel, snowPanel)
+    this._wxTabs = new Tabs(
+      wrap,
+      [
+        { label: '🌧️ Mưa', panel: rainPanel, title: 'Mưa + bão mưa (sét) + gợn hồ' },
+        { label: '❄️ Tuyết', panel: snowPanel, title: 'Tuyết + bão tuyết (trắng xóa)' },
+      ],
+      { classes: WX_TAB_CLASSES, injectCss: false, initial: this._weather.base === 'snow' ? 1 : 0 }
+    )
+  }
+
+  // Tab Mưa: [Bật | ⛈️ Bão] + Nặng/Cỡ hạt + nhóm 🌊 Sóng hồ (5 slider gợn).
+  private _buildRainPanel(panel: HTMLElement): void {
+    const on = this._wxToggle('Bật', this._weather.base === 'rain', (v) => this._setRainOn(v))
+    const storm = this._wxToggle('⛈️ Bão', this._weather.rainStorm, (v) => this._setRainStorm(v))
+    this._wxRainOn = on.input
+    const head = document.createElement('div')
+    head.className = 'ap-wx-head'
+    head.append(on.row, storm.row)
+    panel.append(
+      head,
+      this._wxHeavyRow().row,
+      this._wxSizeRow().row,
+      this._envSubTitle('🌊 Sóng hồ')
+    )
+    this._buildRippleSliders(panel)
+  }
+
+  // Tab Tuyết: [Bật | 🌨️ Bão tuyết] + Nặng/Cỡ hạt (KHÔNG có gợn hồ — tuyết không gợn nước).
+  private _buildSnowPanel(panel: HTMLElement): void {
+    const on = this._wxToggle('Bật', this._weather.base === 'snow', (v) => this._setSnowOn(v))
+    const storm = this._wxToggle('🌨️ Bão tuyết', this._weather.snowStorm, (v) =>
+      this._setSnowStorm(v)
+    )
+    this._wxSnowOn = on.input
+    const head = document.createElement('div')
+    head.className = 'ap-wx-head'
+    head.append(on.row, storm.row)
+    panel.append(head, this._wxHeavyRow().row, this._wxSizeRow().row)
+  }
+
+  // 5 slider 🌊 Sóng hồ: Tần số (rate, CPU) · Size/Thời gian/Tốc độ lan/Bước sóng (uniform WaterSurface, live mọi hồ).
+  private _buildRippleSliders(panel: HTMLElement): void {
+    const w = this._weather
+    const mk = (
+      label: string,
+      min: number,
+      max: number,
+      value: number,
+      onInput: (v: number) => void
+    ): HTMLElement =>
+      this._envLabeledSlider({ label, min, max, value, onInput, save: () => this._saveWeather() })
+        .row
+    const apply = (): void => this._applyRippleParams()
+    panel.append(
+      mk('Tần số', 0, 12, w.rippleRate, (v) => {
+        w.rippleRate = v
+      }),
+      mk('Size sóng', 0, 6, w.rippleAmp, (v) => {
+        w.rippleAmp = v
+        apply()
+      }),
+      mk('Thời gian', 0.3, 8, w.rippleLife, (v) => {
+        w.rippleLife = v
+        apply()
+      }),
+      mk('Tốc độ lan', 0, 3, w.rippleSpeed, (v) => {
+        w.rippleSpeed = v
+        apply()
+      }),
+      mk('Bước sóng', 0.1, 1.5, w.rippleWave, (v) => {
+        w.rippleWave = v
+        apply()
+      })
+    )
+  }
+
+  private _wxHeavyRow(): { row: HTMLElement; slider: HTMLInputElement } {
+    return this._envLabeledSlider({
       label: 'Nặng hạt',
       min: 0.05,
       max: 1,
       value: this._weather.heavy,
-      onInput: (v) => {
-        this._weather.heavy = v
-        this._precip?.setOpacity(v)
-      },
+      onInput: (v) => this._setHeavy(v),
       save: () => this._saveWeather(),
     })
-    const size = this._envLabeledSlider({
+  }
+
+  private _wxSizeRow(): { row: HTMLElement; slider: HTMLInputElement } {
+    return this._envLabeledSlider({
       label: 'Cỡ hạt',
       min: 0.3,
       max: 3,
       value: this._weather.sizeScale,
-      onInput: (v) => {
-        this._weather.sizeScale = v
-        if (this._weather.mode !== 'none')
-          this._precip?.setSize(PRECIP_BASE_SIZE[this._weather.mode] * v)
-      },
+      onInput: (v) => this._setSizeScale(v),
       save: () => this._saveWeather(),
     })
-    wrap.append(heavy.row, size.row)
+  }
+
+  // Checkbox có nhãn (hàng nhỏ) cho Bật/Bão trong tab thời tiết.
+  private _wxToggle(
+    label: string,
+    checked: boolean,
+    onChange: (on: boolean) => void
+  ): { row: HTMLElement; input: HTMLInputElement } {
+    const row = document.createElement('label')
+    row.className = 'ap-wx-toggle'
+    const input = document.createElement('input')
+    input.type = 'checkbox'
+    input.checked = checked
+    input.addEventListener('change', () => onChange(input.checked))
+    const span = document.createElement('span')
+    span.textContent = label
+    row.append(input, span)
+    return { row, input }
+  }
+
+  private _envSubTitle(text: string): HTMLElement {
+    const t = document.createElement('div')
+    t.className = 'ap-env-subtitle'
+    t.textContent = text
+    return t
+  }
+
+  // Effective mode từ base + cờ bão: rain→(storm nếu rainStorm) · snow→(blizzard nếu snowStorm) · none.
+  private _effectiveMode(): WeatherMode {
+    const w = this._weather
+    if (w.base === 'rain') return w.rainStorm ? 'storm' : 'rain'
+    if (w.base === 'snow') return w.snowStorm ? 'blizzard' : 'snow'
+    return 'none'
+  }
+
+  // Bật Mưa → base='rain' (tắt Tuyết, mode đơn). Tắt → none.
+  private _setRainOn(on: boolean): void {
+    this._weather.base = on ? 'rain' : 'none'
+    if (on && this._wxSnowOn) this._wxSnowOn.checked = false
+    this._applyWeatherState()
+  }
+
+  private _setSnowOn(on: boolean): void {
+    this._weather.base = on ? 'snow' : 'none'
+    if (on && this._wxRainOn) this._wxRainOn.checked = false
+    this._applyWeatherState()
+  }
+
+  private _setRainStorm(on: boolean): void {
+    this._weather.rainStorm = on
+    this._applyWeatherState()
+  }
+
+  private _setSnowStorm(on: boolean): void {
+    this._weather.snowStorm = on
+    this._applyWeatherState()
+  }
+
+  private _setHeavy(v: number): void {
+    this._weather.heavy = v
+    this._precip?.setOpacity(v)
+  }
+
+  private _setSizeScale(v: number): void {
+    this._weather.sizeScale = v
+    const m = this._effectiveMode()
+    if (m !== 'none') this._precip?.setSize(PRECIP_BASE_SIZE[m] * v)
+  }
+
+  // 🌊 Đẩy 4 tham số sóng (size/thời gian/tốc độ/bước sóng) vào MỌI hồ. Tần số (rate) ở CPU (_updateRainRipples).
+  private _applyRippleParams(): void {
+    const w = this._weather
+    for (const x of this._siteWaters) {
+      x.surf.setRippleAmp(w.rippleAmp)
+      x.surf.setRippleSpeed(w.rippleSpeed)
+      x.surf.setRippleLife(w.rippleLife)
+      x.surf.setRippleWavelength(w.rippleWave)
+    }
   }
 
   private _envSkyButtons(): HTMLElement {
@@ -2698,27 +2922,6 @@ export class ArchPlanLab extends BaseWorld {
       b.textContent = p.icon
       b.title = p.label
       b.addEventListener('click', () => this._applyEnvPreset(p.opts))
-      row.appendChild(b)
-    }
-    return row
-  }
-
-  private _envWeatherButtons(): HTMLElement {
-    const row = document.createElement('div')
-    row.className = 'ap-env-btns'
-    const modes: [WeatherMode, string, string][] = [
-      ['none', '🚫', 'Tắt thời tiết (quang)'],
-      ['rain', '🌧️', 'Mưa'],
-      ['snow', '❄️', 'Tuyết'],
-      ['storm', '⛈️', 'Bão — mưa dày + gió mạnh + trời âm u đậm'],
-    ]
-    for (const [mode, icon, title] of modes) {
-      const b = document.createElement('button')
-      b.type = 'button'
-      b.textContent = icon
-      b.title = title
-      b.addEventListener('click', () => this._setWeather(mode))
-      this._weatherBtns[mode] = b
       row.appendChild(b)
     }
     return row
@@ -2767,21 +2970,22 @@ export class ArchPlanLab extends BaseWorld {
     return { row, slider: s }
   }
 
-  // 🌧️ Đổi mode thời tiết: dựng lại Precipitation (hoặc gỡ nếu 'none'); 'storm' kèm áp sky âm-u-đậm.
-  private _setWeather(mode: WeatherMode): void {
-    this._weather.mode = mode
+  // 🌦️ Áp trạng thái thời tiết (gọi sau mọi toggle): dựng lại precip + sky bão tương ứng + save.
+  private _applyWeatherState(): void {
     this._applyWeather()
-    if (mode === 'storm') this._applyEnvPreset(STORM_SKY) // bão = trời u ám đậm + sun yếu (combo 1 nút)
+    const m = this._effectiveMode()
+    if (m === 'storm')
+      this._applyEnvPreset(STORM_SKY) // ⛈️ bão mưa = trời u ám TỐI + sét
+    else if (m === 'blizzard') this._applyEnvPreset(BLIZZARD_SKY) // 🌨️ bão tuyết = trắng XÓA (khác bão mưa)
     this._saveWeather()
   }
 
-  // Dựng (lại) Precipitation theo mode hiện tại + áp heavy (opacity). Gỡ khi 'none'. Trụ phủ vùng quanh cam.
+  // Dựng (lại) Precipitation theo EFFECTIVE mode + áp heavy (opacity). Gỡ khi 'none'. Trụ phủ vùng quanh cam.
   private _applyWeather(): void {
     this._precip?.dispose()
     this._precip = null
-    this._syncWeatherBtns()
     this._applySnowCover() // ❄️ tuyết đọng nền theo mode (tạo/gỡ overlay)
-    const m = this._weather.mode
+    const m = this._effectiveMode()
     if (m === 'none') return
     this._precip = new Precipitation(PRECIP_OPTS[m])
     this._precip.setOpacity(this._weather.heavy)
@@ -2789,9 +2993,10 @@ export class ArchPlanLab extends BaseWorld {
     this.scene.add(this._precip.getObject())
   }
 
-  // ❄️ Tuyết đọng nền: overlay CHỈ khi mode='snow'. Tạo mới = accum 0 (ramp lên dần ở onUpdate). Khác → gỡ.
+  // ❄️ Tuyết đọng nền: overlay khi snow HOẶC blizzard. Tạo mới = accum 0 (ramp lên dần ở onUpdate). Khác → gỡ.
   private _applySnowCover(): void {
-    if (this._weather.mode !== 'snow') {
+    const m = this._effectiveMode()
+    if (m !== 'snow' && m !== 'blizzard') {
       this._snowCover?.dispose()
       this._snowCover = null
       this._snowAccum = 0
@@ -2812,16 +3017,38 @@ export class ArchPlanLab extends BaseWorld {
     this._snowCover.setAccum(this._snowAccum)
   }
 
-  private _syncWeatherBtns(): void {
-    for (const [mode, btn] of Object.entries(this._weatherBtns)) {
-      btn?.classList.toggle('on', mode === this._weather.mode)
+  // 🌊 Mưa rải vòng gợn lên MỌI hồ đang render (rain/storm). Tần suất ∝ heavy×số hồ; điểm rơi ngẫu nhiên trong
+  // lòng hồ (đĩa bán kính = nửa cạnh ngắn → nằm gọn cả với hồ polygon). Đếm-lùi: bắn nhiều giọt nếu rate cao.
+  private _updateRainRipples(dt: number): void {
+    const m = this._effectiveMode()
+    if ((m !== 'rain' && m !== 'storm') || this._siteWaters.length === 0) return
+    const rate = this._weather.rippleRate * this._weather.heavy * this._siteWaters.length // giọt/s
+    if (rate <= 0) return
+    this._rainRippleTimer -= dt
+    let guard = 0 // chặn spike khi dt lớn (tab ẩn) — tối đa 8 giọt/frame
+    while (this._rainRippleTimer <= 0 && guard++ < 8) {
+      this._rainRippleTimer += 1 / rate
+      this._emitRainDrop()
     }
+    if (this._rainRippleTimer < 0) this._rainRippleTimer = 1 / rate // dt quá lớn → reset, không dồn nợ
+  }
+
+  // 1 giọt: chọn hồ ngẫu nhiên → điểm trong đĩa lòng hồ (world) → emitRipple biên độ nhỏ (giọt mưa).
+  private _emitRainDrop(): void {
+    const w = this._siteWaters[(Math.random() * this._siteWaters.length) | 0]
+    const c = w.surf.getMesh().getWorldPosition(this._tmpRipplePos)
+    const rad = Math.min(w.cfg.width, w.cfg.depth) / 2000 // mm→m, bán kính đĩa = nửa cạnh ngắn
+    const r = rad * Math.sqrt(Math.random())
+    const a = Math.random() * Math.PI * 2
+    const s = RAIN_DROP_STRENGTH * (0.7 + Math.random() * 0.6)
+    w.surf.emitRipple(c.x + Math.cos(a) * r, c.z + Math.sin(a) * r, s)
   }
 
   // ⚡ Sét (chỉ ⛈️ Bão): AmbientLight lazy lóe sáng, timer ngẫu nhiên giữa các cú, flash decay nhanh.
   // KHÔNG đụng hemi/sun (light riêng, intensity 0 khi không sét) → không phá _applySun.
   private _updateLightning(dt: number): void {
-    if (this._weather.mode !== 'storm') {
+    if (this._effectiveMode() !== 'storm') {
+      // chỉ bão MƯA có sét — bão tuyết (blizzard) KHÔNG sét
       if (this._lightning) this._lightning.intensity = 0
       return
     }
@@ -2845,14 +3072,43 @@ export class ArchPlanLab extends BaseWorld {
     try {
       const raw = localStorage.getItem('archplan:weather')
       if (!raw) return
-      const o = JSON.parse(raw) as Partial<{ mode: WeatherMode; heavy: number; sizeScale: number }>
-      if (o.mode === 'rain' || o.mode === 'snow' || o.mode === 'storm') this._weather.mode = o.mode
-      if (typeof o.heavy === 'number') this._weather.heavy = Math.max(0.05, Math.min(1, o.heavy))
-      if (typeof o.sizeScale === 'number')
-        this._weather.sizeScale = Math.max(0.3, Math.min(3, o.sizeScale))
+      const o = JSON.parse(raw) as Record<string, unknown>
+      this._loadWeatherBase(o)
+      this._loadWeatherScalars(o)
     } catch {
       /* JSON hỏng → giữ default none */
     }
+  }
+
+  // base + cờ bão. Migrate format CŨ (o.mode = rain/snow/storm/blizzard) → base + cờ. Early-return né complexity.
+  private _loadWeatherBase(o: Record<string, unknown>): void {
+    const w = this._weather
+    const legacy = o.mode
+    if (legacy === 'rain' || legacy === 'storm') {
+      w.base = 'rain'
+      w.rainStorm = legacy === 'storm'
+      return
+    }
+    if (legacy === 'snow' || legacy === 'blizzard') {
+      w.base = 'snow'
+      w.snowStorm = legacy === 'blizzard'
+      return
+    }
+    if (o.base === 'rain' || o.base === 'snow') w.base = o.base
+    if (typeof o.rainStorm === 'boolean') w.rainStorm = o.rainStorm
+    if (typeof o.snowStorm === 'boolean') w.snowStorm = o.snowStorm
+  }
+
+  // heavy/size + 5 tham số sóng (clamp đúng dải slider).
+  private _loadWeatherScalars(o: Record<string, unknown>): void {
+    const w = this._weather
+    if (typeof o.heavy === 'number') w.heavy = Math.max(0.05, Math.min(1, o.heavy))
+    if (typeof o.sizeScale === 'number') w.sizeScale = Math.max(0.3, Math.min(3, o.sizeScale))
+    if (typeof o.rippleRate === 'number') w.rippleRate = Math.max(0, Math.min(12, o.rippleRate))
+    if (typeof o.rippleAmp === 'number') w.rippleAmp = Math.max(0, Math.min(6, o.rippleAmp))
+    if (typeof o.rippleLife === 'number') w.rippleLife = Math.max(0.3, Math.min(8, o.rippleLife))
+    if (typeof o.rippleSpeed === 'number') w.rippleSpeed = Math.max(0, Math.min(3, o.rippleSpeed))
+    if (typeof o.rippleWave === 'number') w.rippleWave = Math.max(0.1, Math.min(1.5, o.rippleWave))
   }
 
   private _saveWeather(): void {
@@ -2886,7 +3142,29 @@ export class ArchPlanLab extends BaseWorld {
       // hàng slider có nhãn [tên 52px | thanh]
       `.ap-env-row{display:flex;align-items:center;gap:6px}` +
       `.ap-env-lab{flex:0 0 52px;font:500 11px/1.2 'Segoe UI',system-ui,sans-serif;color:#cfe0d8}` +
-      `.ap-env-row input[type=range]{flex:1;min-width:0;accent-color:#e0b860;cursor:pointer}`
+      `.ap-env-row input[type=range]{flex:1;min-width:0;accent-color:#e0b860;cursor:pointer}` +
+      // 🌦️ code3 tab Mưa/Tuyết — tab folder-style (Mưa xanh dương, Tuyết trắng-xám); panel tô nhạt theo loại
+      `.ap-wx-tabs{display:flex;gap:3px;margin-top:3px}` +
+      `.ap-envpre-float .ap-wx-tab{flex:1;width:auto;height:auto;padding:4px 6px;` +
+      `font:600 11px/1.2 'Segoe UI',system-ui,sans-serif;border-radius:6px 6px 0 0;` +
+      `border:1px solid rgba(180,200,188,.3);border-bottom:none;background:rgba(14,46,38,.6);color:#cfe0d8;opacity:.7}` +
+      `.ap-envpre-float .ap-wx-tab:nth-child(1){border-color:rgba(74,144,217,.5)}` +
+      `.ap-envpre-float .ap-wx-tab:nth-child(2){border-color:rgba(200,214,222,.5)}` +
+      `.ap-envpre-float .ap-wx-tab.ap-wx-on{opacity:1}` +
+      `.ap-envpre-float .ap-wx-tab:nth-child(1).ap-wx-on{background:rgba(40,86,140,.92);color:#dcebff;` +
+      `box-shadow:0 0 0 1px #4a90d9 inset}` +
+      `.ap-envpre-float .ap-wx-tab:nth-child(2).ap-wx-on{background:rgba(150,165,178,.55);color:#fff;` +
+      `box-shadow:0 0 0 1px #c8d6de inset}` +
+      `.ap-wx-panel{padding:6px;border-radius:0 0 7px 7px;border:1px solid rgba(180,200,188,.22);` +
+      `display:flex;flex-direction:column;gap:4px}` +
+      `.ap-wx-rain{background:rgba(40,86,140,.14)}` +
+      `.ap-wx-snow{background:rgba(190,205,215,.12)}` +
+      `.ap-wx-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}` +
+      `.ap-wx-toggle{display:flex;align-items:center;gap:4px;color:#cfe0d8;cursor:pointer;` +
+      `font:500 11px/1.2 'Segoe UI',system-ui,sans-serif}` +
+      `.ap-wx-toggle input{cursor:pointer;accent-color:#e0b860}` +
+      `.ap-env-subtitle{font:600 10px/1.3 'Segoe UI',system-ui,sans-serif;color:#9fc6e8;` +
+      `margin-top:3px;letter-spacing:.3px}`
     document.head.appendChild(s)
   }
 
@@ -3541,6 +3819,7 @@ export class ArchPlanLab extends BaseWorld {
       x.surf.getMesh().layers.set(WATER_REFLECT_LAYER)
       x.surf.excludeReflectionLayer(WATER_REFLECT_LAYER)
     }
+    this._applyRippleParams() // 🌊 đẩy tham số sóng (size/thời gian/tốc độ/bước sóng) vào hồ vừa dựng
     // active = pool tab đang chọn nếu còn render; không thì pool đầu (kể cả tắt, để GUI bind) → null nếu 0 pool.
     if (!this._activeWater || !this.site.waters.includes(this._activeWater)) {
       this._activeWater = this.site.waters.find((w) => w.kind === 'pool') ?? null
