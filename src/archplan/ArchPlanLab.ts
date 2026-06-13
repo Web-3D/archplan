@@ -827,6 +827,10 @@ export class ArchPlanLab extends BaseWorld {
   private _wxRainOn: HTMLInputElement | null = null
   private _wxSnowOn: HTMLInputElement | null = null
   private _wxTabs: Tabs | null = null
+  // 🧪 Demo va chạm: toggle (KHÔNG persist) — thi thoảng bắn 1 va chạm thử để XEM/chỉnh phản xạ tường (ping-pong)
+  // khi chưa có cá/vật nổ thật. Tắt mặc định.
+  private _demoImpact = false
+  private _demoTimer = 0
   // ⚡ Sét: CHỈ khi ⛈️ Bão. AmbientLight riêng lóe sáng (KHÔNG đụng _applySun). timer tới cú kế + flash decay.
   private _lightning: THREE.AmbientLight | null = null
   private _lightTimer = 0
@@ -1713,6 +1717,7 @@ export class ArchPlanLab extends BaseWorld {
     this._precip?.update(deltaTime) // 🌧️ mưa/tuyết rơi (vertex shader; chỉ ghi 1 uniform time)
     this._updateLightning(deltaTime) // ⚡ sét lóe (chỉ ⛈️ Bão)
     this._updateSnowAccum(deltaTime) // ❄️ tuyết đọng nền tích dần (chỉ mode snow)
+    this._updateDemoImpact(deltaTime) // 🧪 demo va chạm (nếu bật) — bắn thử để xem phản xạ tường
     this.css2dRenderer?.render(this.scene, this.camera)
     this.guard?.check()
     this.devHud?.update(this.renderer.info, deltaTime)
@@ -2760,11 +2765,16 @@ export class ArchPlanLab extends BaseWorld {
     const head = document.createElement('div')
     head.className = 'ap-wx-head'
     head.append(on.row, storm.row)
+    const demo = this._wxToggle('🧪 Demo va chạm', this._demoImpact, (v) => {
+      this._demoImpact = v
+      this._demoTimer = 0 // bật → nổ ngay phát đầu
+    })
     panel.append(
       head,
       this._wxHeavyRow().row,
       this._wxSizeRow().row,
-      this._envSubTitle('🌊 Va chạm (rời)')
+      this._envSubTitle('🌊 Va chạm (rời)'),
+      demo.row
     )
     this._buildRippleSliders(panel)
     panel.append(this._envSubTitle('☔ Mưa nền (phủ khắp)'))
@@ -2974,6 +2984,23 @@ export class ArchPlanLab extends BaseWorld {
       x.surf.setRainMaxR(w.rainMaxR)
       x.surf.setRainWaves(w.rainWaves)
     }
+  }
+
+  // 🧪 Demo va chạm: nếu bật, ~mỗi 1.2–2.7s bắn 1 va chạm thử để XEM phản xạ tường (ping-pong). Tự-chứa, KHÔNG persist.
+  private _updateDemoImpact(dt: number): void {
+    if (!this._demoImpact || this._siteWaters.length === 0) return
+    this._demoTimer -= dt
+    if (this._demoTimer > 0) return
+    this._demoTimer = 1.2 + Math.random() * 1.5
+    this._emitDemoImpact()
+  }
+
+  // 1 va chạm thử: hồ ngẫu nhiên, điểm trong 80% lòng (né sát tường) → emitImpact (reflect chỉ khi hồ CHỮ NHẬT).
+  private _emitDemoImpact(): void {
+    const x = this._siteWaters[(Math.random() * this._siteWaters.length) | 0]
+    const lx = (Math.random() * 2 - 1) * (x.cfg.width / 2000) * 0.8
+    const lz = (Math.random() * 2 - 1) * (x.cfg.depth / 2000) * 0.8
+    x.surf.emitImpact(lx, lz, 0.7, x.cfg.shape === 'rect')
   }
 
   private _envSkyButtons(): HTMLElement {
