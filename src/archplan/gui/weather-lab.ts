@@ -63,7 +63,8 @@ function buildParams(host: Element | null, pv: WeatherPreview): void {
     sliderRow('Cỡ hạt', 0.5, 8, 0.1, 1.6, (v) => pv.tune('size', (p) => p.setSize(v))),
     sliderRow('Độ mờ', 0, 1, 0.02, 0.35, (v) => pv.tune('opacity', (p) => p.setOpacity(v))),
     sliderRow('Gió ngang', -8, 8, 0.2, 2.4, (v) => pv.tune('wind', (p) => p.setWind(v, 0))),
-    sliderRow('Drift lắc', 0, 2, 0.05, 0, (v) => pv.tune('drift', (p) => p.setDrift(v)))
+    sliderRow('Drift lắc', 0, 2, 0.05, 0, (v) => pv.tune('drift', (p) => p.setDrift(v))),
+    sliderRow('Vệt mưa (m)', 0.1, 3, 0.05, 0.9, (v) => pv.tune('streak', (p) => p.setStreak(v)))
   )
   host?.replaceChildren(area)
 }
@@ -85,15 +86,15 @@ function buildDoc(host: Element | null): void {
     ],
     [
       'Mưa↔Tuyết',
-      'Phân biệt = tốc + drift + cỡ + màu. Mưa nghiêng theo gió; tuyết drift sin lắc lư.',
+      'Mưa = LineSegments (VỆT streak dọc quỹ đạo, nghiêng gió); tuyết = Points (chấm, drift sin lắc, cỡ theo distance).',
     ],
     [
-      'Giới hạn A',
-      'Mưa = chấm Points (CHƯA streak kéo dài — Points không stretch → Phase C). Chưa: tuyết đọng mái, mưa gợn hồ, sét.',
+      'Vệt mưa (C)',
+      'Đuôi vệt lấy vị trí tại tFall−streak/height → điểm cao hơn streak(m) dọc CHÍNH quỹ đạo → nối liền, 0 thêm CPU.',
     ],
     [
-      'Phase B',
-      'Ráp archplan: 1 instance/scene, preset 🌧️❄️⛈️ liên động overcast SkyGradient (bão = overcast 1 + mưa dày + gió mạnh).',
+      'Phase C',
+      'Sét flash = AmbientLight lóe (tầng archplan, chỉ ⛈️ Bão). Chưa: tuyết đọng mái, mưa gợn mặt hồ (đụng material/WaterSurface).',
     ],
   ]
   const wrap = document.createElement('div')
