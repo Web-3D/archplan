@@ -146,6 +146,7 @@ import type { WaterSurface } from 'threejs-modules/components/WaterSurface'
 import type { WoodSidingStrip } from 'threejs-modules/components/WoodSidingStrip'
 import type { WoodSidingWall } from 'threejs-modules/components/WoodSidingWall'
 import { Precipitation, type PrecipitationOptions } from 'threejs-modules/effects/Precipitation' // 🌧️ mưa/tuyết field — instance scene chính
+import { SnowCover } from 'threejs-modules/effects/SnowCover' // ❄️ tuyết đọng nền — overlay accum (Phase C2)
 import { AsphaltGround } from 'threejs-modules/shaders/ground/AsphaltGround'
 import { PhotoGround, type PhotoGroundMaps } from 'threejs-modules/shaders/ground/PhotoGround' // 🌱 ground texture (+ 🪵 slab walnut: sàn ngang)
 import {
@@ -756,6 +757,9 @@ export class ArchPlanLab extends BaseWorld {
   private _lightning: THREE.AmbientLight | null = null
   private _lightTimer = 0
   private _lightFlash = 0
+  // ❄️ Tuyết đọng nền (mode snow): overlay accum ramp dần trong onUpdate (tuyết phủ ~20s).
+  private _snowCover: SnowCover | null = null
+  private _snowAccum = 0
   private _envFillSlider: HTMLInputElement | null = null // ref để preset sky/storm sync ngược slider
   private _envOverSlider: HTMLInputElement | null = null
   private _fishMarker: THREE.Line | null = null // 🐟 tia trục-Y flash vị trí bầy (cá chìm dưới nền — cần mốc)
@@ -1672,6 +1676,7 @@ export class ArchPlanLab extends BaseWorld {
     for (const f of this._siteFish) f.fish.update(deltaTime) // 🐟 vẫy (uniform) + dời đàn (≤40 matrix, rẻ)
     this._precip?.update(deltaTime) // 🌧️ mưa/tuyết rơi (vertex shader; chỉ ghi 1 uniform time)
     this._updateLightning(deltaTime) // ⚡ sét lóe (chỉ ⛈️ Bão)
+    this._updateSnowAccum(deltaTime) // ❄️ tuyết đọng nền tích dần (chỉ mode snow)
     this.css2dRenderer?.render(this.scene, this.camera)
     this.guard?.check()
     this.devHud?.update(this.renderer.info, deltaTime)
@@ -1814,6 +1819,8 @@ export class ArchPlanLab extends BaseWorld {
       this.scene.remove(this._lightning) // ⚡ AmbientLight sét (không có GPU resource cần dispose)
       this._lightning = null
     }
+    this._snowCover?.dispose() // ❄️ tuyết đọng nền — gỡ mesh + geometry + material
+    this._snowCover = null
   }
 
   // Dispose tài nguyên scene tĩnh (không rebuild mỗi frame) + wall material cache.
@@ -2746,12 +2753,36 @@ export class ArchPlanLab extends BaseWorld {
     this._precip?.dispose()
     this._precip = null
     this._syncWeatherBtns()
+    this._applySnowCover() // ❄️ tuyết đọng nền theo mode (tạo/gỡ overlay)
     const m = this._weather.mode
     if (m === 'none') return
     this._precip = new Precipitation(PRECIP_OPTS[m])
     this._precip.setOpacity(this._weather.heavy)
     this._precip.setSize(PRECIP_BASE_SIZE[m] * this._weather.sizeScale) // cỡ gốc mode × hệ số slider
     this.scene.add(this._precip.getObject())
+  }
+
+  // ❄️ Tuyết đọng nền: overlay CHỈ khi mode='snow'. Tạo mới = accum 0 (ramp lên dần ở onUpdate). Khác → gỡ.
+  private _applySnowCover(): void {
+    if (this._weather.mode !== 'snow') {
+      this._snowCover?.dispose()
+      this._snowCover = null
+      this._snowAccum = 0
+      return
+    }
+    if (!this._snowCover) {
+      this._snowCover = new SnowCover({ size: 80, groundY: 0 }) // phủ lô editor 80×80
+      this.scene.add(this._snowCover.getMesh())
+      this._snowAccum = 0
+      this._snowCover.setAccum(0)
+    }
+  }
+
+  // Ramp tuyết đọng dần (~20s phủ kín) — LIVE uniform, dừng khi đầy. Gọi mỗi frame nếu đang snow.
+  private _updateSnowAccum(dt: number): void {
+    if (!this._snowCover || this._snowAccum >= 1) return
+    this._snowAccum = Math.min(1, this._snowAccum + dt * 0.05)
+    this._snowCover.setAccum(this._snowAccum)
   }
 
   private _syncWeatherBtns(): void {
