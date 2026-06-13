@@ -2777,7 +2777,7 @@ export class ArchPlanLab extends BaseWorld {
     panel.append(head, this._wxHeavyRow().row, this._wxSizeRow().row)
   }
 
-  // 5 slider 🌊 Sóng hồ: Tần số (rate, CPU) · Size/Thời gian/Tốc độ lan/Bước sóng (uniform WaterSurface, live mọi hồ).
+  // 5 slider 🌊 Sóng hồ: Tần suất (rate xuất hiện vòng, CPU) · Size/Thời gian/Tốc độ lan/Bước sóng (uniform, live mọi hồ).
   private _buildRippleSliders(panel: HTMLElement): void {
     const w = this._weather
     const mk = (
@@ -2791,7 +2791,7 @@ export class ArchPlanLab extends BaseWorld {
         .row
     const apply = (): void => this._applyRippleParams()
     panel.append(
-      mk('Tần số', 0, 12, w.rippleRate, (v) => {
+      mk('Tần suất', 0, 24, w.rippleRate, (v) => {
         w.rippleRate = v
       }),
       mk('Size sóng', 0, 6, w.rippleAmp, (v) => {
@@ -3104,7 +3104,7 @@ export class ArchPlanLab extends BaseWorld {
     const w = this._weather
     if (typeof o.heavy === 'number') w.heavy = Math.max(0.05, Math.min(1, o.heavy))
     if (typeof o.sizeScale === 'number') w.sizeScale = Math.max(0.3, Math.min(3, o.sizeScale))
-    if (typeof o.rippleRate === 'number') w.rippleRate = Math.max(0, Math.min(12, o.rippleRate))
+    if (typeof o.rippleRate === 'number') w.rippleRate = Math.max(0, Math.min(24, o.rippleRate))
     if (typeof o.rippleAmp === 'number') w.rippleAmp = Math.max(0, Math.min(6, o.rippleAmp))
     if (typeof o.rippleLife === 'number') w.rippleLife = Math.max(0.3, Math.min(8, o.rippleLife))
     if (typeof o.rippleSpeed === 'number') w.rippleSpeed = Math.max(0, Math.min(3, o.rippleSpeed))
