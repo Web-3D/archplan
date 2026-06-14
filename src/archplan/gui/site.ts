@@ -2727,41 +2727,78 @@ function buildLampPane(
   return pane
 }
 
-// 💡 Sub-tab "Đèn" → hàng tab instance Đ1/Đ2… + ＋ (mirror buildBridgeDomain) trên site.lamps.
-function buildLampDomain(ctx: APGuiCtx): { panel: HTMLElement; dispose: () => void } {
+// Class folder-style 2 cấp đèn (gold/brass — CSS ap-lamp-*). Tách const: né prettier expand inline + gọn hàm.
+const LAMP_ITAB_CLS = {
+  bar: 'ap-tab-bar ap-lamp-itabs',
+  tab: 'ap-tab-btn',
+  panel: 'ap-lamp-isub',
+  active: 'ap-tab-active',
+}
+const LAMP_TTAB_CLS = {
+  bar: 'ap-tab-bar ap-lamp-ttabs',
+  tab: 'ap-tab-btn',
+  panel: 'ap-lamp-tsub',
+  active: 'ap-tab-active',
+}
+
+// Nút ＋ thêm 1 đèn: push makeLamp (stagger X né chồng) → rebuild focus đèn mới → applySite.
+function addLampButton(ctx: APGuiCtx, rebuild: (focus?: number) => void): HTMLElement {
+  return addInstanceButton('Đèn', () => {
+    const last = ctx.site.lamps[ctx.site.lamps.length - 1]
+    const l = makeLamp()
+    if (last) l.x = last.x + 3000 // stagger né chồng đèn cũ
+    ctx.site.lamps.push(l)
+    rebuild(ctx.site.lamps.length - 1)
+    ctx.applySite(true)
+  })
+}
+
+// 💡 Hệ đèn — Tabs LỒNG folder-style gold/brass (code3): cấp NGOÀI = LOẠI đèn (🏮 Trụ sân; chừa 🔆 Hắt
+// tường cho Phase 2 building-lights → thêm 1 item), cấp TRONG = instance Đ1/Đ2/＋ trên site.lamps.
+// navigateToLamp(i) = chọn loại Trụ sân + instance i (code1 Focus: click đèn 3D → nhảy đúng tab).
+function buildLampDomain(ctx: APGuiCtx): {
+  panel: HTMLElement
+  dispose: () => void
+  navigateToLamp: (idx: number) => void
+} {
   const host = document.createElement('div')
-  host.classList.add('ap-fence-domain') // mượn tông nâu
-  let tabs: Tabs | null = null
+  host.classList.add('ap-lamp-domain') // 🟡 scope gold/brass
+  const typePane = document.createElement('div') // cấp NGOÀI: panel loại "Trụ sân" (chứa instance tabs)
+  host.appendChild(typePane)
+  let itabs: Tabs | null = null
+  // cấp TRONG — instance Đ1/Đ2/＋ (dispose+dựng lại mỗi thêm/xoá, mirror Cầu)
   const rebuild = (focus = 0): void => {
-    tabs?.dispose()
-    host.replaceChildren()
+    itabs?.dispose()
+    typePane.replaceChildren()
     const items: TabItem[] = ctx.site.lamps.map((l, i) => {
       const pane = buildLampPane(ctx, l, i, rebuild)
-      host.appendChild(pane)
-      return { label: `Đ${i + 1}`, panel: pane, title: `Đèn ${i + 1}` }
+      typePane.appendChild(pane)
+      return { label: `Đ${i + 1}`, panel: pane, title: `Trụ đèn ${i + 1}` }
     })
-    const addBtn = addInstanceButton('Đèn', () => {
-      const last = ctx.site.lamps[ctx.site.lamps.length - 1]
-      const l = makeLamp()
-      if (last) l.x = last.x + 3000 // stagger né chồng đèn cũ
-      ctx.site.lamps.push(l)
-      rebuild(ctx.site.lamps.length - 1)
-      ctx.applySite(true)
-    })
-    tabs = new Tabs(host, items, {
-      classes: {
-        bar: 'ap-tab-bar ap-fence-itabs',
-        tab: 'ap-tab-btn',
-        panel: 'ap-fence-isub',
-        active: 'ap-tab-active',
-      },
+    const opts = {
+      classes: LAMP_ITAB_CLS,
       injectCss: false,
-      addEl: addBtn,
+      addEl: addLampButton(ctx, rebuild),
       initial: focus,
-    })
+    }
+    itabs = new Tabs(typePane, items, opts)
   }
   rebuild()
-  return { panel: host, dispose: (): void => tabs?.dispose() }
+  // cấp NGOÀI — LOẠI đèn (hiện chỉ 🏮 Trụ sân; thêm loại Phase 2 = thêm item + pane riêng)
+  const titem = [{ label: '🏮 Trụ sân', panel: typePane, title: 'Đèn trụ sân vườn' }]
+  const otabs = new Tabs(host, titem, { classes: LAMP_TTAB_CLS, injectCss: false })
+  return {
+    panel: host,
+    dispose: (): void => {
+      itabs?.dispose()
+      otabs.dispose()
+    },
+    // 👆 Click đèn 3D → chọn loại Trụ sân + tab instance Đ (clamp khi đèn vừa bị xoá).
+    navigateToLamp: (idx: number): void => {
+      otabs.select(0, { trusted: false })
+      itabs?.select(Math.max(0, Math.min(idx, ctx.site.lamps.length - 1)), { trusted: false })
+    },
+  }
 }
 
 // Nút ✕ xoá 1 instance hồ (hàng riêng, canh phải).
@@ -3394,6 +3431,48 @@ interface SitePanel {
   navigateToFence: (idx: number) => void
   navigateToGroundLayer: (idx: number) => void
   navigateToBridge: (idx: number) => void // 🌉 click cầu 3D → sub-tab Cầu ▸ tab C idx
+  navigateToLamp: (idx: number) => void // 💡 click đèn 3D → sub-tab Đèn ▸ loại Trụ sân ▸ tab Đ idx
+}
+
+// Gom 5 hàm navigate (click 3D → chọn sub-tab + ủy quyền domain mở instance). Tách khỏi setupSitePanel (max-lines).
+function siteNav(
+  tabs: Tabs,
+  ground: ReturnType<typeof buildGroundDomain>,
+  fence: ReturnType<typeof buildFenceDomain>,
+  water: ReturnType<typeof buildWaterDomain>,
+  bridge: ReturnType<typeof buildBridgeDomain>,
+  lamp: ReturnType<typeof buildLampDomain>
+): Pick<
+  SitePanel,
+  | 'navigateToWater'
+  | 'navigateToFence'
+  | 'navigateToGroundLayer'
+  | 'navigateToBridge'
+  | 'navigateToLamp'
+> {
+  return {
+    // Click hồ 3D → sub-tab Water (3) → water domain mở type+instance tab của cfg.
+    navigateToWater: (cfg: WaterConfig): boolean => {
+      tabs.select(3, { trusted: false })
+      return water.navigateToWater(cfg)
+    },
+    navigateToFence: (idx: number): void => {
+      tabs.select(1, { trusted: false }) // sub-tab Fence
+      fence.navigateToFence(idx)
+    },
+    navigateToGroundLayer: (idx: number): void => {
+      tabs.select(0, { trusted: false }) // sub-tab Ground
+      ground.navigateToLayer(idx)
+    },
+    navigateToBridge: (idx: number): void => {
+      tabs.select(4, { trusted: false }) // sub-tab Cầu
+      bridge.navigateToBridge(idx)
+    },
+    navigateToLamp: (idx: number): void => {
+      tabs.select(5, { trusted: false }) // sub-tab 💡 Đèn → Trụ sân ▸ Đn
+      lamp.navigateToLamp(idx)
+    },
+  }
 }
 
 export function setupSitePanel(ctx: APGuiCtx, container: Element | null): SitePanel {
@@ -3428,25 +3507,6 @@ export function setupSitePanel(ctx: APGuiCtx, container: Element | null): SitePa
       tabs.dispose()
       for (const d of [ground, fence, garden, water, bridge, lamp]) d.dispose()
     },
-    // Click hồ 3D → mở sub-tab "Water" (index 3) rồi ủy quyền water domain mở type+instance tab của cfg.
-    navigateToWater: (cfg: WaterConfig): boolean => {
-      tabs.select(3, { trusted: false })
-      return water.navigateToWater(cfg)
-    },
-    // Click rào 3D → mở sub-tab "Fence" (index 1) + tab lớp idx.
-    navigateToFence: (idx: number): void => {
-      tabs.select(1, { trusted: false })
-      fence.navigateToFence(idx)
-    },
-    // Click tầng ground 3D → mở sub-tab "Ground" (index 0) + tab Gn của layer idx.
-    navigateToGroundLayer: (idx: number): void => {
-      tabs.select(0, { trusted: false })
-      ground.navigateToLayer(idx)
-    },
-    // Click cầu 3D → mở sub-tab "Cầu" (index 4) + tab C idx.
-    navigateToBridge: (idx: number): void => {
-      tabs.select(4, { trusted: false })
-      bridge.navigateToBridge(idx)
-    },
+    ...siteNav(tabs, ground, fence, water, bridge, lamp), // 5 navigate click-3D → sub-tab + instance
   }
 }

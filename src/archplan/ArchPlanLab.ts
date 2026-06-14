@@ -184,6 +184,7 @@ import {
   type GroundMaterialKey,
   type GroundMixParams,
   isGroundTexKey,
+  type LampConfig,
   renderPuddles,
   renderWaters,
   type SiteState,
@@ -520,6 +521,7 @@ export class ArchPlanLab extends BaseWorld {
   private _siteNavigate: ((cfg: WaterConfig) => boolean) | null = null // click hồ 3D (kể cả cá → hồ chứa) → nhảy GUI tới tab hồ
   private _siteNavigateFence: ((idx: number) => void) | null = null // 🧱 click rào 3D → nhảy GUI tới lớp rào idx
   private _siteNavigateBridge: ((idx: number) => void) | null = null // 🌉 click cầu 3D → nhảy GUI tới tab C idx
+  private _siteNavigateLamp: ((idx: number) => void) | null = null // 💡 click đèn 3D → nhảy GUI Đèn▸Trụ sân▸Đn
   private _siteNavigateLayer: ((idx: number) => void) | null = null // 🟫 click tầng ground 3D → nhảy GUI Ground▸Gn
   private _activeCutIdx = -1 // 🟫 layer cut đang active (focus tab / click / kéo) → mảng cut HIỆN XÁM; -1 = ẩn hết
   private _activeLayerIdx = -1 // 🟫 layer ground đang focus (add HOẶC cut) → GroundTool hiện tay-cầm nắn (free); -1 = không
@@ -797,6 +799,9 @@ export class ArchPlanLab extends BaseWorld {
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
   private _pendingWaterReveal = false // 💧 true = chờ texture nền load xong để AUTO-bật mặt nước (_tickWaterReveal)
+  // 💧 đổ-đầy: hồ vừa reveal → nâng mặt nước từ ĐÁY basin lên baseY (ease-out) + sóng-sánh tắt dần. {mesh,fromY,toY,amp,t}.
+  private _waterFills: { mesh: THREE.Mesh; fromY: number; toY: number; amp: number; t: number }[] =
+    []
   private _siteFish: { cfg: FishSchool; water: WaterConfig; fish: PondFish }[] = [] // 🐟 bầy cá CON của pond — update(dt) trong onUpdate
   private _predation: PondPredation | null = null // 🦈 coordinator săn mồi (tier cao đớp tier thấp khi Đói vùng vàng)
   // 🌧️ Thời tiết = thuộc tính MÔI TRƯỜNG (như sun) — persist riêng localStorage 'archplan:weather',
@@ -1332,6 +1337,7 @@ export class ArchPlanLab extends BaseWorld {
     if (this._tryClickBridge(e)) return // 🌉 cầu TRƯỚC hồ — cầu bắc TRÊN hồ, click cầu phải trúng cầu (không hồ)
     if (this.waterTool?.tryClick(e)) return // 💧 click trúng hồ → trỏ GUI hồ
     if (this._tryClickFence(e)) return // 🧱 click trúng rào → trỏ GUI Fence
+    if (this._tryClickLamp(e)) return // 💡 click trúng đèn → trỏ GUI Đèn▸Trụ sân▸Đn
     if (this._tryClickLayer(e)) return // 🟫 click trúng tầng ground → trỏ GUI Ground▸Gn
     this.manipulate?.clickFocus(e) // building element → trỏ folder tương ứng
   }
@@ -1539,6 +1545,37 @@ export class ArchPlanLab extends BaseWorld {
   private _navigateToBridge(idx: number): void {
     this.drawerTabs?.select(1, { trusted: false }) // Building|Ground|Lab → Ground
     this._siteNavigateBridge?.(idx)
+  }
+
+  // 💡 Đèn của object trúng (đi ngược parent đọc userData.lampRef). -1 nếu không thuộc đèn. lamps lọc enabled
+  // khi render ⇒ so REF (≠ index render) → indexOf ra đúng vị trí gốc trong site.lamps (mirror _bridgeIdxOf).
+  private _lampIdxOf(obj: THREE.Object3D | null): number {
+    let o = obj
+    while (o) {
+      const ref = o.userData.lampRef as LampConfig | undefined
+      if (ref) return this.site.lamps.indexOf(ref)
+      o = o.parent
+    }
+    return -1
+  }
+
+  // 👆 Click thường trúng ĐÈN (vỏ trong siteGroup, gần hơn building pick) → trỏ GUI Đèn. Trả false → nhường.
+  private _tryClickLamp(e: PointerEvent): boolean {
+    if (!this.site.show || this.site.lamps.length === 0) return false
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const hits = this._ray.intersectObjects(this.siteGroup.children, true)
+    const hit = hits.find((h) => this._lampIdxOf(h.object) >= 0)
+    if (!hit) return false
+    const pHit = this._ray.intersectObjects(this.pickGroup.children, false)[0]
+    if (pHit && pHit.distance < hit.distance) return false // building element gần hơn → nhường
+    this._navigateToLamp(this._lampIdxOf(hit.object))
+    return true
+  }
+
+  // 💡 Click trúng đèn 3D → mở GUI: drawer "Ground" (idx1) → sub-tab "💡 Đèn" → Trụ sân ▸ tab Đ idx.
+  private _navigateToLamp(idx: number): void {
+    this.drawerTabs?.select(1, { trusted: false }) // Building|Ground|Lab → Ground
+    this._siteNavigateLamp?.(idx)
   }
 
   // 🟫 Click trúng TẦNG ground (G1+, mesh có groundLayerIdx) GẦN HƠN building pick → trỏ GUI Ground▸Gn. Trả
@@ -1764,8 +1801,40 @@ export class ArchPlanLab extends BaseWorld {
   private _revealAutoWater(): void {
     this._pendingWaterReveal = false
     for (const x of this._siteWaters) {
-      if (x.cfg.surfaceOn) x.surf.getMesh().visible = true
+      if (!x.cfg.surfaceOn) continue
+      const mesh = x.surf.getMesh()
+      mesh.visible = true
+      this._startWaterFill(mesh, x.cfg)
     }
+  }
+
+  // 💧 Khởi động đổ-đầy 1 hồ: pond/pool CÓ basin (vách che) → hạ mesh xuống gần đáy rồi để _tickWaterFill nâng lên.
+  // puddle KHÔNG basin → hạ xuống = lõm xuyên nền xấu → bỏ qua, hiện thẳng tại baseY. baseY = mesh.position.y đã dựng.
+  private _startWaterFill(mesh: THREE.Mesh, cfg: WaterConfig): void {
+    if (cfg.kind === 'puddle') return
+    const toY = mesh.position.y // mặt nước đầy (baseY ≈ rimY-3cm)
+    const drop = Math.max(0.05, cfg.depthY / 1000 - 0.03) // cột nước đáy→mặt; min 5cm cho thấy rõ
+    const amp = Math.min(0.015, drop * 0.05) // biên sóng-sánh ≤1.5cm < khe 3cm tới vành → KHÔNG tràn (mọi kích cỡ)
+    mesh.position.y = toY - drop
+    this._waterFills.push({ mesh, fromY: toY - drop, toY, amp, t: 0 })
+  }
+
+  // 💧 Mỗi frame: nâng mực nước (ease-out cubic) + bob sóng-sánh tắt dần; xong (t≥dur) snap đúng baseY rồi loại.
+  private _tickWaterFill(dt: number): void {
+    if (this._waterFills.length === 0) return
+    const dur = 10 // giây — đầy + lặng (tunable)
+    this._waterFills = this._waterFills.filter((f) => {
+      f.t += dt
+      if (f.t >= dur) {
+        f.mesh.position.y = f.toY
+        return false
+      }
+      const x = f.t / dur
+      const rise = x // tuyến tính: dâng CHẬM ĐỀU (tốc độ không đổi suốt dur)
+      const bob = f.amp * Math.exp(-6 * x) * Math.sin(Math.PI * 3 * x) // sóng-sánh: dao động tắt, =0 ở x=0&1 → đáp đúng
+      f.mesh.position.y = f.fromY + (f.toY - f.fromY) * rise + bob
+      return true
+    })
   }
 
   protected onUpdate(time: number, deltaTime: number): void {
@@ -1773,6 +1842,7 @@ export class ArchPlanLab extends BaseWorld {
     this._applyRotate()
     this.controls?.update()
     this._tickWaterReveal() // 💧 texture nền xong → AUTO bật mặt nước (tự khớp thời-gian-load)
+    this._tickWaterFill(deltaTime) // 💧 đổ-đầy: nâng mực nước từ đáy + sóng-sánh tắt dần (sau reveal)
     for (const s of this.siteShaders) s.setTime?.(time) // 🌿 gió lùa cỏ (GrassGround) chạy theo elapsed
     for (const f of this._siteFish) f.fish.update(deltaTime) // 🐟 vẫy (uniform) + dời đàn (≤64 matrix, rẻ)
     this._predation?.update(deltaTime) // 🦈 săn mồi: tier cao lao đớp tier thấp ở gần (CHỈ khi Đói vùng vàng)
@@ -2663,6 +2733,7 @@ export class ArchPlanLab extends BaseWorld {
     this._siteNavigate = site.navigateToWater // refresh mỗi _rebuildGUI (panel dựng lại) → luôn trỏ panel hiện tại
     this._siteNavigateFence = site.navigateToFence // 🧱 click rào 3D → sub-tab Fence
     this._siteNavigateBridge = site.navigateToBridge // 🌉 click cầu 3D → sub-tab Cầu▸Cn
+    this._siteNavigateLamp = site.navigateToLamp // 💡 click đèn 3D → sub-tab Đèn▸Trụ sân▸Đn
     this._siteNavigateLayer = site.navigateToGroundLayer // 🟫 click tầng ground 3D → sub-tab Ground▸Gn
     this.drawerPanels = [site.panel] // chỉ Ground (Lab ở float riêng); gỡ khi teardown
     this._buildDrawerTabs(drawerBody, site.panel)
@@ -3745,6 +3816,7 @@ export class ArchPlanLab extends BaseWorld {
     this._siteNavigate = null // panel cũ gỡ → bỏ ref navigate (gắn lại ở _buildLeftTools kế tiếp)
     this._siteNavigateFence = null
     this._siteNavigateBridge = null
+    this._siteNavigateLamp = null
     this._siteNavigateLayer = null
     // tab con cỏ (Lá đơn|Bụi cỏ + Số đo|Độ cong|Bóng đổ) + Garden Tabs do site.dispose() lo; Lab panel = preview-only (no Tabs)
     this.drawerTabs?.dispose() // gỡ tab bar drawer (KHÔNG đụng panel — caller sở hữu)
@@ -4086,6 +4158,7 @@ export class ArchPlanLab extends BaseWorld {
     // dựng → ghép lại để drag/tune/handle nhắm đúng instance (gồm cả puddle).
     const wcfgs = [...renderWaters(this.site), ...renderPuddles(this.site)]
     this._siteWaters = h.waters.map((surf, i) => ({ cfg: wcfgs[i], surf }))
+    this._waterFills = [] // 💧 mesh cũ sắp dispose → bỏ fill đang chạy (ref stale); reveal sau dựng ở baseY thẳng
     this._siteFish = h.fish // 🐟 dispose theo siteShaders (clearSite); update(dt) mỗi frame onUpdate
     this._assignLampPool(h.lampTips) // 💡 gán pool real-light vào N đèn gần nhất + áp nightFactor hiện tại
     // 🦈 coordinator săn mồi: nhóm đàn theo HỒ (pond=water ref) → tier cao đớp tier thấp ở gần (khi Đói vàng).
@@ -4753,6 +4826,7 @@ export class ArchPlanLab extends BaseWorld {
     // 🌿 KHÔNG đụng _siteGrass ở đây: cỏ sống trong _grassGroup BỀN, dispose/dựng lại do _syncGrass quản
     // theo chữ ký → giữ nguyên scatter qua các rebuild không-liên-quan-cỏ (đây là cốt lõi né lag).
     this._siteWaters = [] // dispose thật do siteShaders lo (mỗi WaterSurface trong đó); _activeWater giữ (cfg ref)
+    this._waterFills = [] // 💧 mesh fill về 0 (về dispose) → bỏ ref stale
     this._siteFish = [] // 🐟 PondFish cũng trong siteShaders (dispose vòng trên)
     this._predation = null // 🦈 coordinator dựng lại mỗi rebuild (không giữ tài nguyên GPU)
     // 🪨 path-zone StoneScatter cũng trong siteShaders (đã dispose vòng trên) — KHÔNG track riêng (sống trong groundLayers)

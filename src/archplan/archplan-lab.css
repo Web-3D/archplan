@@ -1414,6 +1414,73 @@
   color: #c9a877; /* nâu nhạt */
   opacity: 0.75;
 }
+/* ── 💡 Hệ đèn: bộ màu GOLD/BRASS (code3 NgQuan 2026-06-15). LỒNG 2 CẤP folder-style: domain (brass tối)
+   ▸ Loại "🏮 Trụ sân" bg-2 ▸ instance Đ1/Đ2 bg-3 (sáng dần → thấy lồng). DÍNH: tab active = bg panel nó
+   MỞ RA (tab loại = tsub · tab Đ = isub). mirror .ap-fence-domain, gam vàng-đồng hợp chủ đề đèn. */
+.ap-lamp-domain {
+  background: #241a09; /* nền domain — brass tối nhất */
+  padding: 4px;
+}
+/* cấp NGOÀI — LOẠI đèn (🏮 Trụ sân) */
+.ap-lamp-ttabs {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 0; /* dính tsub */
+  padding-left: 2px;
+  flex-wrap: wrap;
+}
+.ap-lamp-ttabs > .ap-tab-btn {
+  flex: 0 0 auto;
+  min-width: 46px;
+  padding: 0 10px;
+  height: 19px;
+  font-size: 8px;
+  background: rgba(58, 44, 18, 0.5); /* inactive chìm vào domain */
+  border-color: rgba(200, 160, 60, 0.3);
+  color: #e8c878; /* vàng đồng nhạt */
+}
+.ap-lamp-ttabs > .ap-tab-btn.ap-tab-active {
+  background: #3a2c12; /* = tsub → dính liền */
+  border-color: rgba(216, 176, 76, 0.6);
+  border-bottom-color: transparent;
+  color: #ffe9b8; /* kem vàng */
+}
+.ap-lamp-tsub {
+  background: #3a2c12; /* panel loại — brass bg-2 */
+  padding: 5px;
+}
+/* cấp TRONG — instance Đ1/Đ2 (sáng hơn 1 bậc) */
+.ap-lamp-itabs {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 0; /* dính isub */
+  padding-left: 2px;
+  flex-wrap: wrap;
+}
+.ap-lamp-itabs > .ap-tab-btn {
+  flex: 0 0 auto;
+  min-width: 30px;
+  padding: 0 9px;
+  height: 18px;
+  font-size: 8px;
+  background: rgba(80, 64, 28, 0.5);
+  border-color: rgba(216, 176, 76, 0.3);
+  color: #f0d49a;
+}
+.ap-lamp-itabs > .ap-tab-btn.ap-tab-active {
+  background: #50401c; /* = isub → dính */
+  border-color: rgba(230, 196, 110, 0.65);
+  border-bottom-color: transparent;
+  color: #fff2d6; /* kem sáng */
+}
+.ap-lamp-itabs > .ap-tab-add {
+  flex: 0 0 auto;
+  min-width: 22px;
+}
+.ap-lamp-isub {
+  background: #50401c; /* instance pane — brass bg-3 */
+  padding: 6px;
+}
 /* ── 🌿 Garden domain: bộ màu CURATED (OKLCH green ramp, NgQuan 2026-06-05) thay tông nâu site. LỒNG CẤP
    bg-1→bg-4 (mỗi BẬC sáng dần → thấy lồng): domain bg-1 ▸ L2 Grass|Tree bg-2 ▸ L3 Lá đơn|Bụi cỏ bg-3 ▸
    L4 Số đo|Độ cong|Bóng đổ bg-4. accent vàng-chanh = thumb/checkbox; text kem-xanh. (mirror .ap-water-domain) */
