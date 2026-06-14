@@ -223,6 +223,8 @@ import {
   disposeSurfaceTextureSet,
   loadSurfaceTextureSet,
   type SurfaceTextureSpec,
+  textureIdleMs,
+  texturesPending,
 } from './scene/texture-set' // 🌱 loader texture set ground theo PROTOCOL (KTX2/JPG theo đuôi file)
 import { DesignStore } from './state/persistence' // I/O save/load/autosave/export — tách monolith
 import {
@@ -794,6 +796,7 @@ export class ArchPlanLab extends BaseWorld {
   // 💧 Hồ ĐANG SỐNG (đa-instance): cfg↔surf zip theo renderWaters(site). _activeWater = pool của tab đang
   // chọn → 3D drag/handle/tune nhắm nó (kéo thân hồ khác cũng set lại active). null khi chưa có pool nào.
   private _siteWaters: { cfg: WaterConfig; surf: WaterSurface }[] = []
+  private _pendingWaterReveal = false // 💧 true = chờ texture nền load xong để AUTO-bật mặt nước (_tickWaterReveal)
   private _siteFish: { cfg: FishSchool; water: WaterConfig; fish: PondFish }[] = [] // 🐟 bầy cá CON của pond — update(dt) trong onUpdate
   private _predation: PondPredation | null = null // 🦈 coordinator săn mồi (tier cao đớp tier thấp khi Đói vùng vàng)
   // 🌧️ Thời tiết = thuộc tính MÔI TRƯỜNG (như sun) — persist riêng localStorage 'archplan:weather',
@@ -1724,10 +1727,44 @@ export class ArchPlanLab extends BaseWorld {
     this._setupUtilTray() // 🧰 khay tiện ích góc trên-trái — shell bền, TRƯỚC _setupLabFloat (nút 🧪 gắn vào)
     this._setupLabFloat() // 🧪 Lab = phần RIÊNG (float persistent) — tách khỏi drawer, Factory phát triển
     this._setupGUI()
-    this._buildScene()
+    this._buildSceneInitial() // 💧 dựng + HOÃN bật mặt nước (compile/RTT off critical path → load nhanh)
     if (import.meta.env.DEV) {
       this.guard = new RuntimeGuard(this.renderer)
       this.devHud = new DevHud(this.canvas.parentElement ?? document.body) // perf HUD — bấm ` để ẩn
+    }
+  }
+
+  // 💧 Initial build: dựng xong thì ẨN mesh mặt nước (CHỈ visible=false, KHÔNG đổi surfaceOn → autosave GIỮ ý user)
+  // → render đầu KHÔNG compile shader nước (reflector+FBM+ripple+rain+glint) + KHÔNG render RTT (×N hồ) = thủ phạm
+  // FREEZE LOAD (NgQuan A/B: tắt surface = load nhanh; texture nền chỉ async). Bật lại AUTO khi texture nền load XONG
+  // (_tickWaterReveal) → tự khớp thời-gian-load (giờ & tương lai nhiều texture hơn, KHÔNG đoán giây). NgQuan 2026-06-14.
+  private _buildSceneInitial(): void {
+    this._buildScene()
+    if (!this._siteWaters.some((x) => x.surf.getMesh().visible)) return // không hồ nào bật → khỏi defer
+    this._pendingWaterReveal = true
+    this._hideWater()
+    window.setTimeout(() => this._revealAutoWater(), 30000) // 🛟 fallback treo (idle-clock _tickWaterReveal lo CHÍNH: bật ~load-xong+1.2s, tự co giãn)
+  }
+
+  // 💧 Ẩn MỌI mặt nước — gọi LẠI sau mỗi rebuild (cascade dựng lại nước VISIBLE = bug gốc) → giữ ẩn XUYÊN cascade tới reveal.
+  private _hideWater(): void {
+    for (const x of this._siteWaters) x.surf.getMesh().visible = false
+  }
+
+  // 💧 Mỗi frame: bật mặt nước khi cascade texture IM HẲN = pending===0 VÀ không texture nào start/xong trong ~1.2s.
+  // MỌI texture (ground/mix/path/fence/border/foundation/đáy-hồ) chui qua loadSurfaceTextureSet → đồng-hồ-im bắt HẾT,
+  // không phụ thuộc render path → đẩy mặt nước về CUỐI thật. Pending tự tắt trong _revealAutoWater → chạy 1 lần.
+  private _tickWaterReveal(): void {
+    if (!this._pendingWaterReveal) return
+    if (texturesPending() === 0 && textureIdleMs() > 1200) this._revealAutoWater()
+  }
+
+  // 💧 Bật lại mặt nước các hồ vốn ON (đọc surfaceOn HIỆN TẠI trên _siteWaters → né stale ref + tôn trọng toggle tay).
+  // Compile + RTT chạy lúc này — đã qua load nên không "chậm". Cờ pending tắt (idempotent). Disposed → _siteWaters=[] → no-op.
+  private _revealAutoWater(): void {
+    this._pendingWaterReveal = false
+    for (const x of this._siteWaters) {
+      if (x.cfg.surfaceOn) x.surf.getMesh().visible = true
     }
   }
 
@@ -1735,6 +1772,7 @@ export class ArchPlanLab extends BaseWorld {
     this._applyWASD()
     this._applyRotate()
     this.controls?.update()
+    this._tickWaterReveal() // 💧 texture nền xong → AUTO bật mặt nước (tự khớp thời-gian-load)
     for (const s of this.siteShaders) s.setTime?.(time) // 🌿 gió lùa cỏ (GrassGround) chạy theo elapsed
     for (const f of this._siteFish) f.fish.update(deltaTime) // 🐟 vẫy (uniform) + dời đàn (≤64 matrix, rẻ)
     this._predation?.update(deltaTime) // 🦈 săn mồi: tier cao lao đớp tier thấp ở gần (CHỈ khi Đói vùng vàng)
@@ -4019,6 +4057,7 @@ export class ArchPlanLab extends BaseWorld {
       this._siteSig = siteSig
       this._rebuildSite() // nặng: nền/nước(reflector) + handle/lưới/nền-editor (rào tách ra _syncFence)
       this._applySunToWater() // surface mới → hướng glint theo sun hiện tại
+      if (this._pendingWaterReveal) this._hideWater() // 💧 rebuild dựng lại nước VISIBLE → giữ ẩn tới reveal (10s)
     }
     this._syncFence() // 🧱 dựng/giữ rào theo _fenceSig (kéo slider rào chỉ dựng lại rào, không đụng nước)
     this._syncBridge() // 🌉 dựng/giữ cầu theo _bridgeSig (đổi cầu chỉ dựng lại cầu)

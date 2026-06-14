@@ -59,17 +59,49 @@ function loadOne(spec: MapSpec, anis: number, renderer: WebGPURenderer): Promise
   })
 }
 
+// 📏 Đếm TẬP TRUNG số texture-set đang load. MỌI caller (ground/mix-via-mapsOf/border/sand/slab/wood) đều qua hàm
+// NÀY → gate "đã load hết texture chưa?" robust, KHÔNG cần liệt kê từng cờ *Loading (dễ SÓT — đã sót border/sand/mix).
+// 0 = mọi texture qua loader này xong. Dùng: ArchPlanLab._tickWaterReveal (chờ mới bật mặt nước).
+let _pending = 0
+let _lastActivity = 0 // performance.now() lần texture-set GẦN NHẤT start HOẶC xong → đo "cascade IM hẳn" cho reveal nước
+export function texturesPending(): number {
+  return _pending
+}
+// ms kể từ texture-set gần nhất start/xong. Lớn = không còn ai động tĩnh (cascade tắt). Dùng: gate reveal mặt nước.
+export function textureIdleMs(): number {
+  return performance.now() - _lastActivity
+}
+
 // Load đủ map (baseColor bắt buộc; normal/roughness/ao tùy). Trả PhotoGroundMaps cho PhotoGround.
 export async function loadSurfaceTextureSet(
   spec: SurfaceTextureSpec,
   renderer: WebGPURenderer
 ): Promise<PhotoGroundMaps> {
   const anis = spec.anisotropy ?? 8
-  const maps: PhotoGroundMaps = { baseColor: await loadOne(spec.baseColor, anis, renderer) }
-  if (spec.normal) maps.normal = await loadOne(spec.normal, anis, renderer)
-  if (spec.roughness) maps.roughness = await loadOne(spec.roughness, anis, renderer)
-  if (spec.ao) maps.ao = await loadOne(spec.ao, anis, renderer)
-  return maps
+  const t0 = performance.now()
+  _pending++
+  _lastActivity = t0 // 📏 hoạt động: BẮT ĐẦU load → reset đồng-hồ-im
+  try {
+    // 🚀 Load SONG SONG mọi map (trước await TUẦN TỰ = 4× latency/set). Promise.all = fetch+decode+upload ĐỒNG THỜI.
+    const [baseColor, normal, roughness, ao] = await Promise.all([
+      loadOne(spec.baseColor, anis, renderer),
+      spec.normal ? loadOne(spec.normal, anis, renderer) : Promise.resolve(undefined),
+      spec.roughness ? loadOne(spec.roughness, anis, renderer) : Promise.resolve(undefined),
+      spec.ao ? loadOne(spec.ao, anis, renderer) : Promise.resolve(undefined),
+    ])
+    const maps: PhotoGroundMaps = { baseColor }
+    if (normal) maps.normal = normal
+    if (roughness) maps.roughness = roughness
+    if (ao) maps.ao = ao
+    if (import.meta.env.DEV)
+      console.info(
+        `[tex] ${spec.baseColor.url.split('/').slice(-3).join('/')} ${(performance.now() - t0).toFixed(0)}ms` // 📏 per-set
+      )
+    return maps
+  } finally {
+    _pending--
+    _lastActivity = performance.now() // 📏 hoạt động: XONG load (kể cả lỗi) → reset đồng-hồ-im
+  }
 }
 
 // Dispose 1 texture set (caller sở hữu — PhotoGround.dispose KHÔNG đụng texture).
