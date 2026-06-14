@@ -19,6 +19,7 @@ import type {
   GroundLayer,
   GroundMaterialKey,
   GroundMixParams,
+  LampConfig,
   PavingParams,
   StonePathParams,
   TerrainConfig,
@@ -39,6 +40,7 @@ import {
   makeFence,
   makeFishSchool,
   makeGroundLayer,
+  makeLamp,
   makePavingParams,
   makeStonePathParams,
   makeWallCurveParams,
@@ -2648,6 +2650,120 @@ function buildBridgeDomain(ctx: APGuiCtx): {
   }
 }
 
+// 💡 1 hàng slider mm cho field đèn (cao/X/Z/tầm): KÉO chỉ ghi state; BUÔNG (commit) → applySite (rebuild
+// vỏ + gán lại pool). applyLampLive (rebuild-chỉ-đèn) = Phase 2; MVP rebuild-on-release đủ mượt.
+function lampMmRow(
+  ctx: APGuiCtx,
+  l: LampConfig,
+  label: string,
+  key: 'height' | 'x' | 'z' | 'range',
+  min: number,
+  max: number
+): HTMLElement {
+  return sliderRow(
+    label,
+    min,
+    max,
+    0.05,
+    l[key] / 1000,
+    (v, c) => {
+      l[key] = Math.round(v * 1000)
+      if (c) ctx.applySite(true)
+    },
+    1000
+  )
+}
+
+// 💡 Controls 1 đèn: bật + cao/X/Z/tầm/sáng (slider) + màu.
+function buildLampControls(pane: HTMLElement, ctx: APGuiCtx, l: LampConfig): void {
+  pane.appendChild(
+    toggleRow('Bật', l.enabled, (on) => {
+      l.enabled = on
+      ctx.applySite(true)
+    })
+  )
+  pane.appendChild(lampMmRow(ctx, l, 'Cao', 'height', 0.5, 12))
+  pane.appendChild(lampMmRow(ctx, l, 'X', 'x', -20, 20))
+  pane.appendChild(lampMmRow(ctx, l, 'Z', 'z', -20, 20))
+  pane.appendChild(lampMmRow(ctx, l, 'Tầm', 'range', 0, 30))
+  pane.appendChild(
+    sliderRow(
+      'Sáng',
+      0,
+      30,
+      0.5,
+      l.intensity,
+      (v, c) => {
+        l.intensity = v
+        if (c) ctx.applySite(true)
+      },
+      1
+    )
+  )
+  pane.appendChild(
+    colorRow('Màu', l.color, (hex, c) => {
+      l.color = hex
+      if (c) ctx.applySite(true)
+    })
+  )
+}
+
+// 1 pane đèn i: controls + ✕ xoá (splice site.lamps + applySite).
+function buildLampPane(
+  ctx: APGuiCtx,
+  l: LampConfig,
+  i: number,
+  rebuild: (focus?: number) => void
+): HTMLElement {
+  const pane = document.createElement('div')
+  buildLampControls(pane, ctx, l)
+  pane.appendChild(
+    removeRow('✕ Remove đèn', () => {
+      ctx.site.lamps.splice(ctx.site.lamps.indexOf(l), 1)
+      rebuild(Math.max(0, i - 1))
+      ctx.applySite(true)
+    })
+  )
+  return pane
+}
+
+// 💡 Sub-tab "Đèn" → hàng tab instance Đ1/Đ2… + ＋ (mirror buildBridgeDomain) trên site.lamps.
+function buildLampDomain(ctx: APGuiCtx): { panel: HTMLElement; dispose: () => void } {
+  const host = document.createElement('div')
+  host.classList.add('ap-fence-domain') // mượn tông nâu
+  let tabs: Tabs | null = null
+  const rebuild = (focus = 0): void => {
+    tabs?.dispose()
+    host.replaceChildren()
+    const items: TabItem[] = ctx.site.lamps.map((l, i) => {
+      const pane = buildLampPane(ctx, l, i, rebuild)
+      host.appendChild(pane)
+      return { label: `Đ${i + 1}`, panel: pane, title: `Đèn ${i + 1}` }
+    })
+    const addBtn = addInstanceButton('Đèn', () => {
+      const last = ctx.site.lamps[ctx.site.lamps.length - 1]
+      const l = makeLamp()
+      if (last) l.x = last.x + 3000 // stagger né chồng đèn cũ
+      ctx.site.lamps.push(l)
+      rebuild(ctx.site.lamps.length - 1)
+      ctx.applySite(true)
+    })
+    tabs = new Tabs(host, items, {
+      classes: {
+        bar: 'ap-tab-bar ap-fence-itabs',
+        tab: 'ap-tab-btn',
+        panel: 'ap-fence-isub',
+        active: 'ap-tab-active',
+      },
+      injectCss: false,
+      addEl: addBtn,
+      initial: focus,
+    })
+  }
+  rebuild()
+  return { panel: host, dispose: (): void => tabs?.dispose() }
+}
+
 // Nút ✕ xoá 1 instance hồ (hàng riêng, canh phải).
 function removeRow(label: string, onRemove: () => void): HTMLElement {
   const row = document.createElement('div')
@@ -3242,6 +3358,7 @@ function makeSiteTabs(
     garden: HTMLElement
     water: HTMLElement
     bridge: HTMLElement
+    lamp: HTMLElement
   }
 ): Tabs {
   return new Tabs(
@@ -3252,6 +3369,7 @@ function makeSiteTabs(
       { label: 'Garden', panel: panels.garden, title: 'Grass (3D, any surface) + trees' },
       { label: 'Water', panel: panels.water, title: 'Water: Pool / Pond / Puddle' },
       { label: 'Cầu', panel: panels.bridge, title: 'Cầu bắc ngang hồ (bridge)' },
+      { label: '💡 Đèn', panel: panels.lamp, title: 'Đèn sân vườn (trụ đèn, tự bật đêm)' },
     ],
     {
       classes: {
@@ -3292,7 +3410,8 @@ export function setupSitePanel(ctx: APGuiCtx, container: Element | null): SitePa
   const water = buildWaterDomain(ctx)
   const waterSub = water.panel
   const bridge = buildBridgeDomain(ctx) // 🌉 "Cầu" bắc ngang hồ — đa-instance site.bridges
-  p.append(groundSub, fenceSub, gardenSub, waterSub, bridge.panel)
+  const lamp = buildLampDomain(ctx) // 💡 "Đèn" sân vườn — đa-instance site.lamps (pool real-light editor)
+  p.append(groundSub, fenceSub, gardenSub, waterSub, bridge.panel, lamp.panel)
   container?.appendChild(p)
 
   const tabs = makeSiteTabs(p, {
@@ -3301,12 +3420,13 @@ export function setupSitePanel(ctx: APGuiCtx, container: Element | null): SitePa
     garden: gardenSub,
     water: waterSub,
     bridge: bridge.panel,
+    lamp: lamp.panel,
   })
   return {
     panel: p,
     dispose: (): void => {
       tabs.dispose()
-      for (const d of [ground, fence, garden, water, bridge]) d.dispose()
+      for (const d of [ground, fence, garden, water, bridge, lamp]) d.dispose()
     },
     // Click hồ 3D → mở sub-tab "Water" (index 3) rồi ủy quyền water domain mở type+instance tab của cfg.
     navigateToWater: (cfg: WaterConfig): boolean => {

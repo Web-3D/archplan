@@ -165,6 +165,7 @@ import {
   gateWorldSpec,
   grassBuildSig,
   groundGeometry,
+  type LampTip,
   pondWorldXZ,
   renderSiteState,
   siteGrassExclude,
@@ -540,6 +541,15 @@ export class ArchPlanLab extends BaseWorld {
   private _envTrayShown = false
   private envTrayWrap: HTMLElement | null = null // 🌅 khay preset ánh sáng môi trường (float bền như utilTray)
   private controls: OrbitControls | null = null
+
+  // 💡 Pool đèn fixture: N PointLight tạo 1 LẦN (no shadow), gán vào N tip gần nhất mỗi rebuild + bật/tắt
+  // bằng intensity (KHÔNG add/remove → né recompile MỌI NodeMaterial). _lampBaseInt = cường độ base trước
+  // ×nightFactor. _lampGlowMat = bóng emissive CHUNG (editor lerp warm→tối theo đêm). _dayFactor cache từ sky.
+  private readonly _lampPool: THREE.PointLight[] = []
+  private readonly _lampBaseInt: number[] = []
+  private _lampGlowMat: THREE.MeshBasicMaterial | null = null
+  private _dayFactor = 1
+  private static readonly LAMP_POOL_N = 8 // trần real-light đèn (xa hơn = chỉ glow); >16 mới cần TiledLightsNode
 
   // Đèn mặt trời + tham số (điều khiển qua panel ☀ Sun). Default ≈ vị trí cũ (10,18,10).
   private sun: THREE.DirectionalLight | null = null
@@ -1966,6 +1976,12 @@ export class ArchPlanLab extends BaseWorld {
     this.groundGeo = null
     this.groundMat?.dispose()
     this.groundMat = null
+    // 💡 pool đèn (PointLight không có GPU resource — chỉ gỡ scene) + bóng glow material
+    for (const pl of this._lampPool) pl.removeFromParent()
+    this._lampPool.length = 0
+    this._lampBaseInt.length = 0
+    this._lampGlowMat?.dispose()
+    this._lampGlowMat = null
   }
 
   private _setupScene(): void {
@@ -2005,6 +2021,16 @@ export class ArchPlanLab extends BaseWorld {
     this.scene.backgroundNode = this.sky.getBackgroundNode()
     // 🌫️ Sương mù: density-fog (vật thể xa tan vào màn khí) — uFogDensity 0 = tắt. KHÔNG đụng backgroundNode (sky giữ).
     this.scene.fogNode = fog(this.uFogColor, densityFogFactor(this.uFogDensity))
+    // 💡 Pool đèn: tạo N PointLight 1 LẦN (no shadow, intensity 0), thêm scene — gán/tắt bằng intensity mỗi
+    // rebuild (né recompile khi đổi light-count). Bóng glow chung (editor lerp warm→tối theo nightFactor).
+    this._lampGlowMat = new THREE.MeshBasicMaterial({ color: 0xffe6b0, toneMapped: false })
+    for (let i = 0; i < ArchPlanLab.LAMP_POOL_N; i++) {
+      const pl = new THREE.PointLight(0xffd9a0, 0, 0, 2) // decay vật lý 2; distance/intensity set khi gán
+      pl.castShadow = false // đèn fixture KHÔNG đổ bóng — shadow-map đắt (chỉ sun cast)
+      this._lampPool.push(pl)
+      this._lampBaseInt.push(0)
+      this.scene.add(pl)
+    }
     this.scene.add(hemi, sun, ground, this.editorGrid.getObject())
     this._applySun()
   }
@@ -2120,7 +2146,8 @@ export class ArchPlanLab extends BaseWorld {
     this.sun.shadow.needsUpdate = this.sunOpts.enabled // tắt → khỏi vẽ lại shadow map (đỡ depth-pass thừa)
     this._applySunToGrass() // vệt tiếp đất cỏ đổi hướng/độ dài theo sun (live, không dựng lại)
     this._applySunToWater() // đốm nắng glint trên mặt hồ đổi theo sun (live)
-    this._applySunToSky() // 🌅 sky ngày↔đêm + mờ đèn fill/env theo độ-cao sun (live)
+    this._applySunToSky() // 🌅 sky ngày↔đêm + mờ đèn fill/env theo độ-cao sun (live) — set _dayFactor
+    this._applySunToLamps() // 💡 đèn fixture tự bật/tắt theo đêm (dùng _dayFactor vừa set)
     this.sunGizmo?.sync()
   }
 
@@ -2132,6 +2159,7 @@ export class ArchPlanLab extends BaseWorld {
     this.sky.setDayOverride(this.sunOpts.enabled ? null : 0) // sun TẮT = trời đêm (kể cả sun đang cao)
     this.sky.setOvercast(this.sunOpts.overcast) // ☁️ trời xám theo preset/slider — nuốt đĩa nắng
     const day = this.sky.setSun(p.x, p.y, p.z) // [0..1]: 1=trưa, 0=đêm (đã qua override)
+    this._dayFactor = day // 💡 cache cho _applySunToLamps (đèn bật khi đêm)
     // × fill (sunOpts, default 1.5): mặt NGANG xa hướng sun sống bằng hemi+IBL — curve cũ (fill=1)
     // bóp fill cho bóng đậm làm nền tổng tối sầm. Slider/preset khay 🌅 chỉnh live.
     const fill = this.sunOpts.fill
@@ -2158,6 +2186,39 @@ export class ArchPlanLab extends BaseWorld {
     if (!this.sun) return
     const sp = this.sun.position
     for (const x of this._siteWaters) x.surf.setSun(sp.x, sp.y, sp.z)
+  }
+
+  // 💡 Gán pool real-light vào N tip GẦN GỐC nhất (perf cap). Mỗi rebuild: chọn N, set pos/color/range + base
+  // intensity; tip dư = glow-only. Light thừa trong pool → base 0 (vẫn trong scene → né recompile). Áp đêm cuối.
+  private _assignLampPool(tips: LampTip[]): void {
+    const N = ArchPlanLab.LAMP_POOL_N
+    const near = [...tips]
+      .sort((a, b) => a.x * a.x + a.z * a.z - (b.x * b.x + b.z * b.z))
+      .slice(0, N) // N tip gần gốc nhất (camera-nearest = Phase 2)
+    for (let i = 0; i < N; i++) {
+      const pl = this._lampPool[i]
+      const t = near[i]
+      if (t) {
+        pl.position.set(t.x, t.y, t.z)
+        pl.color.set(t.color)
+        pl.distance = t.range
+        this._lampBaseInt[i] = t.intensity
+      } else {
+        this._lampBaseInt[i] = 0 // không tip → đèn tắt
+      }
+    }
+    this._applySunToLamps()
+  }
+
+  // 💡 Bật/tắt theo đêm: real-light intensity = base × nightFactor; bóng glow lerp warm→tối. nightFactor =
+  // 1−day (sun bật) / 1 (sun tắt = đêm). LIVE (chỉ intensity + color uniform — KHÔNG rebuild/recompile).
+  private _applySunToLamps(): void {
+    const night = this.sunOpts.enabled ? 1 - this._dayFactor : 1
+    for (let i = 0; i < this._lampPool.length; i++) {
+      this._lampPool[i].intensity = this._lampBaseInt[i] * night
+    }
+    if (this._lampGlowMat)
+      this._lampGlowMat.color.setHex(0xffe6b0).multiplyScalar(0.08 + 0.92 * night)
   }
 
   // Sun persist riêng (localStorage 'archplan:sun') — độc lập design store. Load TRƯỚC _setupScene.
@@ -3987,6 +4048,7 @@ export class ArchPlanLab extends BaseWorld {
     const wcfgs = [...renderWaters(this.site), ...renderPuddles(this.site)]
     this._siteWaters = h.waters.map((surf, i) => ({ cfg: wcfgs[i], surf }))
     this._siteFish = h.fish // 🐟 dispose theo siteShaders (clearSite); update(dt) mỗi frame onUpdate
+    this._assignLampPool(h.lampTips) // 💡 gán pool real-light vào N đèn gần nhất + áp nightFactor hiện tại
     // 🦈 coordinator săn mồi: nhóm đàn theo HỒ (pond=water ref) → tier cao đớp tier thấp ở gần (khi Đói vàng).
     this._predation = new PondPredation(
       h.fish.map((e) => ({ pond: e.water, fish: e.fish, tier: e.cfg.tier }))
@@ -4040,6 +4102,7 @@ export class ArchPlanLab extends BaseWorld {
     if (Object.keys(borderByKey).length > 0) opts.borderMatByKey = borderByKey
     // Fence material KHÔNG resolve ở đây nữa (đa-lớp → mỗi lớp 1 kind riêng) — _syncFence bơm per-fence.
     this._mixPreview?.resync() // 🔎 texture preset load xong → ô preview thay fallback màu bằng mix thật
+    if (this._lampGlowMat) opts.lampGlowMat = this._lampGlowMat // 💡 bóng glow editor-owned (lerp theo đêm)
     return opts
   }
 
