@@ -142,6 +142,16 @@ Vùng bơi = LÒNG HỒ thật (`bounds`) — KHÔNG vị trí/Move riêng (đi 
 | **📍 Marker tia-Y** | cá CHÌM dưới nền → khó thấy. `ctx.previewFish(fs)` (lab `_previewFish`) = FLASH **Line đứng vàng `depthTest:false`** (xuyên đất/nước, renderOrder 999) tại tâm hồ (offsetX/Z), tự ẩn ~1.5s. Kích: đổi F-tab (Tabs onChange) · kéo slider pane cá · thêm đàn ＋ · click cá 3D. |
 | **🤚 Move / 🎨 Paint / P Pick** | KHÔNG — cá đi theo HỒ (kéo hồ = kéo cá). Quản đàn = ＋ thêm / ✕ xoá / dropdown **Bậc** trong tab Cá. |
 
+### 5e. SITE element — ĐÈN sân vườn 💡
+
+Đèn (`SiteState.lamps[]`, mỗi đèn = **1 group** trong `siteGroup` tag `userData.lampRef`) = site element rời như cầu. Vỏ = trụ+chụp+bóng; real-light KHÔNG ở vỏ (editor pool gán PointLight theo tip — `lamp.ts`). ĐA-INSTANCE: GUI 💡 Đèn ▸ 🏮 Trụ sân ▸ Đ1/Đ2.
+
+| Tương tác | Đèn làm sao |
+|---|---|
+| **🤚 Move** | Raycast `siteGroup` tìm mesh có `lampRef` (`_tryStartLampDrag`, gọi SAU bridge/site-tool; so distance pick-box → building gần hơn thì nhường). Walk-up ra **group** (con trực tiếp siteGroup) → kéo mặt-phẳng-ngang @điểm-neo **dời `group.position`** (0 rebuild — `PERFORMANCE.md`). Thả → gập Δ vào `lamp.x/z` (mm) + `_applySite(true)` (pool real-light gán lại tip mới + autosave). Right-click = trả `startPos`. Anchor: `_tryStartLampDrag`/`_lampDragMove`/`_commitLampDrag` (mirror `_bridgeDrag`); clear ở `_setMoveMode`. |
+| **👆 Focus** | click vỏ đèn 3D (gần hơn building pick) → drawer Ground → 💡 Đèn → 🏮 Trụ sân ▸ tab **Đn**. Anchor: `_tryClickLamp`/`_lampIdxOf`/`_navigateToLamp` (lab) → site `navigateToLamp` → `buildLampDomain.navigateToLamp` (chọn loại + instance). lamps lọc-enabled khi render ⇒ so REF (≠ index render) → `indexOf` ra vị trí gốc. |
+| **🎨 Paint / P Pick** | KHÔNG — chỉnh qua GUI 💡 Đèn ▸ Đn (Bật / Cao / X / Z / Tầm / Sáng / Màu / ✕). |
+
 ---
 
 ## Phím tắt
