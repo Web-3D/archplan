@@ -209,6 +209,7 @@ import { type PaletteHost, PalettePanel } from './interaction/palette' // 🎨 k
 import { ShapeSelection } from './interaction/selection' // 🧲 Shape Group — chọn nhóm + ghost-drag
 import { SunGizmo, type SunGizmoHost } from './interaction/sunGizmo' // ☀ sun = vật thể kéo trong scene
 import { WaterTool, type WaterToolHost } from './interaction/waterDrag' // 💧 kéo hồ/đỉnh/viền 3D — tách monolith
+import { LightingController } from './lighting/LightingController' // 🔦 hệ đèn-pha TÁCH RIÊNG (lighting pattern)
 import { HoverGhost } from './mix/HoverGhost' // ✨ viền mờ sáng đích dưới con trỏ khi cầm xô
 import { MixManager } from './mix/MixManager' // 🎨 hệ mix nền (8 đích + cọ vẽ + prune) — tách Mảnh −1 plan palette
 import { MixPreview } from './mix/MixPreview' // 🔎 ô preview preset TRONG khay (canvas WebGPU riêng)
@@ -584,6 +585,7 @@ export class ArchPlanLab extends BaseWorld {
   private readonly uFogColor = uniform(new THREE.Color(0xbcd0e0))
   private _envFogSlider: HTMLInputElement | null = null // ref slider Sương mù khay 🌅 (đặt cạnh uFog — né hunk cá)
   private sunGizmo: SunGizmo | null = null // ☀ sun = vật thể kéo trong scene (thay panel GUI)
+  private _lighting: LightingController | null = null // 🔦 hệ đèn-pha tách riêng (lighting pattern) — vỏ orchestrator
 
   // opFolders — key: "${instId}:${segIdx}" → opening sub-folders per segment
   private opFolders = new Map<string, GUI[]>()
@@ -1101,6 +1103,7 @@ export class ArchPlanLab extends BaseWorld {
     if (this._tryStartBridgeDrag(e)) return // 🌉 trúng cầu (gần hơn building/hồ) → kéo dời cầu — ƯU TIÊN
     if (this._tryStartSiteTool(e)) return // 💧🟫⛰️ trúng tool site → tool lo
     if (this._tryStartLampDrag(e)) return // 💡 trúng đèn (gần hơn building → tự nhường) → kéo dời XZ
+    if (this._ltDown(e)) return // 🔦 trúng đèn pha → kéo dời (Move)
     if (this._tryStartGateDrag(e)) return // 🚪 trúng cổng → trượt dọc cạnh rào
     this.manipulate?.dragStart(e) // Move tool: nhấn-giữ element building → kéo (focus GUI ngay khi nhấn)
     if (this.manipulate?.isDragging()) return // trúng building → manipulate lo
@@ -1141,7 +1144,9 @@ export class ArchPlanLab extends BaseWorld {
     else if (this.manipulate?.isDragging()) this.manipulate.dragMove(e)
     else if (this._layerDrag)
       this._layerDragMove(e) // 🟫 kéo tầng ground
-    else if (this._lampDrag) this._lampDragMove(e) // 💡 kéo đèn
+    else if (this._lampDrag)
+      this._lampDragMove(e) // 💡 kéo đèn
+    else if (this._ltDragging()) this._lighting?.pointerMove(e) // 🔦 kéo đèn pha
   }
 
   // 🪨🧱 Resolve object raycast TRÚNG → object mang userData.groundLayerIdx. Surface/path = chính nó (idx trên
@@ -1394,6 +1399,10 @@ export class ArchPlanLab extends BaseWorld {
       this._commitLampDrag() // 💡 buông đèn → bake x/z + rebuild (pool gán lại tip) + autosave
       return true
     }
+    if (this._ltDragging()) {
+      this._ltUp() // 🔦 buông đèn pha → commit x/z + persist
+      return true
+    }
     if (this.manipulate?.isDragging()) {
       this.manipulate.dragEnd()
       return true
@@ -1416,6 +1425,7 @@ export class ArchPlanLab extends BaseWorld {
       this._mix.bucketApplyAt(e) // 🪣 click = áp preset vào đích (CLONE) — hụt cũng nuốt (đang cầm xô)
       return
     }
+    if (this._lighting?.clickFocus(e)) return // 🔦 click đèn pha → focus panel đèn pha
     this._clickFocusChain(e)
   }
 
@@ -1536,6 +1546,7 @@ export class ArchPlanLab extends BaseWorld {
     this._gateDrag = null // huỷ kéo cổng đang dở
     this._bridgeDrag = null // 🌉 huỷ kéo cầu đang dở
     this._lampDrag = null // 💡 huỷ kéo đèn đang dở
+    this._ltCancel() // 🔦 huỷ/trả vị trí đèn pha đang kéo (rời Move mode)
     this._layerDrag = null // 🟫 huỷ kéo tầng ground đang dở
     if (on) {
       this._setPaintMode(false)
@@ -1865,7 +1876,7 @@ export class ArchPlanLab extends BaseWorld {
     await this._setupEnvironment() // IBL → MeshStandardNodeMaterial phản chiếu specular (bớt nhựa)
     this._setupCamera()
     this._setupCSS2D()
-    if (this.sun) this.sunGizmo = new SunGizmo(this._sunGizmoHost(this.sun)) // ☀ sun kéo được trong scene
+    this._setupSceneInteractors() // ☀ sun kéo + 🔦 hệ đèn-pha (cần camera/controls sẵn)
     this.humanFigure = new HumanFigure()
     this.humanFigure.build()
     this.scene.add(this.humanFigure.group)
@@ -2180,6 +2191,8 @@ export class ArchPlanLab extends BaseWorld {
     this.coordPicker = null
     this.sunGizmo?.dispose() // ☀ gỡ quả sun + panel CSS2D
     this.sunGizmo = null
+    this._lighting?.dispose() // 🔦 gỡ hệ đèn-pha (group + panel + lights)
+    this._lighting = null
     this.sun?.dispose() // dispose shadow map render target
     this.sun = null
     this.scene.backgroundNode = null // 🌅 gỡ sky node nền
@@ -2483,6 +2496,7 @@ export class ArchPlanLab extends BaseWorld {
     }
     if (this._lampGlowMat)
       this._lampGlowMat.color.setHex(0xffe6b0).multiplyScalar(0.08 + 0.92 * night)
+    this._lighting?.update(night) // 🔦 đèn pha sáng dần khi tối (cùng nightFactor)
   }
 
   // 💡 Cấu hình 1 PointLight ĐỔ BÓNG. Point-shadow = cube 6 mặt (đắt) → GUARD perf: castShadow set lúc TẠO
@@ -2520,6 +2534,35 @@ export class ArchPlanLab extends BaseWorld {
       this._lampPool[0].shadow.needsUpdate = true // 💡 bóng real bám đèn-active live (1 light, 6 depth-pass)
       if (this.sun) this.sun.shadow.needsUpdate = true // đèn dời → bóng sun cập nhật
     })
+  }
+
+  // ☀🔦 Vật thể tương tác scene cần camera/controls sẵn: quả sun kéo + hệ đèn-pha tách riêng (lighting pattern).
+  private _setupSceneInteractors(): void {
+    if (this.sun) this.sunGizmo = new SunGizmo(this._sunGizmoHost(this.sun))
+    this._lighting = new LightingController({
+      scene: this.scene,
+      camera: this.camera,
+      canvas: this.canvas,
+      container: this.canvas.parentElement ?? document.body,
+      setOrbit: (on) => {
+        if (this.controls) this.controls.enabled = on
+      },
+    })
+  }
+
+  // 🔦 Wrapper hệ đèn-pha — gói null-guard để handler pointer giữ complexity ≤10 (mirror _siteDragTools style).
+  private _ltDown(e: PointerEvent): boolean {
+    const lt = this._lighting
+    return lt !== null && lt.pointerDown(e)
+  }
+  private _ltDragging(): boolean {
+    return this._lighting !== null && this._lighting.isDragging()
+  }
+  private _ltUp(): void {
+    this._lighting?.pointerUp()
+  }
+  private _ltCancel(): void {
+    this._lighting?.pointerCancel()
   }
 
   // Sun persist riêng (localStorage 'archplan:sun') — độc lập design store. Load TRƯỚC _setupScene.

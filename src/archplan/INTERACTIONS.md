@@ -152,6 +152,16 @@ Vùng bơi = LÒNG HỒ thật (`bounds`) — KHÔNG vị trí/Move riêng (đi 
 | **👆 Focus** | click vỏ đèn 3D (gần hơn building pick) → drawer Ground → 💡 Đèn → 🏮 Trụ sân ▸ tab **Đn**. Anchor: `_tryClickLamp`/`_lampIdxOf`/`_navigateToLamp` (lab) → site `navigateToLamp` → `buildLampDomain.navigateToLamp` (chọn loại + instance). lamps lọc-enabled khi render ⇒ so REF (≠ index render) → `indexOf` ra vị trí gốc. |
 | **🎨 Paint / P Pick** | KHÔNG — chỉnh qua GUI 💡 Đèn ▸ Đn (Bật / Cao / X / Z / Tầm / Sáng / Màu / ✕). |
 
+### 5f. SITE element — ĐÈN PHA uplight 🔦 (lighting pattern, tách riêng)
+
+Đèn pha = **hệ TÁCH RIÊNG** (`lighting/` — KHÔNG trong `siteGroup`/`SiteState`): lõi `SiteLightingSystem` (SpotLight no-shadow + housing) + vỏ `LightingController` (panel float MẶT RIÊNG + `UplightDrag`). Persist `archplan:lighting` (độc lập design state). ArchPlanLab CHỈ delegate qua wrapper `_lt*`. **Mẫu khi thêm fixture đèn mới**: cắm vào lõi, KHÔNG đụng god-module.
+
+| Tương tác | Đèn pha làm sao |
+|---|---|
+| **🤚 Move** | Move mode nhấn → `_ltDown` → `UplightDrag.tryStartDrag` raycast `system.pickUplight` (housing/lens `userData.uplightIndex`) → kéo chiếu mặt y=0 `moveBase` (0 rebuild). Thả `_ltUp`→`endDrag` gập x/z vào config + persist. Right-click `_ltCancel`→trả vị trí (qua `_setMoveMode`). |
+| **👆 Focus** | click vỏ đèn pha (normal mode, `_maybeClickFocus`) → `clickFocus` → `LightPanel.focus(i)` nháy viền card. |
+| **🎨 Paint / P Pick** | KHÔNG — chỉnh qua panel float 🔦 Đèn pha (X/Z/Ngắm/Cao/Sáng/Góc/Mềm/Tầm/Màu/✕/＋). |
+
 ---
 
 ## Phím tắt
