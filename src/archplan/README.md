@@ -5,6 +5,22 @@ Editor mặt bằng kiến trúc multi-floor, render 3D real-time (WebGPU). **Ap
 
 ---
 
+## Entries (Vite multi-page) — Edition vs Viewer
+
+| Entry | File | Vai trò | Deploy |
+| --- | --- | --- | --- |
+| `index.html` | `main.ts` → ArchPlanLab | **Editor** (tác giả: dựng nhà + site) — nặng | local / riêng |
+| `viewer.html` · `demo.html` | `viewer.ts` · `demo.ts` | Showcase building (portfolio · diorama nắng) — nhẹ | — |
+| `site-viewer.html` | `site-viewer.ts` + `site-viewer-panel.ts` | **Viewer PRODUCTION**: nạp design → render SITE đầy đủ (ground-mix + nước + cá + rào + cỏ + móng-mix) + bảng điều khiển (thời tiết · ánh sáng · cho-ăn/thả-mồi · đói-bậc-4 · tạo-bậc-5 + predation · WASD), KHÔNG editor | **staging → production** (Vercel) |
+
+**Chuẩn ngành — 1 build, env-gate** (KHÔNG fork GUI staging/prod riêng — drift trap):
+- **Nguồn scene:** DEV = `localStorage` autosave (scene đang dựng trong editor); build (Vercel staging+prod) = `fetch('scene.json')` (export đặt `public/`), thiếu → fallback.
+- **HUD đo:** `import.meta.env.DEV` hoặc URL `?hud` → staging opt-in, prod thường ẩn.
+- **Staging vs Production = Vercel preview deploy vs production deploy** (CÙNG 1 build), không phải 2 codebase.
+- Material site + **móng/tường/sàn building** dùng chung `MixManager` + manifest `scene/texture-specs.ts` (bản sao gọn của `ArchPlanLab` GROUND_TEX_SPEC — KHÔNG kéo editor vào bundle; site-viewer.js ~20KB). ⚠️ thêm texture ground mới ở editor → đồng bộ `texture-specs.ts`.
+
+---
+
 ## Cấu trúc module (sau khi rã monolith)
 
 `ArchPlanLab.ts` là **host mỏng** (lifecycle + orchestrate + undo/redo + pointer dispatch + build

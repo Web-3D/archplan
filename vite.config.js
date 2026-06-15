@@ -31,6 +31,7 @@ export default {
         main: resolve(__dirname, 'src/index.html'), // editor (ArchPlanLab — nặng)
         viewer: resolve(__dirname, 'src/viewer.html'), // showcase viewer (portfolio — nhẹ)
         demo: resolve(__dirname, 'src/demo.html'), // tool-demo nghịch (cộng đồng — nhẹ)
+        'site-viewer': resolve(__dirname, 'src/site-viewer.html'), // PRODUCTION site đầy đủ (đo cost — tiền đề Vercel)
       },
       output: { manualChunks: { 'three-vendor': ['three'] } },
     },
