@@ -1,68 +1,74 @@
 /**
  * VỊ TRÍ   — archplan/src/archplan/lighting/LightPanel.ts
- * VAI TRÒ  — Panel GUI hệ đèn — MẶT RIÊNG (float, KHÔNG nhét drawer Ground). Liệt kê đèn-pha + slider
- *            (X/Z/ngắm/sáng/góc/mềm/tầm) + màu + thêm/xoá. Tái dùng sliderRow (gui/tweak) → đồng bộ style.
- * LIÊN HỆ  — host = LightingController (configs + callback sync/persist/structural). focus(i) ← click 3D (Focus).
+ * VAI TRÒ  — Panel GUI hệ đèn — MẶT RIÊNG (float, KHÔNG nhét drawer Ground). Render N MỤC fixture
+ *            (🔦 đèn pha · 🟡 bollard · 🎏 đèn dây), mỗi mục = header(＋) + card slider + màu + xoá.
+ *            Dumb-renderer: nhận PanelSection[] (controller dựng, đóng kín config typed theo INDEX → 0 `any`).
+ * LIÊN HỆ  — host = LightingController. focus(s,i) ← click 3D (Focus) trỏ đúng card mục s.
  *
- * CÁCH DÙNG: const p = new LightPanel(container, host); p.rebuild(); p.focus(i)
+ * CÁCH DÙNG: const p = new LightPanel(container, sections); p.rebuild(); p.focus(s, i)
  * DISPOSE: dispose() — gỡ wrap khỏi DOM (không GPU resource).
  */
 
-import type { UplightConfig } from 'threejs-modules/site/lighting/SiteLightingSystem'
-
 import { sliderRow } from '../gui/tweak'
 
-export interface LightPanelHost {
-  configs: UplightConfig[]
-  changed: (commit: boolean) => void // slider sửa: false=live (sync), true=commit (sync+persist)
-  structural: () => void // thêm/xoá đèn: sync+persist (panel tự rebuild sau)
-  add: () => void // push 1 đèn mặc định vào configs
-}
+// 1 hàng slider: [nhãn, min, max, step, get, set]. get/set đóng kín config typed (controller dựng).
+export type LightRow = [string, number, number, number, () => number, (v: number) => void]
 
-const DEG = 180 / Math.PI
+// 1 MỤC fixture — mọi truy cập theo INDEX (không lộ generic ra array) → trộn 3 loại config trong 1 panel.
+export interface PanelSection {
+  icon: string
+  name: string // số ít, vd 'Đèn pha' → card 'Đèn pha 1'
+  hint: string // gợi ý khi rỗng
+  focusColor: string // viền nháy lúc Focus
+  liveDrag: boolean // false = chỉ cập nhật lúc buông (string rebuild geometry)
+  count: () => number
+  rows: (i: number) => LightRow[]
+  colorOf: (i: number) => number
+  setColor: (i: number, hex: number, commit: boolean) => void
+  add: () => void // push 1 config mặc định + sync hệ + persist
+  remove: (i: number) => void // splice + sync hệ + persist
+  changed: (commit: boolean) => void // slider/màu sửa: false=live, true=commit
+}
 
 export class LightPanel {
   private readonly wrap: HTMLElement
-  private readonly list: HTMLElement
-  private readonly cards: HTMLElement[] = []
+  private readonly lists: HTMLElement[] = [] // 1 list/mục
+  private readonly cards: HTMLElement[][] = [] // cards[s][i]
   private isDisposed = false
 
   constructor(
     container: Element,
-    private readonly host: LightPanelHost
+    private readonly sections: PanelSection[]
   ) {
     this.wrap = document.createElement('div')
     this.wrap.className = 'ap-light-float'
     this.wrap.style.cssText =
-      'position:absolute;top:64px;right:8px;width:236px;max-height:70vh;overflow:auto;' +
+      'position:absolute;top:64px;right:8px;width:240px;max-height:78vh;overflow:auto;' +
       'background:rgba(20,22,28,.92);color:#dfe3ea;font:11px system-ui,sans-serif;' +
       'padding:8px 10px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.5);z-index:20'
-    this.wrap.appendChild(this._header())
-    this.list = document.createElement('div')
-    this.wrap.appendChild(this.list)
+    this.sections.forEach((s, si) => {
+      this.wrap.appendChild(this._sectionHead(s, si))
+      const list = document.createElement('div')
+      this.lists.push(list)
+      this.cards.push([])
+      this.wrap.appendChild(list)
+    })
     container.appendChild(this.wrap)
     this.rebuild()
   }
 
-  /** Dựng lại danh sách card (gọi sau add/remove). */
+  /** Dựng lại toàn bộ card (gọi sau add/remove bất kỳ mục). */
   rebuild(): void {
     if (this.isDisposed) return
-    this.list.innerHTML = ''
-    this.cards.length = 0
-    this.host.configs.forEach((_, i) => {
-      const card = this._card(i)
-      this.cards.push(card)
-      this.list.appendChild(card)
-    })
-    if (this.host.configs.length === 0) this.list.appendChild(this._emptyHint())
+    this.sections.forEach((s, si) => this._rebuildSection(s, si))
   }
 
-  /** Cuộn tới + nháy viền card đèn i (👆 Focus từ click 3D). */
-  focus(i: number): void {
-    const card = this.cards[i]
+  /** Cuộn tới + nháy viền card i của mục s (👆 Focus từ click 3D). */
+  focus(s: number, i: number): void {
+    const card = this.cards[s]?.[i]
     if (!card) return
     card.scrollIntoView({ block: 'nearest' })
-    card.style.outline = '2px solid #ffd9a0'
+    card.style.outline = `2px solid ${this.sections[s].focusColor}`
     window.setTimeout(() => (card.style.outline = 'none'), 900)
   }
 
@@ -74,100 +80,98 @@ export class LightPanel {
 
   // ── Private ────────────────────────────────────────────────────────────────
 
-  private _header(): HTMLElement {
+  private _rebuildSection(s: PanelSection, si: number): void {
+    const list = this.lists[si]
+    list.innerHTML = ''
+    this.cards[si] = []
+    const n = s.count()
+    for (let i = 0; i < n; i++) {
+      const card = this._card(s, i)
+      this.cards[si].push(card)
+      list.appendChild(card)
+    }
+    if (n === 0) list.appendChild(this._emptyHint(s))
+  }
+
+  private _sectionHead(s: PanelSection, si: number): HTMLElement {
     const head = document.createElement('div')
     head.style.cssText =
-      'display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;font-weight:600'
+      'display:flex;align-items:center;justify-content:space-between;font-weight:600;' +
+      (si === 0
+        ? 'margin-bottom:6px'
+        : 'margin:10px 0 6px;border-top:1px solid #353b47;padding-top:8px')
     const title = document.createElement('span')
-    title.textContent = '🔦 Đèn pha (uplight)'
+    title.textContent = `${s.icon} ${s.name}`
     const add = document.createElement('button')
     add.textContent = '＋'
-    add.title = 'Thêm 1 đèn pha'
+    add.title = `Thêm 1 ${s.name.toLowerCase()}`
     add.style.cssText =
       'cursor:pointer;background:#3a4150;color:#fff;border:none;border-radius:4px;width:22px;height:20px'
     add.addEventListener('click', () => {
-      this.host.add()
-      this.host.structural()
+      s.add()
       this.rebuild()
     })
     head.append(title, add)
     return head
   }
 
-  private _emptyHint(): HTMLElement {
+  private _emptyHint(s: PanelSection): HTMLElement {
     const hint = document.createElement('div')
-    hint.style.cssText = 'opacity:.6;line-height:1.4;padding:4px 0'
-    hint.textContent = 'Chưa có đèn pha. Bấm ＋ để thêm — rọi gốc cây / tường / tượng.'
+    hint.style.cssText = 'opacity:.6;line-height:1.4;padding:2px 0 4px'
+    hint.textContent = s.hint
     return hint
   }
 
-  private _card(i: number): HTMLElement {
-    const c = this.host.configs[i]
+  private _card(s: PanelSection, i: number): HTMLElement {
     const card = document.createElement('div')
     card.style.cssText = 'border-top:1px solid #2c313c;padding:6px 0;margin-top:4px'
-    card.appendChild(this._cardHead(i))
-    for (const [label, min, max, step, get, set] of this._rows(c)) {
+    card.appendChild(this._cardHead(s, i))
+    for (const [label, min, max, step, get, set] of s.rows(i)) {
       card.appendChild(
-        sliderRow(label, min, max, step, get(), (v, commit) => {
-          set(v)
-          this.host.changed(commit)
-        })
+        sliderRow(
+          label,
+          min,
+          max,
+          step,
+          get(),
+          (v, commit) => {
+            set(v)
+            s.changed(commit)
+          },
+          s.liveDrag
+        )
       )
     }
-    card.appendChild(
-      this._colorRow('Màu', c.color, (hex, commit) => {
-        c.color = hex
-        this.host.changed(commit)
-      })
-    )
+    card.appendChild(this._colorRow(s.colorOf(i), (hex, commit) => s.setColor(i, hex, commit)))
     return card
   }
 
-  private _cardHead(i: number): HTMLElement {
+  private _cardHead(s: PanelSection, i: number): HTMLElement {
     const head = document.createElement('div')
     head.style.cssText =
       'display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;font-weight:600'
     const name = document.createElement('span')
-    name.textContent = `Đèn pha ${i + 1}`
+    name.textContent = `${s.name} ${i + 1}`
     const del = document.createElement('button')
     del.textContent = '✕'
     del.title = 'Xoá đèn này'
     del.style.cssText = 'cursor:pointer;background:none;color:#e08a8a;border:none;font-size:13px'
     del.addEventListener('click', () => {
-      this.host.configs.splice(i, 1)
-      this.host.structural()
+      s.remove(i)
       this.rebuild()
     })
     head.append(name, del)
     return head
   }
 
-  // Bảng slider 1 đèn: [nhãn, min, max, step, get, set] — góc lưu rad (UI = độ); mềm 0..1 (UI = %).
-  private _rows(
-    c: UplightConfig
-  ): [string, number, number, number, () => number, (v: number) => void][] {
-    return [
-      ['X m', -20, 20, 0.1, () => c.x, (v) => (c.x = v)],
-      ['Z m', -20, 20, 0.1, () => c.z, (v) => (c.z = v)],
-      ['Ngắm X', -20, 20, 0.1, () => c.aimX, (v) => (c.aimX = v)],
-      ['Ngắm Z', -20, 20, 0.1, () => c.aimZ, (v) => (c.aimZ = v)],
-      ['Cao chiếu', 0, 6, 0.1, () => c.aimY, (v) => (c.aimY = v)],
-      ['Sáng', 0, 30, 0.5, () => c.intensity, (v) => (c.intensity = v)],
-      ['Góc °', 5, 80, 1, () => c.angle * DEG, (v) => (c.angle = v / DEG)],
-      ['Mềm %', 0, 100, 5, () => c.penumbra * 100, (v) => (c.penumbra = v / 100)],
-      ['Tầm m', 0, 30, 0.5, () => c.range, (v) => (c.range = v)],
-    ]
-  }
-
   private _colorRow(
-    label: string,
     initial: number,
     onChange: (hex: number, commit: boolean) => void
   ): HTMLElement {
     const row = document.createElement('div')
     row.style.cssText = 'display:flex;align-items:center;gap:4px;margin-bottom:3px'
     const lbl = document.createElement('span')
-    lbl.textContent = label
+    lbl.textContent = 'Màu'
     lbl.style.cssText = 'width:60px;flex-shrink:0'
     const inp = document.createElement('input')
     inp.type = 'color'

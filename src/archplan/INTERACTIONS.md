@@ -152,15 +152,15 @@ Vùng bơi = LÒNG HỒ thật (`bounds`) — KHÔNG vị trí/Move riêng (đi 
 | **👆 Focus** | click vỏ đèn 3D (gần hơn building pick) → drawer Ground → 💡 Đèn → 🏮 Trụ sân ▸ tab **Đn**. Anchor: `_tryClickLamp`/`_lampIdxOf`/`_navigateToLamp` (lab) → site `navigateToLamp` → `buildLampDomain.navigateToLamp` (chọn loại + instance). lamps lọc-enabled khi render ⇒ so REF (≠ index render) → `indexOf` ra vị trí gốc. |
 | **🎨 Paint / P Pick** | KHÔNG — chỉnh qua GUI 💡 Đèn ▸ Đn (Bật / Cao / X / Z / Tầm / Sáng / Màu / ✕). |
 
-### 5f. SITE element — ĐÈN PHA uplight 🔦 (lighting pattern, tách riêng)
+### 5f. SITE element — ĐÈN FIXTURE 🔦🟡🎏 (lighting pattern, tách riêng)
 
-Đèn pha = **hệ TÁCH RIÊNG** (`lighting/` — KHÔNG trong `siteGroup`/`SiteState`): lõi `SiteLightingSystem` (SpotLight no-shadow + housing) + vỏ `LightingController` (panel float MẶT RIÊNG + `UplightDrag`). Persist `archplan:lighting` (độc lập design state). ArchPlanLab CHỈ delegate qua wrapper `_lt*`. **Mẫu khi thêm fixture đèn mới**: cắm vào lõi, KHÔNG đụng god-module.
+Hệ đèn fixture = **TÁCH RIÊNG** (`lighting/` — KHÔNG trong `siteGroup`/`SiteState`): **3 lõi** `site/lighting/` — `SiteLightingSystem` (🔦 F1 đèn pha uplight) · `BollardLights` (🟡 F2 trụ rọi xuống) · `StringLights` (🎏 F3 đèn dây emissive). Vỏ `LightingController` cầm cả 3 + `LightPanel` float MẶT RIÊNG (**3 mục**) + **1 `FixtureDrag`/hệ** (interface `{pick,getBase,moveBase}` chung). Persist `archplan:lighting` (3 nhóm, độc lập design state). ArchPlanLab CHỈ delegate qua wrapper `_lt*` (**0 sửa** khi thêm fixture — controller giữ API). **Mẫu thêm fixture mới (F4–F6)**: +1 lõi sibling cắm vào pattern, vỏ tái dùng FixtureDrag/LightPanel/store — KHÔNG đụng god-module.
 
-| Tương tác | Đèn pha làm sao |
+| Tương tác | Đèn fixture làm sao |
 |---|---|
-| **🤚 Move** | Move mode nhấn → `_ltDown` → `UplightDrag.tryStartDrag` raycast `system.pickUplight` (housing/lens `userData.uplightIndex`) → kéo chiếu mặt y=0 `moveBase` (0 rebuild). Thả `_ltUp`→`endDrag` gập x/z vào config + persist. Right-click `_ltCancel`→trả vị trí (qua `_setMoveMode`). |
-| **👆 Focus** | click vỏ đèn pha (normal mode, `_maybeClickFocus`) → `clickFocus` → `LightPanel.focus(i)` nháy viền card. |
-| **🎨 Paint / P Pick** | KHÔNG — chỉnh qua panel float 🔦 Đèn pha (X/Z/Ngắm/Cao/Sáng/Góc/Mềm/Tầm/Màu/✕/＋). |
+| **🤚 Move** | Move mode nhấn → `_ltDown` → `controller.pointerDown` thử cả 3 `FixtureDrag.tryStartDrag` (raycast `system.pick` — `userData.{uplight,bollard,string}Index`) → kéo chiếu mặt y=0 `moveBase` (0 rebuild; đèn dây = dịch **CẢ chuỗi** qua subgroup). Thả `_ltUp`→`endDrag` gập về config + persist (đèn dây: trung điểm → dịch 2 đầu + rebuild). Right-click `_ltCancel`→trả vị trí. |
+| **👆 Focus** | click vỏ đèn (normal mode, `_maybeClickFocus`) → `clickFocus` → `LightPanel.focus(s,i)` nháy viền card đúng mục. |
+| **🎨 Paint / P Pick** | KHÔNG — chỉnh qua panel float: 🔦 Đèn pha (X/Z/Ngắm/Cao/Sáng/Góc/Mềm/Tầm) · 🟡 Bollard (X/Z/Cao/Sáng/Góc/Tầm) · 🎏 Đèn dây (A·X/Z, B·X/Z, Cao A/B, Võng, Sáng, Số bóng) — đều +Màu/✕/＋. |
 
 ---
 
