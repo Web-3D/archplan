@@ -2669,6 +2669,7 @@ function lampMmRow(
     (v, c) => {
       l[key] = Math.round(v * 1000)
       if (c) ctx.applySite(true)
+      else ctx.applyLampLive() // 💡 kéo: transform group + pool (0 rebuild)
     },
     1000
   )
@@ -2696,6 +2697,7 @@ function buildLampControls(pane: HTMLElement, ctx: APGuiCtx, l: LampConfig): voi
       (v, c) => {
         l.intensity = v
         if (c) ctx.applySite(true)
+        else ctx.applyLampLive() // 💡 kéo Sáng: pool intensity live
       },
       1
     )
@@ -2704,6 +2706,7 @@ function buildLampControls(pane: HTMLElement, ctx: APGuiCtx, l: LampConfig): voi
     colorRow('Màu', l.color, (hex, c) => {
       l.color = hex
       if (c) ctx.applySite(true)
+      else ctx.applyLampLive() // 💡 kéo Màu: pool color live
     })
   )
 }
@@ -3044,6 +3047,13 @@ function buildFishBehaviorTab(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool):
       return (f) => f.setBobAmp(fs.bobAmp)
     })
   )
+  // 🎢 CHÚI mũi khi lặn/ngoi (pitch) — chuyển từ Hình thái sang đây (hành vi vận động). 0 = thân luôn ngang.
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Chúi mũi %', [0, 200, 5], fs.pitchAmp * 100, (v) => {
+      fs.pitchAmp = v / 100
+      return (f) => f.setPitchAmp(fs.pitchAmp)
+    })
+  )
   // 🐟 BỨT TỐC: vài con phóng vọt rồi khựng; slider = TẦN SUẤT (0 = tắt, cao = bứt thường xuyên). 0..100% → 0..1.
   pane.appendChild(
     fishTuneSlider(ctx, fs, 'Bứt tốc %', [0, 100, 5], fs.burstRate * 100, (v) => {
@@ -3051,15 +3061,25 @@ function buildFishBehaviorTab(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool):
       return (f) => f.setBurstRate(fs.burstRate)
     })
   )
-  // 🐟 BƠI THEO ĐÀN (boids cohesion+alignment): tụm cụm + đồng hướng. Pond ít con → mặc định TẮT; bật khi muốn
-  // đàn "có tổ chức" (live qua tuneFish, 0 rebuild). Separation (tách thân) vẫn luôn chạy dù tắt.
+  appendFishToggles(pane, ctx, fs) // 🐟 boids + 🍽 mò ăn (forage)
+  pane.appendChild(fishHungerRow(ctx, fs)) // 🐟 ĐÓI (master độ no) + mốc đỏ ngưỡng chết
+}
+
+// 🐟🍽 2 toggle hành vi đàn — boids (tụm cụm + đồng hướng; separation vẫn chạy khi tắt) + mò ăn (đói→sinh thức-ăn
+// nổi→ăn hồi no; tắt = độ-no tĩnh theo slider). Cả 2 live qua tuneFish (0 rebuild). Tách giữ buildFishBehaviorTab ≤50.
+function appendFishToggles(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): void {
   pane.appendChild(
     toggleRow('🐟 Bơi theo đàn (boids)', fs.schooling, (on) => {
       fs.schooling = on
       ctx.tuneFish(fs, (f) => f.setSchooling(on), true)
     })
   )
-  pane.appendChild(fishHungerRow(ctx, fs)) // 🐟 ĐÓI (master độ no) + mốc đỏ ngưỡng chết
+  pane.appendChild(
+    toggleRow('🍽 Mò ăn (forage)', fs.forage, (on) => {
+      fs.forage = on
+      ctx.tuneFish(fs, (f) => f.setForage(on), true)
+    })
+  )
 }
 
 // 🐟 Slider ĐÓI (0..20): mốc đỏ ở 6 = NGƯỠNG CHẾT. >6 chưa chết; ≤6 chết theo tỉ lệ (6→1/6 đàn, 5→2/6,…,0→cả
@@ -3134,19 +3154,6 @@ function buildFishShapeColor(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): 
       return (f) => f.setBodyWidth(fs.bodyWidth)
     })
   )
-  // 🎢 NGHIÊNG THÂN: bank = nghiêng vào cua (đẹp khi lượn/zic-zac), pitch = chúi mũi khi lặn/ngoi. 0 = tắt, 100 = gốc.
-  pane.appendChild(
-    fishTuneSlider(ctx, fs, 'Nghiêng cua %', [0, 200, 5], fs.bankAmp * 100, (v) => {
-      fs.bankAmp = v / 100
-      return (f) => f.setBankAmp(fs.bankAmp)
-    })
-  )
-  pane.appendChild(
-    fishTuneSlider(ctx, fs, 'Chúi mũi %', [0, 200, 5], fs.pitchAmp * 100, (v) => {
-      fs.pitchAmp = v / 100
-      return (f) => f.setPitchAmp(fs.pitchAmp)
-    })
-  )
   fishColorRows(pane, ctx, fs)
   pane.appendChild(
     fishTuneSlider(ctx, fs, 'Tỉ lệ mảng %', [0, 100, 5], fs.patchAmount * 100, (v) => {
@@ -3172,37 +3179,71 @@ const FISH_TIER_OPTS: [string, string][] = [
   ['Bậc 2 — Mập / Orca (sea ⏳)', '2'],
   ['Bậc 1 — Cá voi (sea ⏳)', '1'],
 ]
+// 🐟 Màu KHUNG select theo bậc: 1 xanh dương · 2 đỏ · 3 tím · 4 vàng · 5 xanh lục · 6 bạc.
+const TIER_COLOR: Record<number, string> = {
+  1: '#3b82f6',
+  2: '#e54848',
+  3: '#a855f7',
+  4: '#e8c13a',
+  5: '#4caf50',
+  6: '#c9c9d0',
+}
+
+// 🐟 Dropdown BẬC — KHÔNG nhãn (ô select là đủ), KHUNG tô MÀU theo bậc. Đổi bậc → áp preset size/count/hành-vi
+// mặc định (chỉnh tay sau) → rebuild (range + màu đổi theo) + applySite.
 function fishTierRow(
   ctx: APGuiCtx,
   fs: FishSchool,
   rebuild: (focus?: number) => void,
   i: number
 ): HTMLElement {
-  return selectRow('Bậc', FISH_TIER_OPTS, String(fs.tier), (v) => {
-    const p = fishTierPreset(Number(v))
-    fs.tier = Number(v)
-    fs.size = p.sizeMm // áp cỡ + số con + HÀNH VI mặc định của bậc (chỉnh tay lại ở slider dưới)
+  const row = document.createElement('div')
+  row.style.marginBottom = '4px'
+  const sel = document.createElement('select')
+  sel.className = 'ap-ground-sel'
+  const c = TIER_COLOR[fs.tier] ?? '#888'
+  sel.style.cssText = `width:100%;font-weight:600;color:${c};border:2px solid ${c};box-shadow:inset 0 0 0 1px ${c}66`
+  for (const [text, val] of FISH_TIER_OPTS) {
+    const o = document.createElement('option')
+    o.value = val
+    o.textContent = text
+    if (val === String(fs.tier)) o.selected = true
+    sel.appendChild(o)
+  }
+  sel.addEventListener('change', () => {
+    const p = fishTierPreset(Number(sel.value))
+    fs.tier = Number(sel.value)
+    fs.size = p.sizeMm // áp cỡ + số con + HÀNH VI mặc định của bậc
     fs.count = p.count
-    fs.speed = p.speed // 🐟 bậc thấp chậm hơn chút (mồi)
-    fs.burstRate = p.burstRate // 🐟 bậc thấp bứt tốc thường hơn
-    fs.wanderAmp = p.wanderAmp // 🐟 bậc thấp lăng xăng hơn
-    rebuild(i) // range slider Số cá/Cỡ đổi theo bậc → dựng lại pane đàn này
+    fs.speed = p.speed
+    fs.burstRate = p.burstRate
+    fs.wanderAmp = p.wanderAmp
+    rebuild(i) // dựng lại pane (range slider + màu khung đổi theo bậc)
     ctx.applySite(true)
   })
+  row.appendChild(sel)
+  return row
 }
 
-// 🐟 2 tab LỒNG [Hình thái · Hành vi] của 1 đàn (tông l5). Trả Tabs cho caller dispose.
+// 🐟 3 tab LỒNG [Hình thái · Hành vi · Thả mồi] của 1 đàn (tông l5). Trả Tabs cho caller dispose.
 function buildFishInnerTabs(host: HTMLElement, ctx: APGuiCtx, fs: FishSchool): Tabs {
   const morph = document.createElement('div')
   buildFishMorphTab(morph, ctx, fs)
   const behavior = document.createElement('div')
   buildFishBehaviorTab(behavior, ctx, fs)
-  host.append(morph, behavior)
+  const feed = document.createElement('div')
+  buildFishFeedTab(feed, ctx, fs)
+  host.append(morph, behavior, feed)
   return new Tabs(
     host,
     [
       { label: 'Hình thái', panel: morph, title: 'Số cá + hình dáng + màu' },
-      { label: 'Hành vi', panel: behavior, title: 'Bơi/lượn/lăng xăng/nhấp nhô/bứt tốc + Đói' },
+      {
+        label: 'Hành vi',
+        panel: behavior,
+        title: 'Bơi/lượn/lăng xăng/nhấp nhô/chúi mũi/bứt tốc + Đói',
+      },
+      { label: 'Thả mồi', panel: feed, title: 'Cách thả mồi + sóng nước khi cá ăn' },
     ],
     {
       classes: {
@@ -3214,6 +3255,65 @@ function buildFishInnerTabs(host: HTMLElement, ctx: APGuiCtx, fs: FishSchool): T
       injectCss: false,
     }
   )
+}
+
+// 🍽🌊 Tab "Thả mồi": toggle click-thả-mồi + cách thả (số viên/nhịp rơi/độ rộng — per-school live) + nhóm SÓNG khi ăn.
+function buildFishFeedTab(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): void {
+  pane.appendChild(
+    // 👆 MODE click thả mồi (toàn cục): bật → click hồ 3D rải thức-ăn rơi tại chỗ.
+    toggleRow('👆 Click thả mồi', ctx.getFeedMode?.() ?? false, (on) => ctx.setFeedMode?.(on))
+  )
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Số mồi', [1, 30, 1], fs.foodCount, (v) => {
+      fs.foodCount = Math.round(v)
+      return (f) => f.setFoodCount(fs.foodCount)
+    })
+  )
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Nhịp rơi', [0.03, 0.5, 0.01], fs.foodDrop, (v) => {
+      fs.foodDrop = v
+      return (f) => f.setFoodDrop(fs.foodDrop)
+    })
+  )
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Độ rộng', [0.1, 2, 0.1], fs.foodSpread, (v) => {
+      fs.foodSpread = v
+      return (f) => f.setFoodSpread(fs.foodSpread)
+    })
+  )
+  appendEatWaveRows(pane, ctx, fs) // 🌊 nhóm sóng khi ăn + 💦 giọt bắn
+}
+
+// 🌊 Nhóm "Sóng khi ăn": 4 slider GLOBAL (mọi hồ + chung gợn mưa — ctx ripple) + 💦 giọt bắn per-school (eatSplash).
+function appendEatWaveRows(pane: HTMLElement, ctx: APGuiCtx, fs: FishSchool): void {
+  const hdr = document.createElement('div')
+  hdr.className = 'ap-terrain-hdr'
+  hdr.textContent = '🌊 Sóng khi ăn (mọi hồ)'
+  hdr.style.cssText = 'margin:7px 0 3px;font-weight:600;opacity:.85'
+  pane.appendChild(hdr)
+  pane.appendChild(rippleSlider(ctx, 'Số bước sóng', 'rippleWave', 0.1, 1.5, 0.05))
+  pane.appendChild(rippleSlider(ctx, 'Độ rộng sóng', 'rippleSpeed', 0, 3, 0.05))
+  pane.appendChild(rippleSlider(ctx, 'Thời gian sóng', 'rippleLife', 0.3, 8, 0.1))
+  pane.appendChild(rippleSlider(ctx, 'Độ dày sóng', 'rippleAmp', 0, 6, 0.1))
+  pane.appendChild(
+    fishTuneSlider(ctx, fs, 'Giọt bắn lên', [0, 2, 0.05], fs.eatSplash, (v) => {
+      fs.eatSplash = v
+      return () => {} // 💦 đọc LIVE trong eat-callback (ArchPlanLab) → setter PondFish no-op
+    })
+  )
+}
+
+// 🌊 1 slider tham số sóng GLOBAL (ctx ripple — mọi hồ). mmFactor 0 (đồng bộ look slider cá khác).
+function rippleSlider(
+  ctx: APGuiCtx,
+  label: string,
+  key: 'rippleAmp' | 'rippleSpeed' | 'rippleLife' | 'rippleWave',
+  min: number,
+  max: number,
+  step: number
+): HTMLElement {
+  const cur = ctx.getRippleParam?.(key) ?? min
+  return sliderRow(label, min, max, step, cur, (v) => ctx.setRippleParam?.(key, v), 0)
 }
 
 // 🐟 1 nút tab đàn (F1/F2…) — active highlight do showPane toggle. Tách giữ rule-50.
@@ -3236,27 +3336,54 @@ function buildFishPane(
   i: number,
   rebuild: (focus?: number) => void
 ): () => void {
-  content.appendChild(
-    toggleRow('🐟 Hiện đàn', fs.enabled, (on) => {
-      fs.enabled = on
-      ctx.applySite(true)
-    })
-  )
+  content.appendChild(fishHeaderRow(ctx, w, fs, i, rebuild)) // 🐟 Hiện đàn + ↺ Reset + 🗑 Xoá (icon, 1 hàng)
   content.appendChild(fishTierRow(ctx, fs, rebuild, i))
   const inner = buildFishInnerTabs(content, ctx, fs)
-  content.appendChild(
-    // 🦈 hồi cá bị predator đớp (consumed→false) — live qua tuneFish (0 rebuild), khớp đúng đàn cfg
-    removeRow('↺ Reset đàn (hồi cá bị ăn)', () => ctx.tuneFish(fs, (f) => f.resetSchool(), true))
-  )
-  content.appendChild(
-    removeRow('✕ Xoá đàn', () => {
+  return (): void => inner.dispose() // ⚠️ BỌC arrow giữ `this` — trả `inner.dispose` trần = unbound → throw khi gọi d()
+}
+
+// 🐟 Hàng đầu pane đàn: toggle Hiện đàn (chiếm rộng) + 2 nút ICON ↺ Reset / 🗑 Xoá (gọn). Xoá có CONFIRM popup.
+function fishHeaderRow(
+  ctx: APGuiCtx,
+  w: WaterConfig,
+  fs: FishSchool,
+  i: number,
+  rebuild: (focus?: number) => void
+): HTMLElement {
+  const row = document.createElement('div')
+  row.style.cssText = 'display:flex;align-items:center;gap:4px;margin-bottom:4px'
+  const tog = toggleRow('🐟 Hiện đàn', fs.enabled, (on) => {
+    fs.enabled = on
+    ctx.applySite(true)
+  })
+  tog.style.flex = '1'
+  tog.style.marginBottom = '0'
+  row.append(
+    tog,
+    fishIconBtn('↺', 'Reset đàn (hồi cá bị ăn)', () =>
+      ctx.tuneFish(fs, (f) => f.resetSchool(), true)
+    ),
+    fishIconBtn('🗑', 'Xoá đàn', () => {
+      if (!window.confirm('Xoá đàn cá này?')) return // 🗑 popup confirm trước khi xoá
       const arr = w.fishSchools
-      if (arr) arr.splice(arr.indexOf(fs), 1) // xoá ĐÚNG đàn này (ref fs) khỏi w.fishSchools
+      if (arr) arr.splice(arr.indexOf(fs), 1) // xoá ĐÚNG đàn này (ref fs)
       rebuild(Math.max(0, i - 1))
       ctx.applySite(true)
     })
   )
-  return (): void => inner.dispose() // ⚠️ BỌC arrow giữ `this` — trả `inner.dispose` trần = unbound → throw khi gọi d()
+  return row
+}
+
+// 🐟 Nút ICON gọn (reuse style ap-tab-btn) — symbol + title hover.
+function fishIconBtn(sym: string, title: string, onClick: () => void): HTMLButtonElement {
+  const b = document.createElement('button')
+  b.type = 'button'
+  b.className = 'ap-tab-btn'
+  b.textContent = sym
+  b.title = title
+  b.style.cssText = 'flex:0 0 auto;min-width:26px;padding:0 6px'
+  b.addEventListener('click', onClick)
+  return b
 }
 
 // 🐟 Tab "Cá" trong pane POND — quản LIST nhiều ĐÀN (chuỗi bậc lớn-ăn-bé). Hàng F1/F2…＋ tự dựng TAY (bar = con

@@ -100,6 +100,7 @@ export interface APGuiCtx {
   // 🌳 Sân vườn (site/lô): SiteState sống ở Lab; panel sửa trực tiếp rồi gọi applySite.
   site: SiteState
   applySite(persist: boolean): void // re-render lô + đôn nhà; persist=true → autosave (false = live drag)
+  applyLampLive(): void // 💡 kéo slider đèn: transform group + recompute pool (0 rebuild). Buông → applySite(true)
   // 🟫 Báo Lab layer ground nào đang active (focus tab / click 3D). Cut → hiện mảng XÁM trên editor; add/-1 →
   // ẩn mọi cut. Lab toggle mesh.visible (raycaster vẫn pick). Optional — GUI builder không cần thì bỏ qua.
   setActiveGroundLayer?(idx: number): void
@@ -123,6 +124,13 @@ export interface APGuiCtx {
   // 🐟 Chỉnh bầy cá LIVE (vị trí/vùng/sâu/cỡ/tốc/màu — transform mesh + setter PondFish, 0 rebuild) của
   // ĐÚNG bầy cfg (tab F1 F2…). No-op nếu bầy chưa render (enabled=false).
   tuneFish(cfg: FishSchool, apply: (f: PondFish) => void, persist: boolean): void
+  // 👆 MODE click thả mồi: on = click hồ 3D → rải thức-ăn (rơi từ cao) tại điểm cho cá hồ đó. getFeedMode = trạng thái (toggle hiện đúng).
+  setFeedMode?(on: boolean): void
+  getFeedMode?(): boolean
+  // 🌊 Tham số DÁNG sóng gợn (GLOBAL — mọi hồ + chung gợn mưa): amp(độ dày)/speed(độ rộng)/life(thời gian)/wave(bước sóng).
+  // set → áp ngay mọi hồ; get → giá trị hiện tại cho slider khởi tạo. Dùng ở tab Thả mồi (nhóm sóng khi cá ăn).
+  setRippleParam?(key: 'rippleAmp' | 'rippleSpeed' | 'rippleLife' | 'rippleWave', v: number): void
+  getRippleParam?(key: 'rippleAmp' | 'rippleSpeed' | 'rippleLife' | 'rippleWave'): number
   // 💧 Chọn pool active (= tab instance đang mở) → 3D drag/handle nhắm hồ này. Gọi khi đổi tab Pl.
   setActiveWater(cfg: WaterConfig): void
   // 🪨 XOAY path-zone LIVE: CHỈ set mesh.rotation.y (transform thuần — KHÔNG rebuild gì → né water-RTT = tụt fps).

@@ -166,11 +166,13 @@ import {
   grassBuildSig,
   groundGeometry,
   type LampTip,
+  lampTip,
   pondWorldXZ,
   renderSiteState,
   siteGrassExclude,
   type SiteRenderCtx,
   type SiteRenderOpts,
+  tuneLampLive,
   waterPolygons,
 } from 'threejs-modules/site/render/fromState'
 import {
@@ -518,6 +520,7 @@ export class ArchPlanLab extends BaseWorld {
   private drawerBody: HTMLElement | null = null // cột cuộn trong drawer — gui + panels dựng vào đây
   private drawerTabs: Tabs | null = null // tab ngang đầu drawer (🏠 Building | 🌳 Ground | 🎛️ Lab)
   private _siteDispose: (() => void) | null = null // teardown tab CON panel Ground (outer + Garden domain + Water domain)
+  private _feedMode = false // 🍽 mode "click thả mồi": bật → click hồ 3D rải thức-ăn (rơi từ cao) thay vì navigate
   private _siteNavigate: ((cfg: WaterConfig) => boolean) | null = null // click hồ 3D (kể cả cá → hồ chứa) → nhảy GUI tới tab hồ
   private _siteNavigateFence: ((idx: number) => void) | null = null // 🧱 click rào 3D → nhảy GUI tới lớp rào idx
   private _siteNavigateBridge: ((idx: number) => void) | null = null // 🌉 click cầu 3D → nhảy GUI tới tab C idx
@@ -553,7 +556,15 @@ export class ArchPlanLab extends BaseWorld {
   private readonly _lampBaseInt: number[] = []
   private _lampGlowMat: THREE.MeshBasicMaterial | null = null
   private _dayFactor = 1
+  // 💡 Đèn ĐANG thao tác (click-Focus / kéo Move / chỉnh slider) → giữ slot shadow pool[0] bám nó (1 bóng real
+  // theo đèn-đang-cầm). Ref (≠ index) để né bug đổi-index khi xoá đèn. null = chưa chạm đèn nào → bóng ở đèn gần gốc.
+  private _activeLamp: LampConfig | null = null
   private static readonly LAMP_POOL_N = 8 // trần real-light đèn (xa hơn = chỉ glow); >16 mới cần TiledLightsNode
+  // Chỉ N đèn ĐẦU pool đổ bóng. RÀNG BUỘC CỨNG: point-shadow = +1 SAMPLER/đèn ở fragment stage; adapter cap
+  // maxSamplersPerShaderStage=16 (KHÔNG nâng được, ≠ textures nâng 48 ở main.ts). Vật liệu nặng (ground mix +
+  // reflector + IBL + sun-shadow) ~14 sampler → chỉ còn ~1-2 cho đèn. N=1 = 1 bóng real (an toàn margin), bám
+  // đèn-active (pool[0]). Shadow ĐẦY ĐỦ mọi đèn → ground-bake lúc production (deferred lamp-shadow-production).
+  private static readonly LAMP_SHADOW_N = 1
 
   // Đèn mặt trời + tham số (điều khiển qua panel ☀ Sun). Default ≈ vị trí cũ (10,18,10).
   private sun: THREE.DirectionalLight | null = null
@@ -692,6 +703,16 @@ export class ArchPlanLab extends BaseWorld {
     startOffZ: number
     startPt: THREE.Vector3
     startMeshPos: THREE.Vector3 // 🪨 vị trí mesh GỐC trước kéo — surface zone=(0,0,0) geo-world-baked; path=(offX,baseY,offZ)
+  } | null = null
+  // 💡 Phiên kéo 1 ĐÈN bằng Move tool (mirror _bridgeDrag): kéo = dời group.position (0 rebuild); buông = gập
+  // Δ vào lamp.x/z + _applySite (pool real-light gán lại tip mới). Right-click = trả gốc. group = con siteGroup.
+  private _lampDrag: {
+    idx: number
+    group: THREE.Object3D
+    startX: number
+    startZ: number
+    startPt: THREE.Vector3
+    startPos: THREE.Vector3
   } | null = null
   private _liveRebuild = false // true trong rAF live-drag (kéo nhà/hồ/slider) → hoãn rải-lại-cỏ vì exclude
   // Chữ ký SITE (nền/nước/rào, BỎ grass3d — cỏ quản riêng). Kéo NHÀ đổi `state` chứ KHÔNG đổi `site` →
@@ -1079,6 +1100,7 @@ export class ArchPlanLab extends BaseWorld {
     if (this._shiftToggleSelect(e)) return // 🧲 Shift+click = chọn/bỏ khối vào nhóm, không kéo gì khác
     if (this._tryStartBridgeDrag(e)) return // 🌉 trúng cầu (gần hơn building/hồ) → kéo dời cầu — ƯU TIÊN
     if (this._tryStartSiteTool(e)) return // 💧🟫⛰️ trúng tool site → tool lo
+    if (this._tryStartLampDrag(e)) return // 💡 trúng đèn (gần hơn building → tự nhường) → kéo dời XZ
     if (this._tryStartGateDrag(e)) return // 🚪 trúng cổng → trượt dọc cạnh rào
     this.manipulate?.dragStart(e) // Move tool: nhấn-giữ element building → kéo (focus GUI ngay khi nhấn)
     if (this.manipulate?.isDragging()) return // trúng building → manipulate lo
@@ -1117,7 +1139,9 @@ export class ArchPlanLab extends BaseWorld {
     else if (this._bridgeDrag)
       this._bridgeDragMove(e) // 🌉 kéo cầu
     else if (this.manipulate?.isDragging()) this.manipulate.dragMove(e)
-    else if (this._layerDrag) this._layerDragMove(e) // 🟫 kéo tầng ground
+    else if (this._layerDrag)
+      this._layerDragMove(e) // 🟫 kéo tầng ground
+    else if (this._lampDrag) this._lampDragMove(e) // 💡 kéo đèn
   }
 
   // 🪨🧱 Resolve object raycast TRÚNG → object mang userData.groundLayerIdx. Surface/path = chính nó (idx trên
@@ -1256,6 +1280,68 @@ export class ArchPlanLab extends BaseWorld {
     this._applySite(true)
   }
 
+  // 💡 Move nhấn trúng 1 ĐÈN (gần hơn building pick) → bắt đầu kéo dời XZ (mirror _tryStartBridgeDrag). group =
+  // con trực tiếp siteGroup mang lampRef. Focus GUI ngay khi nhấn.
+  private _tryStartLampDrag(e: PointerEvent): boolean {
+    if (!this.site.show || this.site.lamps.length === 0) return false
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const hits = this._ray.intersectObjects(this.siteGroup.children, true)
+    const hit = hits.find((h) => this._lampIdxOf(h.object) >= 0)
+    if (!hit) return false
+    const pHit = this._ray.intersectObjects(this.pickGroup.children, false)[0]
+    if (pHit && pHit.distance < hit.distance) return false // building element gần hơn → nhường
+    const idx = this._lampIdxOf(hit.object)
+    const lamp = this.site.lamps[idx]
+    if (!lamp) return false
+    let group: THREE.Object3D = hit.object
+    while (group.parent && group.parent !== this.siteGroup) group = group.parent
+    this.canvas.setPointerCapture(e.pointerId)
+    this._navigateToLamp(idx)
+    this._setActiveLamp(lamp) // 💡 đèn đang cầm = caster shadow pool[0]
+    this._lampDrag = {
+      idx,
+      group,
+      startX: lamp.x,
+      startZ: lamp.z,
+      startPt: hit.point.clone(),
+      startPos: group.position.clone(),
+    }
+    return true
+  }
+
+  // 💡 Kéo đèn LIVE: dời group.position theo Δ chiếu mặt-phẳng-ngang @điểm-neo — 0 rebuild. Giữ Y (gốc trụ @nền).
+  private _lampDragMove(e: PointerEvent): void {
+    const d = this._lampDrag
+    if (!d) return
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -d.startPt.y)
+    const pt = new THREE.Vector3()
+    if (!this._ray.ray.intersectPlane(plane, pt)) return
+    d.group.position.set(
+      d.startPos.x + (pt.x - d.startPt.x),
+      d.startPos.y,
+      d.startPos.z + (pt.z - d.startPt.z)
+    )
+    // 💡 1 bóng real bám đèn ĐANG cầm: caster pool[0] (=active) theo XZ group live (y giữ — XZ move không đổi cao)
+    const pl = this._lampPool[0]
+    pl.position.x = d.group.position.x
+    pl.position.z = d.group.position.z
+    pl.shadow.needsUpdate = true
+  }
+
+  // 💡 Buông: gập Δ group.position vào lamp.x/z (mm) → _applySite(true) (vỏ + pool real-light gán lại) + autosave.
+  private _commitLampDrag(): void {
+    const d = this._lampDrag
+    this._lampDrag = null
+    if (!d) return
+    const lamp = this.site.lamps[d.idx]
+    if (lamp) {
+      lamp.x = Math.round(d.startX + (d.group.position.x - d.startPos.x) * 1000)
+      lamp.z = Math.round(d.startZ + (d.group.position.z - d.startPos.z) * 1000)
+    }
+    this._applySite(true)
+  }
+
   // Buông cổng: commit (nuốt rAF live → _syncFence stone thật + gate box trở lại + autosave). Tách khỏi
   // _onPointerUp (giữ complexity ≤10). Cổng KHÔNG vào undo (site G0) — chỉ autosave.
   private _commitGateDrag(): void {
@@ -1304,6 +1390,10 @@ export class ArchPlanLab extends BaseWorld {
       this._commitBridgeDrag() // 🌉 buông cầu → bake offset + rebuild (trụ đâm hồ mới) + autosave
       return true
     }
+    if (this._lampDrag) {
+      this._commitLampDrag() // 💡 buông đèn → bake x/z + rebuild (pool gán lại tip) + autosave
+      return true
+    }
     if (this.manipulate?.isDragging()) {
       this.manipulate.dragEnd()
       return true
@@ -1333,6 +1423,7 @@ export class ArchPlanLab extends BaseWorld {
   // Tách khỏi _maybeClickFocus (complexity ≤10 sau khi thêm nhánh 🪣).
   private _clickFocusChain(e: PointerEvent): void {
     this._setActiveCut(-1) // 🟫 click = deselect cut (ẩn xám); _tryClickLayer→navTo bật lại nếu trúng cut
+    if (this._tryFeedClick(e)) return // 🍽 mode thả mồi BẬT: click hồ → rải thức-ăn (rơi từ cao), KHÔNG navigate
     if (this._tryClickFish(e)) return // 🐟 cá TRƯỚC hồ — cá bơi DƯỚI mặt nước trong suốt (ray riêng mesh cá)
     if (this._tryClickBridge(e)) return // 🌉 cầu TRƯỚC hồ — cầu bắc TRÊN hồ, click cầu phải trúng cầu (không hồ)
     if (this.waterTool?.tryClick(e)) return // 💧 click trúng hồ → trỏ GUI hồ
@@ -1382,6 +1473,11 @@ export class ArchPlanLab extends BaseWorld {
     if (this._bridgeDrag) {
       this._bridgeDrag.sub.position.copy(this._bridgeDrag.startPos)
       this._bridgeDrag = null
+      return true
+    }
+    if (this._lampDrag) {
+      this._lampDrag.group.position.copy(this._lampDrag.startPos) // 💡 trả đèn về vị trí trước kéo
+      this._lampDrag = null
       return true
     }
     if (this._layerDrag) {
@@ -1439,6 +1535,7 @@ export class ArchPlanLab extends BaseWorld {
     for (const t of this._siteDragTools()) t.cancelDrag() // 💧🟫⛰️ huỷ kéo/nặn tool site đang dở + ẩn viền/đĩa
     this._gateDrag = null // huỷ kéo cổng đang dở
     this._bridgeDrag = null // 🌉 huỷ kéo cầu đang dở
+    this._lampDrag = null // 💡 huỷ kéo đèn đang dở
     this._layerDrag = null // 🟫 huỷ kéo tầng ground đang dở
     if (on) {
       this._setPaintMode(false)
@@ -1485,6 +1582,46 @@ export class ArchPlanLab extends BaseWorld {
     this._navigateToWater(entry.water) // mở tab pond chứa cá (Water ▸ Pond ▸ instance ▸ tab Cá)
     this._previewFish(entry.cfg) // flash tia-Y tại tâm hồ — xác nhận trúng bầy nào
     return true
+  }
+
+  // 🍽 MODE THẢ MỒI bật: click hồ 3D → rải thức-ăn (rơi từ cao) tại điểm click cho MỌI đàn của hồ đó. Trả true =
+  // đã thả (chặn navigate). Raycast MẶT NƯỚC → điểm world → đổi local từng đàn (gốc = mesh cá). Tắt mode → false.
+  private _tryFeedClick(e: PointerEvent): boolean {
+    if (!this._feedMode || this._siteFish.length === 0) return false
+    this._ray.setFromCamera(this._ndc(e), this.camera)
+    const hit = this._ray.intersectObjects(
+      this._siteWaters.map((x) => x.surf.getMesh()),
+      false
+    )[0]
+    const wcfg = hit && this._siteWaters.find((x) => x.surf.getMesh() === hit.object)?.cfg
+    if (!hit || !wcfg) return false
+    let fed = false
+    for (const entry of this._siteFish) {
+      if (entry.water !== wcfg) continue // chỉ đàn của HỒ trúng
+      const o = entry.fish.getMesh().getWorldPosition(new THREE.Vector3())
+      entry.fish.scatterFoodAt(hit.point.x - o.x, hit.point.z - o.z) // world → local đàn → toả 1 vốc rơi xuống
+      fed = true
+    }
+    return fed
+  }
+
+  // 🌊💦 Nối "cá đớp mồi → sóng lan + nước bắn": mỗi đàn tìm WaterSurface CÙNG hồ (cfg ref) → callback _eatFx tại
+  // điểm đớp (local cá == local nước, chung gốc offset). Gọi mỗi rebuild (fish/water mới).
+  private _wireEatRipples(): void {
+    for (const e of this._siteFish) {
+      const sw = this._siteWaters.find((x) => x.cfg === e.water)
+      if (!sw) continue
+      e.fish.setEatRipple((x, z) => this._eatFx(sw.surf, x, z, e.cfg.eatSplash)) // splash đọc LIVE từ cfg
+    }
+  }
+
+  // 🌊💦 Hiệu ứng 1 cú đớp tại (lx,lz) local: vòng sóng (emitImpact 1 vòng, reflect=false → rẻ pool 16-slot) + giọt
+  // nước bắn (SplashBurst dùng chung, lazy; strength = eatSplash per-school, 0 = tắt). local→world qua tâm hồ.
+  private _eatFx(surf: WaterSurface, lx: number, lz: number, splash: number): void {
+    surf.emitImpact(lx, lz, 0.5, false) // 1 vòng/đớp (không dội tường)
+    if (splash <= 0) return // 💦 tắt giọt bắn
+    const c = surf.getMesh().getWorldPosition(this._splashTmp) // tâm hồ world → + local = điểm đớp
+    this._ensureSplash().burst(c.x + lx, c.y, c.z + lz, splash) // 💦 bắn lên (demo va-chạm dùng 1)
   }
 
   // 🧱 Click trúng RÀO trong 3D → mở GUI: drawer "Ground" (idx1) → sub-tab "Fence" → instance lớp idx.
@@ -1568,7 +1705,9 @@ export class ArchPlanLab extends BaseWorld {
     if (!hit) return false
     const pHit = this._ray.intersectObjects(this.pickGroup.children, false)[0]
     if (pHit && pHit.distance < hit.distance) return false // building element gần hơn → nhường
-    this._navigateToLamp(this._lampIdxOf(hit.object))
+    const idx = this._lampIdxOf(hit.object)
+    this._navigateToLamp(idx)
+    this._setActiveLamp(this.site.lamps[idx]) // 💡 đèn click = caster shadow pool[0]
     return true
   }
 
@@ -2129,12 +2268,12 @@ export class ArchPlanLab extends BaseWorld {
     this.scene.backgroundNode = this.sky.getBackgroundNode()
     // 🌫️ Sương mù: density-fog (vật thể xa tan vào màn khí) — uFogDensity 0 = tắt. KHÔNG đụng backgroundNode (sky giữ).
     this.scene.fogNode = fog(this.uFogColor, densityFogFactor(this.uFogDensity))
-    // 💡 Pool đèn: tạo N PointLight 1 LẦN (no shadow, intensity 0), thêm scene — gán/tắt bằng intensity mỗi
-    // rebuild (né recompile khi đổi light-count). Bóng glow chung (editor lerp warm→tối theo nightFactor).
+    // 💡 Pool đèn: tạo N PointLight 1 LẦN (intensity 0), thêm scene — gán/tắt bằng intensity mỗi rebuild (né
+    // recompile khi đổi light-count). Bóng glow chung (editor lerp warm→tối theo nightFactor).
     this._lampGlowMat = new THREE.MeshBasicMaterial({ color: 0xffe6b0, toneMapped: false })
     for (let i = 0; i < ArchPlanLab.LAMP_POOL_N; i++) {
       const pl = new THREE.PointLight(0xffd9a0, 0, 0, 2) // decay vật lý 2; distance/intensity set khi gán
-      pl.castShadow = false // đèn fixture KHÔNG đổ bóng — shadow-map đắt (chỉ sun cast)
+      if (i < ArchPlanLab.LAMP_SHADOW_N) this._configLampShadow(pl) // 💡 chỉ N đèn gần nhất đổ bóng (pool[0..] = gần)
       this._lampPool.push(pl)
       this._lampBaseInt.push(0)
       this.scene.add(pl)
@@ -2298,14 +2437,31 @@ export class ArchPlanLab extends BaseWorld {
 
   // 💡 Gán pool real-light vào N tip GẦN GỐC nhất (perf cap). Mỗi rebuild: chọn N, set pos/color/range + base
   // intensity; tip dư = glow-only. Light thừa trong pool → base 0 (vẫn trong scene → né recompile). Áp đêm cuối.
+  // Thứ tự gán pool: đèn ACTIVE trước (slot 0 = caster shadow đang cầm) → còn lại GẦN gốc nhất. Tip thuần config.
+  private _orderedLampTips(): LampTip[] {
+    const en = this.site.lamps.filter((l) => l.enabled)
+    en.sort((a, b) => {
+      if (a === this._activeLamp) return -1
+      if (b === this._activeLamp) return 1
+      return a.x * a.x + a.z * a.z - (b.x * b.x + b.z * b.z)
+    })
+    return en.map(lampTip)
+  }
+
+  // Đặt đèn active (click/kéo/slider) → reassign pool đưa nó vào slot shadow pool[0] + vẽ lại shadow map.
+  private _setActiveLamp(lamp: LampConfig): void {
+    this._activeLamp = lamp
+    this._assignLampPool(this._orderedLampTips())
+    this._lampPool[0].shadow.needsUpdate = true
+  }
+
+  // tips ĐÃ xếp (active-first → gần-gốc) từ _orderedLampTips: gán pool[i]=tips[i] (KHÔNG sort lại). pool[0] =
+  // đèn active = caster shadow (LAMP_SHADOW_N=1). Thừa slot (tip undefined) → baseInt 0 (đèn tắt).
   private _assignLampPool(tips: LampTip[]): void {
     const N = ArchPlanLab.LAMP_POOL_N
-    const near = [...tips]
-      .sort((a, b) => a.x * a.x + a.z * a.z - (b.x * b.x + b.z * b.z))
-      .slice(0, N) // N tip gần gốc nhất (camera-nearest = Phase 2)
     for (let i = 0; i < N; i++) {
       const pl = this._lampPool[i]
-      const t = near[i]
+      const t = tips[i]
       if (t) {
         pl.position.set(t.x, t.y, t.z)
         pl.color.set(t.color)
@@ -2327,6 +2483,43 @@ export class ArchPlanLab extends BaseWorld {
     }
     if (this._lampGlowMat)
       this._lampGlowMat.color.setHex(0xffe6b0).multiplyScalar(0.08 + 0.92 * night)
+  }
+
+  // 💡 Cấu hình 1 PointLight ĐỔ BÓNG. Point-shadow = cube 6 mặt (đắt) → GUARD perf: castShadow set lúc TẠO
+  // (no recompile) + autoUpdate=false (vẽ lại CHỈ khi rebuild/move qua _updateLampShadows, KHÔNG mỗi frame) +
+  // map 512 (đèn = accent, bóng mềm) + far 30m (tầm đèn) + normalBias .02 (point-shadow dễ acne). Tĩnh = 0 cost.
+  private _configLampShadow(pl: THREE.PointLight): void {
+    pl.castShadow = true
+    pl.shadow.autoUpdate = false
+    pl.shadow.mapSize.set(512, 512)
+    pl.shadow.camera.near = 0.1
+    pl.shadow.camera.far = 30
+    pl.shadow.bias = -0.002
+    pl.shadow.normalBias = 0.02
+  }
+
+  // 💡 Đèn shadow.autoUpdate=false → phải kích needsUpdate khi đèn dời/geometry đổi để vẽ lại shadow map 1 lần
+  // (tĩnh = 0 cost). Gọi ở _rebuildSite (commit). KHÔNG gọi lúc live-drag slider (giữ kéo mượt — bóng theo khi buông).
+  private _updateLampShadows(): void {
+    for (const pl of this._lampPool) pl.shadow.needsUpdate = true
+  }
+
+  // 💡 LIVE kéo slider đèn: transform group + recompute pool — KHÔNG rebuild site (né reflector RTT/cỏ/recompile;
+  // PERFORMANCE.md). THROTTLE ≤1/frame qua _siteRaf (commit _applySite nuốt nó). tuneLampLive = transform 0
+  // rebuild (x/z/cao); _assignLampPool(tips từ config) = real-light/glow theo intensity/range/màu/vị trí. Buông
+  // slider → _applySite(true) commit (autosave). Mirror _applyBridgeLive (chỉ-1-phần).
+  private _applyLampLive(): void {
+    if (this._siteRaf) return
+    this._siteRaf = requestAnimationFrame(() => {
+      this._siteRaf = 0
+      for (const o of this.siteGroup.children) {
+        const ref = o.userData.lampRef as LampConfig | undefined
+        if (ref) tuneLampLive(o, ref)
+      }
+      this._assignLampPool(this._orderedLampTips())
+      this._lampPool[0].shadow.needsUpdate = true // 💡 bóng real bám đèn-active live (1 light, 6 depth-pass)
+      if (this.sun) this.sun.shadow.needsUpdate = true // đèn dời → bóng sun cập nhật
+    })
   }
 
   // Sun persist riêng (localStorage 'archplan:sun') — độc lập design store. Load TRƯỚC _setupScene.
@@ -2435,6 +2628,10 @@ export class ArchPlanLab extends BaseWorld {
     | 'buildWaterFx'
     | 'tuneFish'
     | 'previewFish'
+    | 'setFeedMode'
+    | 'getFeedMode'
+    | 'setRippleParam'
+    | 'getRippleParam'
     | 'setActiveWater'
     | 'previewWater'
     | 'tunePathRotLive'
@@ -2453,6 +2650,15 @@ export class ArchPlanLab extends BaseWorld {
       buildWaterFx: (host) => this._buildWaterFxControls(host), // 🌊 va chạm rời → sub-tab Water (drawer phải)
       tuneFish: (cfg, apply, persist) => this._tuneFish(cfg, apply, persist),
       previewFish: (fs) => this._previewFish(fs),
+      setFeedMode: (on) => {
+        this._feedMode = on // 🍽 bật/tắt click-thả-mồi (toggle GUI)
+      },
+      getFeedMode: () => this._feedMode,
+      setRippleParam: (key, v) => {
+        this._weather[key] = v // 🌊 sóng GLOBAL (mọi hồ + gợn mưa) → áp ngay
+        this._applyRippleParams()
+      },
+      getRippleParam: (key) => this._weather[key],
       setActiveWater: (cfg) => this.waterTool?.setActiveCfg(cfg),
       previewWater: (cfg) => this.waterTool?.showOutline(cfg),
       tunePathRotLive: (flatIdx, rotDeg) => this._tunePathRotLive(flatIdx, rotDeg),
@@ -2507,6 +2713,7 @@ export class ArchPlanLab extends BaseWorld {
       setGround: (t) => this._setGroundType(t),
       site: this.site,
       applySite: (persist) => this._applySite(persist),
+      applyLampLive: () => this._applyLampLive(),
       setActiveGroundLayer: (idx) => this._setActiveCut(idx), // 🟫 focus layer (navTo) → cut hiện xám / add ẩn cut
       ...this._siteLiveCtx(), // 🌳 nhóm delegate LIVE-drag (site/rào/cầu/terrain) — tách giữ ≤50 dòng
       siteStats: () => this._siteStats(),
@@ -4160,7 +4367,9 @@ export class ArchPlanLab extends BaseWorld {
     this._siteWaters = h.waters.map((surf, i) => ({ cfg: wcfgs[i], surf }))
     this._waterFills = [] // 💧 mesh cũ sắp dispose → bỏ fill đang chạy (ref stale); reveal sau dựng ở baseY thẳng
     this._siteFish = h.fish // 🐟 dispose theo siteShaders (clearSite); update(dt) mỗi frame onUpdate
-    this._assignLampPool(h.lampTips) // 💡 gán pool real-light vào N đèn gần nhất + áp nightFactor hiện tại
+    this._wireEatRipples() // 🌊 cá đớp mồi → sóng lan trên mặt nước (PondFish callback ↔ WaterSurface.emitImpact)
+    this._assignLampPool(this._orderedLampTips()) // 💡 active-first → pool[0]=đèn cầm (shadow); còn lại gần-gốc
+    this._updateLampShadows() // 💡 đèn/geometry đổi → vẽ lại shadow map đèn 1 lần (autoUpdate=false)
     // 🦈 coordinator săn mồi: nhóm đàn theo HỒ (pond=water ref) → tier cao đớp tier thấp ở gần (khi Đói vàng).
     this._predation = new PondPredation(
       h.fish.map((e) => ({ pond: e.water, fish: e.fish, tier: e.cfg.tier }))
