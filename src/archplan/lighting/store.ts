@@ -55,6 +55,9 @@ function nn<T>(v: T | null): v is T {
 function num(v: unknown, d: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : d
 }
+function bool(v: unknown): boolean {
+  return v === true
+}
 function col(v: unknown, d: number): number {
   return Math.floor(num(v, d)) & 0xffffff
 }
@@ -76,6 +79,7 @@ function sanitizeUp(raw: unknown): UplightConfig | null {
     angle: num(r.angle, 0.5),
     penumbra: num(r.penumbra, 0.4),
     range: num(r.range, 8),
+    shadow: bool(r.shadow),
   }
 }
 
@@ -90,6 +94,7 @@ function sanitizeBo(raw: unknown): BollardConfig | null {
     height: num(r.height, 0.8),
     angle: num(r.angle, 1.0),
     range: num(r.range, 4),
+    shadow: bool(r.shadow),
   }
 }
 

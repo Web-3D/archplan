@@ -20,7 +20,7 @@ import {
 import { defaultString, StringLights } from 'threejs-modules/site/lighting/StringLights'
 
 import { FixtureDrag, type FixtureSystem } from './FixtureDrag'
-import { LightPanel, type LightRow, type PanelSection } from './LightPanel'
+import { LightPanel, type LightRow, type LightToggle, type PanelSection } from './LightPanel'
 import { type LightingConfigs, loadLighting, saveLighting } from './store'
 
 export interface LightingControllerHost {
@@ -32,6 +32,11 @@ export interface LightingControllerHost {
 }
 
 const DEG = 180 / Math.PI
+
+// Ngân sách bóng cho hệ đèn fixture MỚI (spot-shadow = +1 sampler GLOBAL/đèn, dùng chung mọi pipeline lit).
+// Trần app 16; ground worst 11 + pool đèn cũ 1 = 12 → chừa 4, lấy 3 (margin 1 dưới trần). Tính: GPU-BUDGETS §6.
+// Muốn 4 → bỏ pool point cũ (Phase 3 merge). Đếm CHUNG uplight + bollard (đèn dây = PointLight, KHÔNG shadow).
+const SHADOW_BUDGET = 3
 
 export class LightingController {
   private readonly up = new SiteLightingSystem()
@@ -135,10 +140,42 @@ export class LightingController {
   }
 
   private _syncAll(save: boolean): void {
+    this._enforceShadowBudget()
     this.up.setUplights(this.cfg.uplights)
     this.bo.setBollards(this.cfg.bollards)
     this.st.setStrings(this.cfg.strings)
     if (save) saveLighting(this.cfg)
+  }
+
+  // Cap tổng đèn-shadow (uplight + bollard) ≤ SHADOW_BUDGET — vượt thì ép shadow=false (đèn vẫn sáng, mất bóng).
+  // GLOBAL vì sampler-shadow vào MỌI pipeline lit; ép ở config trước khi sync để binding không bao giờ vỡ.
+  private _enforceShadowBudget(): void {
+    let n = 0
+    const grant = (want: boolean): boolean => (want && n < SHADOW_BUDGET ? (n++, true) : false)
+    for (const c of this.cfg.uplights) c.shadow = grant(c.shadow)
+    for (const c of this.cfg.bollards) c.shadow = grant(c.shadow)
+  }
+
+  // Toggle bóng (commit, hiếm — castShadow đổi = recompile): enforce budget + sync 2 hệ spot + persist.
+  private _toggleShadow(): void {
+    this._enforceShadowBudget()
+    this.up.setUplights(this.cfg.uplights)
+    this.bo.setBollards(this.cfg.bollards)
+    saveLighting(this.cfg)
+  }
+
+  // Spec 1 toggle 🌑 Đổ bóng cho 1 fixture — set xong tự enforce+sync (panel rebuild phản ánh budget).
+  private _shadowToggle(get: () => boolean, set: (v: boolean) => void): LightToggle[] {
+    return [
+      [
+        '🌑 Đổ bóng',
+        get,
+        (v) => {
+          set(v)
+          this._toggleShadow()
+        },
+      ],
+    ]
   }
 
   // Drag commit uplight/bollard: gập vị trí mới vào config (x,z) + persist + đồng bộ slider panel.
@@ -177,6 +214,11 @@ export class LightingController {
       liveDrag: true,
       count: () => u.length,
       rows: (i) => this._upRows(u[i]),
+      toggles: (i) =>
+        this._shadowToggle(
+          () => u[i].shadow,
+          (v) => (u[i].shadow = v)
+        ),
       colorOf: (i) => u[i].color,
       setColor: (i, hex, commit) => this._setColor(u[i], hex, () => this._upChanged(commit)),
       add: () => this._add(u, defaultUplight(0, 0), () => this.up.setUplights(u)),
@@ -195,6 +237,11 @@ export class LightingController {
       liveDrag: true,
       count: () => b.length,
       rows: (i) => this._boRows(b[i]),
+      toggles: (i) =>
+        this._shadowToggle(
+          () => b[i].shadow,
+          (v) => (b[i].shadow = v)
+        ),
       colorOf: (i) => b[i].color,
       setColor: (i, hex, commit) => this._setColor(b[i], hex, () => this._boChanged(commit)),
       add: () => this._add(b, defaultBollard(0, 0), () => this.bo.setBollards(b)),

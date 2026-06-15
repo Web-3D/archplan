@@ -160,7 +160,7 @@ Hệ đèn fixture = **TÁCH RIÊNG** (`lighting/` — KHÔNG trong `siteGroup`/
 |---|---|
 | **🤚 Move** | Move mode nhấn → `_ltDown` → `controller.pointerDown` thử cả 3 `FixtureDrag.tryStartDrag` (raycast `system.pick` — `userData.{uplight,bollard,string}Index`) → kéo chiếu mặt y=0 `moveBase` (0 rebuild; đèn dây = dịch **CẢ chuỗi** qua subgroup). Thả `_ltUp`→`endDrag` gập về config + persist (đèn dây: trung điểm → dịch 2 đầu + rebuild). Right-click `_ltCancel`→trả vị trí. |
 | **👆 Focus** | click vỏ đèn (normal mode, `_maybeClickFocus`) → `clickFocus` → `LightPanel.focus(s,i)` nháy viền card đúng mục. |
-| **🎨 Paint / P Pick** | KHÔNG — chỉnh qua panel float: 🔦 Đèn pha (X/Z/Ngắm/Cao/Sáng/Góc/Mềm/Tầm) · 🟡 Bollard (X/Z/Cao/Sáng/Góc/Tầm) · 🎏 Đèn dây (A·X/Z, B·X/Z, Cao A/B, Võng, Sáng, Số bóng) — đều +Màu/✕/＋. |
+| **🎨 Paint / P Pick** | KHÔNG — chỉnh qua panel float: 🔦 Đèn pha (X/Z/Ngắm/Cao/Sáng/Góc/Mềm/Tầm) · 🟡 Bollard (X/Z/Cao/Sáng/Góc/Tầm) · 🎏 Đèn dây (A·X/Z, B·X/Z, Cao A/B, Võng, Sáng, Số bóng) — đều +Màu/✕/＋. **🌑 Đổ bóng** (checkbox) cho uplight + bollard — ngân sách CHUNG ≤3 (`SHADOW_BUDGET`), bật quá trần tự bỏ tick. |
 
 ---
 

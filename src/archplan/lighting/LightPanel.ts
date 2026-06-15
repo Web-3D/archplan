@@ -14,6 +14,10 @@ import { sliderRow } from '../gui/tweak'
 // 1 hàng slider: [nhãn, min, max, step, get, set]. get/set đóng kín config typed (controller dựng).
 export type LightRow = [string, number, number, number, () => number, (v: number) => void]
 
+// 1 hàng toggle checkbox: [nhãn, get, set]. set TỰ enforce+sync+persist (controller); panel rebuild sau để
+// phản ánh budget (vd bật bóng quá trần → controller ép false → checkbox tự bỏ tick).
+export type LightToggle = [string, () => boolean, (v: boolean) => void]
+
 // 1 MỤC fixture — mọi truy cập theo INDEX (không lộ generic ra array) → trộn 3 loại config trong 1 panel.
 export interface PanelSection {
   icon: string
@@ -23,6 +27,7 @@ export interface PanelSection {
   liveDrag: boolean // false = chỉ cập nhật lúc buông (string rebuild geometry)
   count: () => number
   rows: (i: number) => LightRow[]
+  toggles?: (i: number) => LightToggle[] // hàng checkbox (vd 🌑 Đổ bóng) — bỏ qua nếu undefined
   colorOf: (i: number) => number
   setColor: (i: number, hex: number, commit: boolean) => void
   add: () => void // push 1 config mặc định + sync hệ + persist
@@ -143,7 +148,28 @@ export class LightPanel {
       )
     }
     card.appendChild(this._colorRow(s.colorOf(i), (hex, commit) => s.setColor(i, hex, commit)))
+    if (s.toggles) {
+      for (const [label, get, set] of s.toggles(i)) {
+        card.appendChild(
+          this._toggleRow(label, get(), (v) => {
+            set(v) // controller: enforce budget + sync + persist
+            this.rebuild() // phản ánh budget (có thể bị ép false)
+          })
+        )
+      }
+    }
     return card
+  }
+
+  private _toggleRow(label: string, initial: boolean, onChange: (v: boolean) => void): HTMLElement {
+    const row = document.createElement('label')
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:3px 0;cursor:pointer'
+    const cb = document.createElement('input')
+    cb.type = 'checkbox'
+    cb.checked = initial
+    cb.addEventListener('change', () => onChange(cb.checked))
+    row.append(cb, document.createTextNode(label))
+    return row
   }
 
   private _cardHead(s: PanelSection, i: number): HTMLElement {
