@@ -45,6 +45,7 @@ import {
   makeStonePathParams,
   makeWallCurveParams,
   makeWater,
+  MAX_MIX_SLOTS,
 } from 'threejs-modules/site/state'
 import { type TabItem, Tabs } from 'threejs-modules/ui/Tabs'
 
@@ -775,7 +776,7 @@ function _mixLayerCell(
   return cell
 }
 
-// Ô trống = + to (bấm = thêm lớp mới, tối đa 4). Tách (rule-50).
+// Ô trống = + to (bấm = thêm lớp mới, tối đa MAX_MIX_SLOTS=2 — hạ từ 4 chừa sampler cho đèn). Tách (rule-50).
 function _mixAddLayerCell(
   mix: GroundMixParams,
   cb: { redraw: () => void; commit: () => void }
@@ -786,7 +787,7 @@ function _mixAddLayerCell(
   card.textContent = '+'
   card.title = 'Thêm lớp mix'
   card.addEventListener('click', () => {
-    if (mix.slots.length >= 4) return
+    if (mix.slots.length >= MAX_MIX_SLOTS) return
     mix.slots.push({ key: 'construction-gravel', bias: 0.55, seed: 13.7 + mix.slots.length * 18 })
     cb.redraw()
     cb.commit()
@@ -1501,7 +1502,7 @@ export function buildMixBoard(
         mkMixSlotRow(ctx, target, mix, i, i === active, { redraw, onPick: () => pick(i), commit })
       )
     )
-    addBtn.disabled = mix.slots.length >= 4
+    addBtn.disabled = mix.slots.length >= MAX_MIX_SLOTS
     syncBrush()
   }
   ctx.registerMixPaintSync?.(redraw) // 🖌 mode vẽ tắt từ ngoài (Move/Pick) → bỏ highlight tag + nút 🖌

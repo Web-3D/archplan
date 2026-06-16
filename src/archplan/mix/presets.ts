@@ -16,6 +16,7 @@ import {
   type GroundMixParams,
   isGroundTexKey,
   makeGroundMixParams,
+  MAX_MIX_SLOTS,
 } from 'threejs-modules/site/state'
 
 export interface MixPreset {
@@ -50,7 +51,7 @@ function sanitizeSlot(raw: unknown): GroundMixParams['slots'][number] | null {
 }
 
 // Mix từ nguồn KHÔNG TIN (localStorage cũ / JSON import): base phải key TEXTURE; field số kẹp
-// range slider board; slots ≤4 lọc hỏng; paint chỉ nhận string (base64 mask). null = entry bỏ.
+// range slider board; slots ≤ MAX_MIX_SLOTS lọc hỏng; paint chỉ nhận string (base64 mask). null = entry bỏ.
 export function sanitizeMix(raw: unknown): GroundMixParams | null {
   if (typeof raw !== 'object' || raw === null) return null
   const o = raw as Record<string, unknown>
@@ -58,7 +59,7 @@ export function sanitizeMix(raw: unknown): GroundMixParams | null {
   const def = makeGroundMixParams(o.base as GroundMaterialKey)
   const slots = Array.isArray(o.slots)
     ? o.slots
-        .slice(0, 4)
+        .slice(0, MAX_MIX_SLOTS)
         .map(sanitizeSlot)
         .filter((s): s is NonNullable<typeof s> => s !== null)
     : []
